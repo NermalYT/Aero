@@ -1,0 +1,133 @@
+/* ---------- the frog pond ---------- */
+:root, :root[data-theme="day"] {
+  --frog: #8cbb55; --frog-ink: #3c4725; --frog-mouth: #4b5631; --frog-tongue: #f48b8c; --frog-tongue2: #c86e70; --frog-eye: #303a1c;
+  --frog-sheen: rgba(255, 255, 255, .55); --frog-glint: #ffffff; --frog-shadow: rgba(10, 60, 40, .28); --frog-lid: 0;
+  --pad: #6cc64a; --pad-edge: #3f9a34; --pad-vein: rgba(225, 255, 190, .55); --pad-gloss: rgba(255, 255, 255, .7);
+  --lotus: #ffd6ea; --lotus2: #ff9fc8; --lotus-c: #ffd84a;
+  --stone: #9fb7c6; --stone2: #6e8797; --reed: #3c9a3a; --reed2: #2b7d2f; --cattail: #7a4f2c;
+  --w0: #9be4f6; --w1: #45bfe6; --w2: #1590c6; --w3: #0a5f93; --bank0: #5fcf4a; --bank1: #2c9a3a;
+  --w-mirror: rgba(255, 255, 255, .28); --w-glint: rgba(255, 255, 255, .9); --w-ring: rgba(255, 255, 255, .7); --moonpath: 0;
+}
+:root[data-theme="night"] {
+  --frog: #5b8a4a; --frog-ink: #17220f; --frog-mouth: #26301a; --frog-tongue: #c97a86; --frog-tongue2: #93525e; --frog-eye: #0f160a;
+  --frog-sheen: rgba(170, 215, 255, .35); --frog-glint: #d8ecff; --frog-shadow: rgba(0, 0, 10, .45); --frog-lid: .58;
+  --pad: #2f7a45; --pad-edge: #1b5130; --pad-vein: rgba(150, 230, 200, .25); --pad-gloss: rgba(170, 220, 255, .35);
+  --lotus: #b7c8f2; --lotus2: #8a9fe0; --lotus-c: #f4f0b8;
+  --stone: #4d6476; --stone2: #2c3d4b; --reed: #1b5a36; --reed2: #11402a; --cattail: #3f2c1f;
+  --w0: #2a6f95; --w1: #134e74; --w2: #0a3354; --w3: #041a30; --bank0: #155c3a; --bank1: #0a3a24;
+  --w-mirror: rgba(150, 200, 255, .12); --w-glint: rgba(190, 225, 255, .55); --w-ring: rgba(170, 220, 255, .45); --moonpath: .85;
+}
+
+/* frog parts */
+.frog-art { display: block; width: 100%; height: auto; overflow: visible; }
+.frog-art .o { fill: var(--frog-ink); stroke: var(--frog-ink); stroke-width: 9; stroke-linejoin: round; }
+.frog-art .f { fill: var(--frog); stroke: none; }
+.frog-art .fr-shadow { fill: var(--frog-shadow); }
+.frog-art .fr-sheen { fill: none; stroke: var(--frog-sheen); stroke-width: 4.2; stroke-linecap: round; opacity: .85; }
+.frog-art .fr-toe { fill: none; stroke: var(--frog-ink); stroke-width: 2; stroke-linecap: round; }
+.frog-art .fr-pupil { fill: var(--frog-eye); }
+.frog-art .fr-glint { fill: var(--frog-glint); opacity: .9; }
+.frog-art .fr-lid { fill: var(--frog); transform-box: fill-box; transform-origin: 50% 0; transform: scaleY(var(--frog-lid)); }
+.frog-art .fr-lid-line { fill: none; stroke: var(--frog-eye); stroke-width: 2.6; stroke-linecap: round; }
+.frog-art .fr-line { fill: none; stroke: var(--frog-ink); stroke-width: 3.4; stroke-linecap: round; }
+.frog-art .fr-line.thin { stroke-width: 2.6; }
+.frog-art .fr-mouth { fill: var(--frog-mouth); }
+.frog-art .fr-mouth-rim { fill: none; stroke: var(--frog-ink); stroke-width: 4; }
+.frog-art .fr-tongue { fill: var(--frog-tongue); }
+.frog-art .fr-tongue-back { fill: var(--frog-tongue2); }
+.frog-art .fr-mouth-open { display: none; }
+.frog-art .fr-body { transform-box: fill-box; transform-origin: 50% 100%; }
+.frog-art .fr-eye { transform-box: fill-box; }
+.frog-art .fr-reflect { fill: color-mix(in srgb, var(--frog) 45%, transparent); opacity: .55; }
+.frog-art .fr-ring { fill: none; stroke: var(--w-ring); stroke-width: 1.4; opacity: .7; }
+.frog-art .fr-ring.r2 { opacity: .45; }
+.frog-art.peek .fr-mouth { fill: var(--frog-mouth); stroke: var(--frog-ink); stroke-width: 2.6; }
+
+/* a meep: the mouth opens wide for a moment (closed is the normal state) */
+.frog.meep .fr-mouth-closed { display: none; }
+.frog.meep .fr-mouth-open { display: inline; }
+.frog.meep .fr-body { animation: meep .95s cubic-bezier(.3, 1.6, .5, 1) both; }
+@keyframes meep { 0% { transform: scale(1, 1); } 18% { transform: scale(.96, 1.07); } 55% { transform: scale(1.01, 1.03); } 100% { transform: scale(1, 1); } }
+
+/* lily pads, lotus, stones, reeds */
+.pad-art, .lotus-art, .stone-art, .reeds-art { display: block; width: 100%; height: auto; overflow: visible; }
+.pad-art .pad-shadow { fill: rgba(0, 40, 70, .22); }
+.pad-art .pad-edge { fill: var(--pad-edge); }
+.pad-art .pad-top { fill: var(--pad); }
+.pad-art .pad-vein { fill: none; stroke: var(--pad-vein); stroke-width: 1.4; stroke-linecap: round; }
+.pad-art .pad-gloss { fill: none; stroke: var(--pad-gloss); stroke-width: 3; stroke-linecap: round; }
+.lotus-art .lo-p { fill: var(--lotus); stroke: var(--lotus2); stroke-width: 1; }
+.lotus-art .lo-p.back { fill: var(--lotus2); }
+.lotus-art .lo-c { fill: var(--lotus-c); }
+.stone-art .st-shadow { fill: rgba(0, 30, 60, .25); }
+.stone-art .st-body { fill: var(--stone); stroke: var(--stone2); stroke-width: 2; }
+.stone-art .st-gloss { fill: none; stroke: rgba(255, 255, 255, .6); stroke-width: 4; stroke-linecap: round; }
+.reeds-art .rd { fill: none; stroke: var(--reed2); stroke-width: 3; stroke-linecap: round; }
+.reeds-art .ct { fill: var(--cattail); }
+.reeds-art .lf { fill: var(--reed); }
+.reeds-art .lf.l2 { fill: var(--reed2); }
+.reeds-art .gr { fill: none; stroke: var(--reed); stroke-width: 3; stroke-linecap: round; }
+
+/* ---------- pond layout ----------
+   The pond is a strip along the bottom of the window, under the glass panels (which stop just above the
+   water, see --pond-pad in app.css). Frogs and lily pads are sized from the strip height, so they never
+   reach a control; on short windows the strip shrinks and then disappears. */
+:root { --pond-h: clamp(0px, calc((100vh - 560px) * .36), 170px); --pond-pad: max(12px, calc(var(--pond-h) * .84)); }
+@media (max-height: 680px) { :root { --pond-h: 0px; } }
+body.scene-off, body.no-pond { --pond-h: 0px; }
+#sky .pond { position: absolute; left: 0; right: 0; bottom: 0; height: var(--pond-h); }
+#sky .pond .water { position: absolute; inset: 0; width: 100%; height: 100%; }
+#sky .pond .w0 { stop-color: var(--w0); } #sky .pond .w1 { stop-color: var(--w1); } #sky .pond .w2 { stop-color: var(--w2); } #sky .pond .w3 { stop-color: var(--w3); }
+#sky .pond .bk0 { stop-color: var(--bank0); } #sky .pond .bk1 { stop-color: var(--bank1); }
+#sky .pond .shore-gloss { fill: none; stroke: rgba(255, 255, 255, .55); stroke-width: 3; vector-effect: non-scaling-stroke; }
+:root[data-theme="night"] #sky .pond .shore-gloss { stroke: rgba(150, 210, 255, .25); }
+#sky .pond .sky-mirror { fill: var(--w-mirror); }
+#sky .pond .glints ellipse { fill: var(--w-glint); animation: glint 5.5s ease-in-out infinite; }
+#sky .pond .glints ellipse:nth-child(2n) { animation-duration: 7s; animation-delay: -2s; }
+#sky .pond .glints ellipse:nth-child(3n) { animation-duration: 9s; animation-delay: -4s; }
+@keyframes glint { 0%, 100% { opacity: .9; } 50% { opacity: .25; } }
+#sky .pond .moonpath { opacity: var(--moonpath); }
+#sky .pond .moonpath ellipse { fill: rgba(220, 238, 255, .75); }
+:root[data-theme="night"] #sky .pond .glints { opacity: .35; }
+.pond-item { position: absolute; bottom: calc(var(--pond-h) * var(--b, 0)); width: calc(var(--pond-h) * var(--w, 1)); }
+.pond-item.pad { --w: 1.2; --b: .06; }
+.pond-item.pad.sm { --w: .78; --b: .3; }
+.pond-item.pad.xs { --w: .58; --b: .44; }
+.pond-item.f-sit { --w: .8; --b: .15; }
+.pond-item.f-peek { --w: .5; --b: .12; }
+.pond-item.stone { --w: .82; --b: .2; }
+.pond-item.f-rest { --w: .5; --b: .37; }
+.pond-item.lotus { --w: .24; --b: .44; }
+.pond-item.reeds { --w: .78; --b: .2; }
+.pond .frog { pointer-events: auto; cursor: pointer; }
+.pond .ripples { position: absolute; inset: 0; }
+.pond .rp { position: absolute; width: calc(var(--pond-h) * .7); height: calc(var(--pond-h) * .1); border-radius: 50%; border: 1.5px solid var(--w-ring);
+  opacity: 0; animation: ripple 9s ease-out infinite; }
+.pond .rp.r1 { left: 24%; bottom: 22%; } .pond .rp.r2 { left: 57%; bottom: 10%; animation-delay: -3s; } .pond .rp.r3 { left: 71%; bottom: 38%; animation-delay: -6s; }
+@keyframes ripple { 0% { transform: scale(.2); opacity: 0; } 10% { opacity: .8; } 60% { opacity: 0; transform: scale(1.4); } 100% { opacity: 0; transform: scale(1.4); } }
+
+/* ambient frog life (Full scenery only; the governor pauses it) */
+.pond .frog .fr-lid { animation: blink 6.5s infinite; }
+.pond .f-peek .fr-lid { animation-duration: 8.3s; animation-delay: -3s; }
+.pond .f-sit .fr-eye:nth-of-type(2) .fr-lid { animation-delay: -.02s; }
+@keyframes blink { 0%, 93%, 100% { transform: scaleY(var(--frog-lid)); } 95.5% { transform: scaleY(1); } }
+:root[data-theme="night"] .pond .frog .fr-lid { animation-duration: 11s; }
+.pond .f-sit .frog-art, .pond .f-rest .frog-art { animation: breathe 4.6s ease-in-out infinite; transform-origin: 50% 95%; }
+.pond .f-rest .frog-art { animation-duration: 5.4s; animation-delay: -2s; }
+@keyframes breathe { 50% { transform: scale(1.012, .99); } }
+.pond .pad, .pond .f-sit, .pond .lotus { animation: bob 7s ease-in-out infinite; }
+.pond .pad.sm, .pond .lotus { animation-duration: 8.5s; animation-delay: -3s; }
+.pond .pad.xs { animation-duration: 9.5s; animation-delay: -5s; }
+.pond .f-peek { animation: peek 10s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(1.5px); } }
+@keyframes peek { 0%, 100% { transform: translateY(0); } 45%, 60% { transform: translateY(5%); } }
+
+/* small windows: fewer frogs */
+@media (max-width: 1100px) { .pond-item.p3, .pond-item.lotus { display: none; } }
+@media (max-width: 860px) { .pond-item.stone, .pond-item.f-rest, .pond-item.p2, .pond-item.reeds.right { display: none; } }
+
+/* the governor: Still, busy (a model is generating / tuning / benchmarking) and hidden windows freeze all motion */
+body.scene-still #sky *, body.scene-still #sky *::before, body.scene-still #sky *::after,
+body.scene-paused #sky *, body.scene-paused #sky *::before, body.scene-paused #sky *::after { animation-play-state: paused !important; }
+body.scene-off #sky > :not(.defs) { display: none !important; }   /* beats the night rule that shows fireflies */
+@media (prefers-reduced-motion: reduce) { #sky *, #sky *::before, #sky *::after { animation-play-state: paused !important; } }

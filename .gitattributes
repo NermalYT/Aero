@@ -1,0 +1,9 @@
+# Windows scripts are stored with CRLF line endings exactly as they ship, so a "Download ZIP" from GitHub runs as is.
+*.bat -text
+*.cmd -text
+*.ps1 -text
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.gguf binary

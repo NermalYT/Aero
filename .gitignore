@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# An install's own folders, if one is ever made inside the repo
+/data/
+/models/
+/llama/
+/app/
+source/data/
+source/models/
+source/llama/
+
+# Release builds and logs
+*.zip
+*.log
