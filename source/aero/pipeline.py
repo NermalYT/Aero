@@ -18,7 +18,8 @@ import uuid
 
 import httpx
 
-from . import agent, agents, chatgpt, cloud, control, experience, looplog, memory, router, stats, tools
+from . import (agent, agents, app_catalog, app_registry, chatgpt, cloud, control, experience, looplog, memory, router,
+               stats, tools)
 from .config import DATA
 
 CORE_TOOLS = ["list_dir", "read_file", "find_files", "search_files", "run_command", "web_search", "fetch_url",
@@ -180,6 +181,44 @@ async def route(turn, opts):
         yield {"t": "router", "message": rec}
     else:
         turn.exposed = None if prev is None else list(prev)      # no router: everything (or what this chat had)
+
+
+# ------------------------------------------------------------------------------------------------ apps
+
+BACKEND_TOOLS = {"accessibility": ["app_view", "app_click", "app_type", "app_read", "app_keys"],
+                 "browser": ["browser_open", "browser_read_sections", "browser_snapshot", "browser_click",
+                             "browser_type"],
+                 "file": ["read_file", "edit_file", "write_file", "find_files"], "terminal": ["run_command"],
+                 "protocol": ["app_launch"], "media_session": ["app_launch"]}
+
+
+def app_context(turn, task):
+    """Apps and services the request names (app_registry.mentions: deterministic, no model call). Adds a line to the
+    turn context and, when the router narrowed the tools, the tools that fit those apps."""
+    try:
+        ms = app_registry.mentions(task)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not ms:
+        return ""
+    line = app_registry.context_line(task, ms)
+    if turn.exposed is not None:
+        available = [c[0] for c in tool_catalog(turn.settings)]
+        want = ["app_find"]
+        for m in ms:
+            e = app_catalog.entry(m.get("catalog") or m.get("id")) or {}
+            if m.get("installed"):
+                want.append("app_launch")
+            for b in e.get("backends", []):
+                want += BACKEND_TOOLS.get(b, [])
+                if b == "mcp":
+                    key = (m.get("catalog") or m.get("id") or "").replace("_", "")
+                    want += [n for n in available if n.startswith("mcp_") and key and key in n.lower().replace("_", "")]
+        add = [n for n in dict.fromkeys(want) if n in available and n not in turn.exposed]
+        if add:
+            order = {n: i for i, n in enumerate(available)}
+            turn.exposed = sorted(set(turn.exposed) | set(add), key=lambda n: order.get(n, 1e9))
+    return line
 
 
 # The router fills in "preference" when it reads one, but a 2B model also finds preferences in plain requests
@@ -511,6 +550,12 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
             async for ev in route(turn, opts):
                 yield out(ev)
         turn.memory_text = agent.memory_recall(settings, turn.history, carry, chat_id, turn.ctx_size)
+        if not mod and settings.get("tools_enabled", True):
+            apps_line = await asyncio.to_thread(app_context, turn, task)
+            if apps_line:
+                turn.memory_text = (apps_line + "\n\n" + turn.memory_text).strip()
+                if turn.exposed is not None:
+                    yield out({"t": "exposure", "exposed": list(turn.exposed)})
         journal = bool(loop) and settings.get("loop_journal", True)
         if journal:
             turn.journal_text = looplog.block(task)
@@ -544,12 +589,30 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         failed = True
         yield out({"t": "error", "error": f"{type(e).__name__}: {e}"})
     finally:
+        stopped = turn.cancel.is_set()
+        summary = turn.graph.summary() if stopped else None
+        if stopped:
+            turn.graph.cancel_open("stopped")
+        turn.graph.status = "stopped" if stopped else "error" if failed else "done"
+        try:
+            turn.graph.save(force=True)
+        except OSError:
+            pass
         turn.close()
+        agent.release(ids["chat"])
+        if ids["chat"] != chat_id:
+            agent.release(chat_id)
         if turn.controlling:
             control.banner_off()
         final = next((m.get("content") for m in reversed(turn.history) if m.get("role") == "assistant"
                       and not m.get("tool_calls") and (m.get("content") or "").strip()), "")
-        agents.finish(ids["chat"], "stopped" if turn.cancel.is_set() else "error" if failed else "done", final)
+        agents.finish(ids["chat"], "stopped" if stopped else "error" if failed else "done", final)
+    if summary and (summary["completed"] or summary["not_completed"]):
+        done = "; ".join(summary["completed"][-8:]) or "nothing yet"
+        rest = "; ".join(summary["not_completed"][-8:]) or "nothing"
+        yield _sse({"t": "notice", "text": f"Stopped. Finished: {done}. Not finished: {rest}. Nothing else will run "
+                                           "for this task, and anything Aero was holding (app windows, your mouse and "
+                                           "keyboard, its browser tab) was released."})
     if turn.controlling:
         yield _sse({"t": "control_end"})
     yield _sse({"t": "done", "today_usd": cloud.spent_today()})

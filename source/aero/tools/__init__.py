@@ -6,6 +6,7 @@ External MCP servers (data/mcp.json) register into the same registry at runtime.
 """
 import os
 import inspect
+import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,11 @@ class Tool:
         except Exception:
             return False
 
+    @property
+    def caps(self):
+        from ..capabilities import caps_of
+        return caps_of(self.name, self.category)
+
 
 REGISTRY: dict = {}
 
@@ -44,6 +50,7 @@ CATEGORIES = {
     "mcp": "External MCP servers (GitHub, plugins, apps)",
     "skills": "Skills (task instructions loaded on demand)",
     "agents": "Subagents (the local model hands part of a task to a fresh copy of itself)",
+    "ask": "Questions to you while the rest of the task keeps going",
 }
 
 
@@ -55,12 +62,24 @@ def tool(name, description, category, params=None, required=None, summary=None, 
 
 
 class Ctx:
-    """Per-call context handed to tools."""
-    def __init__(self, settings, vision=False, chat_id=None):
+    """Per-call context handed to tools. cancel: the turn's Stop flag (anything with is_set()); long tools check
+    cancelled() between steps so Stop takes effect mid-action. owner: who holds resource locks for this call."""
+    def __init__(self, settings, vision=False, chat_id=None, cancel=None):
         self.settings = settings
         self.vision = vision
         self.chat_id = chat_id
+        self.cancel = cancel
         self.work_dir = Path(os.path.expandvars(os.path.expanduser(settings.get("work_dir") or "~")))
+
+    @property
+    def owner(self):
+        return self.chat_id or "aero"
+
+    def cancelled(self):
+        try:
+            return bool(self.cancel is not None and self.cancel.is_set())
+        except Exception:
+            return False
 
     def path(self, p):
         p = os.path.expandvars(os.path.expanduser(str(p or ".")))
@@ -101,7 +120,15 @@ def label(name, args):
 
 
 def run(name, args, ctx):
-    """Returns {'text': str, 'image': upload_id | None, 'error': bool}."""
+    """Returns {'text': str, 'image': upload_id | None, 'error': bool, 'envelope': {...}} (see action_results)."""
+    t0 = time.monotonic()
+    res = _run(name, args, ctx)
+    from ..action_results import finish
+    t = REGISTRY.get(name)
+    return finish(res, name, (time.monotonic() - t0) * 1000, t.caps.side_effect if t else "none")
+
+
+def _run(name, args, ctx):
     from .. import localonly
     t = REGISTRY.get(name)
     if not t:
@@ -134,6 +161,6 @@ def run(name, args, ctx):
 
 
 def load_all():
-    from . import files, shell, desktop, apps, web, browser, memory_tools, skill_tools, agent_tools, mod_tools  # noqa: F401,E501  (registration side effects)
+    from . import files, shell, desktop, apps, app_tools, web, browser, memory_tools, skill_tools, agent_tools, ask_tools, mod_tools, doc_tools  # noqa: F401,E501  (registration side effects)
     from . import mcp_client
     mcp_client.start_all_async()
