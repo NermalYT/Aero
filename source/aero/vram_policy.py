@@ -289,7 +289,7 @@ class Runner:
         s = load_settings()
         self.snapshot = self.detector.read()
         eng = self.hooks.engine()
-        act = self.policy.tick(now or time.time(), self.snapshot["state"], s, eng)
+        act = self.policy.tick(time.time() if now is None else now, self.snapshot["state"], s, eng)
         if act:
             self.policy.busy = True
             try:
@@ -338,7 +338,9 @@ class Runner:
             vram_before = self.hooks.vram()
             lb_target = target
             if not self._wait_idle():
-                return p.done("enter", False, error="a reply kept running for 10 minutes; Remote Mode will try again")
+                p.busy = False                          # keep waiting: the next step tries again (no failure)
+                p.wait_note = "waiting for the reply in progress to finish"
+                return None
             self.hooks.hold(True)
             try:
                 ok, info = self.hooks.reload(pl["cfg"])

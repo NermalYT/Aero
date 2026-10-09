@@ -128,9 +128,10 @@ class TaskGraph:
             raise ValueError(state)
         n = self.nodes[node_id]
         n.state = state
-        if state == "running" and n.started is None:
-            n.started = time.time()
+        if state == "running":
             n.attempts += 1
+            if n.started is None:
+                n.started = time.time()
         if state in DONE:
             n.ended = time.time()
         if result is not None:

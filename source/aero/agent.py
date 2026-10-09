@@ -25,6 +25,7 @@ from . import (action_results, agents, attachments, capabilities, clarifications
                osinfo, resources, stats, task_graph, tools)
 
 _approvals = {}        # call_id -> Future
+_approval_chat = {}    # call_id -> chat id it belongs to (Stop in one chat must not answer another chat's cards)
 _chat_allow = {}       # chat_id -> set(categories) allowed for the rest of the chat
 _cancel = {}           # chat_id -> asyncio.Event
 
@@ -35,8 +36,16 @@ PARALLEL_MAX = 4               # read-only tool calls from one step that may run
 TIMEOUT_RE = re.compile(r"time(d)? ?out|TimeoutError|timeout", re.I)
 
 
+def _ask(call_id, chat_id):
+    fut = asyncio.get_running_loop().create_future()
+    _approvals[call_id] = fut
+    _approval_chat[call_id] = chat_id
+    return fut
+
+
 def resolve_approval(call_id, decision, chat_id=None, category=None):
     fut = _approvals.pop(call_id, None)
+    _approval_chat.pop(call_id, None)
     if decision == "allow_chat" and chat_id and category:
         _chat_allow.setdefault(chat_id, set()).add(category)
     if fut and not fut.done():
@@ -55,7 +64,7 @@ def stop(chat_id):
     if ev:
         ev.set()
     for cid, fut in list(_approvals.items()):
-        if not fut.done():
+        if _approval_chat.get(cid) in (chat_id, None) and not fut.done():
             fut.set_result("deny")
     release(chat_id, close_browser=True)
 
@@ -674,6 +683,9 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
     needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set()) and not physical
     label = tools.label(name, args or {})
     node = _graph_node(turn, name, label, lane, category) if t else None
+    ask_fut = None
+    if needs and args is not None:          # registered before the card goes out, so an instant answer or Stop finds it
+        ask_fut = _ask(call_id, _root(turn).chat_id)
     yield {"t": "tool_start", "call_id": call_id, "name": name, "args": args, "label": label, "category": category,
            "needs_approval": needs and args is not None, "foreground": fg_needed and args is not None, "lane": lane}
     if node is not None:
@@ -698,17 +710,14 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
         res = guard
     else:
         decision = "allow"
-        if needs:
-            fut = asyncio.get_running_loop().create_future()
-            _approvals[call_id] = fut
-            decision = await fut
+        if ask_fut is not None:
+            decision = "deny" if turn.cancel.is_set() else await ask_fut
         if fg_needed and decision != "deny" and not turn.cancel.is_set():
             what, _rect = await asyncio.to_thread(control.target, name, args, owner)
+            fut = _ask(call_id, owner)
             yield {"t": "foreground_request", "call_id": call_id, "name": name, "label": label, "target": what,
                    "by": control.actor(turn, lane), "lane": lane}
-            fut = asyncio.get_running_loop().create_future()
-            _approvals[call_id] = fut
-            decision = await fut
+            decision = "deny" if turn.cancel.is_set() else await fut
             if decision in ("allow", "allow_task"):
                 input_guard.grant(owner, "task" if decision == "allow_task" else "once")
         if decision == "deny" or turn.cancel.is_set():
@@ -758,7 +767,11 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
                 finally:
                     if input_keys:
                         resources.release(input_keys, owner)
-    _note_outcome(turn, name, args, res) if t else None
+    if ask_fut is not None and not ask_fut.done():
+        _approvals.pop(call_id, None)
+        ask_fut.cancel()
+    if t:
+        _note_outcome(turn, name, args, res)
     evidence = action_results.evidence(res.get("envelope"))
     content = res.get("text", "") + (("\n" + evidence) if evidence else "")
     tmsg = {"role": "tool", "tool_call_id": call_id, "name": name, "content": content,
@@ -1197,8 +1210,7 @@ async def run_subagent(turn, call_id, args, lane="local"):
     elif pol == "off":
         err = "Subagents are turned off in Settings → Tools."
     elif needs:
-        fut = asyncio.get_running_loop().create_future()
-        _approvals[call_id] = fut
+        fut = _ask(call_id, _root(turn).chat_id)
         if await fut == "deny" or turn.cancel.is_set():
             err = "The user denied starting this subagent. Do the work yourself or ask what they want."
     if err:
