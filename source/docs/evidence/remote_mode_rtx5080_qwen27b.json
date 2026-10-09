@@ -1,0 +1,111 @@
+{
+ "at": "2026-10-09 15:43:37",
+ "model": "Qwen3.8-27B, IQ2_M GGUF (11.5 GB, 64 layers + 1 MTP block)",
+ "llama_server": "0.6.0-dev",
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "vram_total_mb": 16303,
+ "cpu": "AMD Ryzen 9 9950X3D2 16-Core Processor",
+ "ram_total_mb": 63156,
+ "target": 0.8,
+ "layers": {
+  "n_layer": 65,
+  "total_mb": 11122,
+  "embd_mb": 521,
+  "output_mb": 2425,
+  "layer_mb_min": 0,
+  "layer_mb_max": 139,
+  "experts_mb": 0
+ },
+ "plan": {
+  "before": 0.9532,
+  "target": 0.8,
+  "n_layer": 65,
+  "after": 0.7983,
+  "moved_bytes": 1806491904,
+  "why": "53 of 65 layers on the GPU"
+ },
+ "remote_cfg": {
+  "ctx": 8192,
+  "ngl": 53,
+  "kv": "q8_0",
+  "fa": true,
+  "ub": 512
+ },
+ "naive_ngl": 52,
+ "naive_share": 0.7866,
+ "normal": {
+  "label": "normal",
+  "ok": true,
+  "cfg": {
+   "ctx": 8192,
+   "ngl": 999,
+   "kv": "q8_0",
+   "fa": true,
+   "ub": 512
+  },
+  "load_s": 4.2,
+  "vram_before_mb": 697,
+  "vram_loaded_mb": 12141,
+  "vram_model_total_mb": 11444,
+  "vram_after_stop_mb": 697,
+  "measured_weight_share": 0.9532,
+  "gpu_buffers_mb": {
+   "model": 10601.05,
+   "kv": 272.0,
+   "rs": 149.62,
+   "compute": 150.29
+  },
+  "cpu_buffers_mb": {
+   "model": 521.0,
+   "output": 0.95,
+   "compute": 48.29
+  },
+  "devices": {
+   "CUDA0": 11172.96
+  },
+  "offloaded": [
+   66,
+   66
+  ],
+  "decode_tok_s": 58.9
+ },
+ "remote": {
+  "label": "remote",
+  "ok": true,
+  "cfg": {
+   "ctx": 8192,
+   "ngl": 53,
+   "kv": "q8_0",
+   "fa": true,
+   "ub": 512
+  },
+  "load_s": 4.2,
+  "vram_before_mb": 697,
+  "vram_loaded_mb": 10393,
+  "vram_model_total_mb": 9696,
+  "vram_after_stop_mb": 697,
+  "measured_weight_share": 0.7983,
+  "gpu_buffers_mb": {
+   "model": 8878.25,
+   "kv": 221.0,
+   "rs": 118.45,
+   "compute": 207.21
+  },
+  "cpu_buffers_mb": {
+   "model": 2243.8,
+   "output": 0.95,
+   "kv": 51.0,
+   "rs": 31.17,
+   "compute": 48.4
+  },
+  "devices": {
+   "CUDA0": 9424.91
+  },
+  "offloaded": [
+   53,
+   66
+  ],
+  "decode_tok_s": 21.2
+ },
+ "vram_freed_mb": 1748
+}

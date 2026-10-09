@@ -63,6 +63,8 @@ const I = {
   mod: '<svg viewBox="0 0 24 24"><path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3h7z"/></svg>',
   update: '<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>',
   lab: '<svg viewBox="0 0 24 24"><path d="M4 18a8 8 0 1 1 16 0"/><path d="m12 18 4-6"/><circle cx="12" cy="18" r="1.4"/><path d="M6.5 13.5l1 .6M12 9v1.2M17.5 13.5l-1 .6"/></svg>',
+  ask: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17.5v.01"/></svg>',
+  remote: '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><path d="M18.5 8a4 4 0 0 1 0 6M21 5.5a8 8 0 0 1 0 11"/></svg>',
 };
 const ico = (name) => { const s = h('span', { class: 'ico', html: I[name] }); return s; };
 const osKind = () => S.st?.os?.kind || 'windows';
@@ -671,6 +673,7 @@ async function openChat(id) {
   try { S.chat = await api('/api/chats/' + id); } catch (e) { return toast(e.message, true); }
   if (PHONE.matches) setSidebar(false);
   renderMessages(); renderChatList(); setTitleBar();
+  refreshQuestions(S.chat);
 }
 
 /** The top bar: the chat's title and, once it has one, the name of the agent you're talking to. */
@@ -720,7 +723,7 @@ const isReviewerMsg = m => REVIEW_LANES.has(m.from);
 const PHASE_NOW = { work: 'working', fix: 'fixing', lesson: 'learning', review: 'reviewing', execute: 'taking over' };
 const PHASE_DONE = { work: 'done', fix: 'fixed', lesson: 'learned', review: 'reviewed', execute: 'done' };
 const CAT_ICON = { files_read: 'file', files_write: 'edit', shell: 'text', screen: 'app', desktop: 'app', browser: 'ext', web: 'search',
-  memory: 'mem', mcp: 'plug', skills: 'bulb', meta: 'tools', cloud: 'review', claude_code: 'spark', agents: 'agents' };
+  memory: 'mem', mcp: 'plug', skills: 'bulb', meta: 'tools', cloud: 'review', claude_code: 'spark', agents: 'agents', ask: 'ask' };
 
 function laneModelName(lane, model) {
   if (model) return model;
@@ -800,6 +803,7 @@ function renderItem(ctx, m) {
     case 'learned': closeLane(ctx); ctx.el.append(learnedCard(m)); break;
     case 'notice': appendNotice(ctx, m); break;
     case 'subagent': placeSub(ctx, subBlock(m, false)); break;
+    case 'question': placeQuestion(ctx, m, S.chat); break;
   }
 }
 
@@ -914,6 +918,13 @@ function attachToolResult(ctx, m) {
   const body = $(':scope > .tool-body', card);
   $$('.res', body).forEach(x => x.remove());
   body.append(h('div', { class: 'lbl res' }, 'Output'), h('pre', { class: 'res' }, m.content || ''));
+  $(':scope > .tool-head .vbadge', card)?.remove();
+  if (m.verified === true || m.verified === false || (m.verified === null && 'verified' in m)) {
+    const v = m.verified === true ? ['ok', 'verified', 'Aero checked the effect from the app, page or file itself']
+      : m.verified === false ? ['bad', 'check failed', 'Aero checked and the action did not take effect']
+        : ['warn', 'not verified', 'Sent, but the result could not be checked'];
+    st.after(h('span', { class: 'vbadge ' + v[0], 'data-tip': v[2] + (m.mode ? ` · ${m.mode.toLowerCase().replace(/_/g, ' ')}` : '') }, v[1]));
+  }
   if (m.image && !$('img.shot', card)) card.append(h('img', { class: 'shot', src: '/api/uploads/' + m.image, onclick: () => viewImage('/api/uploads/' + m.image) }));
   if (m.error && !m.denied) card.classList.add('open');
 }
@@ -1451,6 +1462,10 @@ async function runAgent(loop) {
         case 'subagent_done': push(ev.sub); if (subs[ev.sub.id]) subFinish(subs[ev.sub.id], ev.sub); scrollBottom(); break;
         case 'control': setControl(ev); break;
         case 'control_end': setControl(null); break;
+        case 'question': { const m = { role: 'question', id: uid(), question: ev.question, ts: Date.now() / 1000 }; push(m); placeQuestion(ctx, m, chat); scrollBottom(); break; }
+        case 'waiting': { const c = $(`.qcard[data-qid="${CSS.escape(ev.question_id)}"] .qwait`, ctx.el); if (c) c.textContent = ' · Aero is waiting for this answer'; break; }
+        case 'foreground_request': { const card = findCard(ctx.el, ev.call_id); if (card) askForeground(card, ev, chat); break; }
+        case 'task': taskProgress(ctx, ev); break;
         case 'review': {
           push(ev.message); closeLane(ctx); S.activeLane = null;
           ctx.el.append(reviewCard(ev.message)); ctx.afterFix = false; scrollBottom(); break;
@@ -1617,6 +1632,12 @@ function subEvent(subs, ev, chat) {
   const sb = subs[ev.sub];
   if (ev.t === 'control') return setControl(ev);
   if (!sb) return;
+  if (ev.t === 'question') {
+    const m = { role: 'question', id: uid(), question: ev.question, ts: Date.now() / 1000 };
+    chat.messages.push(m); sb.el.classList.remove('folded'); sb.body.append(questionCard(m, chat)); return scrollBottom();
+  }
+  if (ev.t === 'foreground_request') { const card = findCard(sb.body, ev.call_id); if (card) { sb.el.classList.remove('folded'); askForeground(card, ev, chat, sb.rec.name); } return; }
+  if (ev.t === 'task') return;
   const flush = () => {
     sb.raf = 0; const c = sb.cur; if (!c) return;
     if (c.reasoning && !c.think) { c.thinkBody = h('div', { class: 'think-body' }); c.think = h('details', { class: 'think', open: true }, h('summary', {}, 'Thinking…'), c.thinkBody); sb.body.insertBefore(c.think, c.md); }
@@ -1690,7 +1711,7 @@ function subChatCard(a) {
 // button. The same banner shows over the app being controlled (overlay.py).
 S.ctl = { own: null, other: null };
 function setControl(ev) {
-  S.ctl.own = ev ? { by: ev.by, target: ev.target } : null;
+  S.ctl.own = ev ? { by: ev.by, target: ev.target, text: ev.text, mode: ev.mode } : null;
   renderControl();
 }
 function renderControl() {
@@ -1699,12 +1720,208 @@ function renderControl() {
   document.body.classList.toggle('controlled', !!c);
   if (!c) { $('#controlStop').disabled = false; $('#controlStop').textContent = 'Stop'; return; }
   const what = !c.target || c.target === 'your PC' ? 'your PC' : c.target === 'the browser' ? 'the browser' : c.target;
-  $('#controlText').textContent = `${c.by || 'Aero'} is controlling ${what}`;
+  $('#controlText').textContent = c.text || `${c.by || 'Aero'} is controlling ${what}`;
+  $('#controlBar').classList.toggle('fg', c.mode === 'FOREGROUND_CONSENT_REQUIRED');
 }
 function stopControl() {
   const b = $('#controlStop'); b.disabled = true; b.textContent = 'Stopping…';
   if (S.streaming) stopGen();
   api('/api/stop_all', { method: 'POST' }).catch(() => { });
+}
+
+
+// ---------------------------------------------------------------- v1.1: questions while the task keeps going
+// ask_user posts a card and returns at once; the agent keeps working and waits only where it needs the answer
+// (get_answer). Answering after the reply finished sends the answer into the chat so the task picks up from there.
+function questionCard(m, chat) {
+  const q = m.question || {};
+  const answered = q.status === 'answered';
+  const who = q.owner ? `${q.owner} (subagent)` : (S.st?.engine.model?.name || 'The local model');
+  const wait = h('span', { class: 'qwait muted' }, answered ? '' : ' · the rest of the task keeps going');
+  const card = h('div', { class: 'qcard' + (answered ? ' done' : ''), 'data-qid': q.id },
+    h('div', { class: 'qh' }, h('span', { class: 'ico', html: I.ask }), h('b', {}, `${who} asks`), wait),
+    h('div', { class: 'qt' }, q.text || ''));
+  const box = h('div', { class: 'qa' });
+  const send = async v => {
+    v = String(v ?? '').trim(); if (!v) return;
+    $$('button, input', box).forEach(x => x.disabled = true);
+    try {
+      const r = await api('/api/answer', { method: 'POST', json: { question_id: q.id, answer: v } });
+      Object.assign(q, r.question);
+      markAnswered(card, q);
+      if (chat) await (S.chat === chat ? saveChat() : api('/api/chats/' + chat.id, { method: 'PUT', json: chat }).catch(() => { }));
+      if (!(S.streaming && S.chat === chat) && S.chat === chat) resumeWithAnswer(q);
+    } catch (e) { toast(e.message, true); $$('button, input', box).forEach(x => x.disabled = false); }
+  };
+  if (answered) markAnswered(card, q);
+  else {
+    for (const c of q.choices || []) box.append(h('button', { class: 'btn ghost sm', onclick: () => send(c) }, c));
+    if (q.allow_free || !(q.choices || []).length) {
+      const inp = h('input', { type: 'text', placeholder: q.kind === 'yes_no' ? 'yes or no' : q.kind === 'number' ? 'a number' : 'Your answer', onkeydown: e => { if (e.key === 'Enter') send(inp.value); } });
+      box.append(inp, h('button', { class: 'btn sm', onclick: () => send(inp.value) }, 'Answer'));
+    }
+    box.append(h('button', { class: 'btn ghost sm', 'data-tip': 'Close the question without answering', onclick: async () => {
+      await api(`/api/questions/${q.id}/cancel`, { method: 'POST' }).catch(() => { }); q.status = 'cancelled'; markAnswered(card, q);
+      if (chat) saveChat();
+    } }, 'Dismiss'));
+    card.append(box);
+    notify('Aero has a question', q.text || '');
+  }
+  return card;
+}
+function markAnswered(card, q) {
+  card.classList.add('done'); $('.qa', card)?.remove(); $('.qwait', card).textContent = '';
+  $('.qans', card)?.remove();
+  card.append(h('div', { class: 'qans' }, q.status === 'answered' ? h('span', {}, 'Answered: ', h('b', {}, q.answer)) : 'Closed without an answer.'));
+}
+function placeQuestion(ctx, m, chat) { const c = questionCard(m, chat); (ctx.lane?.el || ctx.el).append(c); return c; }
+/** The reply already finished: send the answer as the next message, so the same task continues from it. */
+function resumeWithAnswer(q) {
+  const ta = $('#input');
+  ta.value = `Answer to your question "${q.text}": ${q.answer}`;
+  send();
+}
+async function refreshQuestions(chat) {
+  if (!chat?.id) return;
+  let r; try { r = await api('/api/questions?chat_id=' + encodeURIComponent(chat.id)); } catch { return; }
+  const open = new Set((r.questions || []).map(q => q.id));
+  let changed = false;
+  for (const m of chat.messages || []) {
+    if (m.role === 'question' && m.question?.status === 'pending' && !open.has(m.question.id)) { m.question.status = 'closed'; changed = true; }
+  }
+  if (changed && S.chat === chat) renderMessages();
+}
+
+// ---------------------------------------------------------------- v1.1: foreground control needs a yes first
+function askForeground(card, ev, chat, who) {
+  if ($(':scope > .approve', card)) return;
+  const st = $(':scope > .tool-head .tstat', card);
+  st.className = 'tstat ask'; st.textContent = 'needs your mouse and keyboard';
+  const ap = h('div', { class: 'approve fg' });
+  const decide = d => {
+    api('/api/approve', { method: 'POST', json: { call_id: ev.call_id, decision: d, chat_id: chat.id } }).catch(() => { });
+    ap.remove(); st.className = 'tstat run'; st.textContent = d === 'deny' ? 'denying…' : 'waiting for you to stop typing…';
+  };
+  ap.append(
+    h('div', { class: 'q' }, h('b', {}, 'Foreground control required. '),
+      `${who ? 'Subagent ' + who : ev.by || 'Aero'} wants your real mouse and keyboard for ${toolInfo(ev.name).name}${ev.label ? ' → ' + ev.label : ''} ${!ev.target || ev.target === 'your PC' ? 'on your PC' : 'in ' + ev.target}. ` +
+      'If you allow it, Aero waits until you stop typing, uses them, then puts back the window you were using.'),
+    h('button', { class: 'btn sm', onclick: () => decide('allow') }, 'Allow once'),
+    h('button', { class: 'btn ghost sm', onclick: () => decide('allow_task'), 'data-tip': 'Allow it for the rest of this task (until the reply ends or you press Stop)' }, 'Allow for this task'),
+    h('button', { class: 'btn danger sm', onclick: () => decide('deny') }, 'Deny'));
+  card.append(ap); card.classList.add('open'); scrollBottom(true);
+  notify('Aero needs your mouse and keyboard', `${toolInfo(ev.name).name} ${ev.label || ''}`);
+}
+
+// ---------------------------------------------------------------- v1.1: the task's steps, live
+function taskProgress(ctx, ev) {
+  const n = ev.node; if (!n) return;
+  ctx.tasks = ctx.tasks || { nodes: new Map(), el: null };
+  ctx.tasks.nodes.set(n.id, n);
+  if (ctx.tasks.nodes.size < 2) return;
+  if (!ctx.tasks.el) {
+    const sum = h('summary', {}), list = h('ol', {});
+    ctx.tasks.el = h('details', { class: 'tasks' }, sum, list); ctx.tasks.sum = sum; ctx.tasks.list = list;
+    const after = ctx.router && ctx.router.parentNode === ctx.el ? ctx.router.nextSibling : ctx.el.firstChild;
+    ctx.el.insertBefore(ctx.tasks.el, after);
+  }
+  const all = [...ctx.tasks.nodes.values()], count = st => all.filter(x => x.state === st).length;
+  const bits = [`${count('completed')} done`];
+  for (const [st, word] of [['running', 'running'], ['waiting_for_user', 'waiting for you'], ['failed', 'failed'], ['cancelled', 'not run']]) if (count(st)) bits.push(`${count(st)} ${word}`);
+  ctx.tasks.sum.textContent = `Steps · ${bits.join(' · ')}`;
+  ctx.tasks.list.innerHTML = '';
+  for (const x of all.slice(-40)) ctx.tasks.list.append(h('li', { class: 'ts-' + x.state }, h('span', { class: 'tsst' }, TASK_WORD[x.state] || x.state), ' ', x.label || x.action));
+}
+const TASK_WORD = { pending: 'queued', ready: 'ready', running: 'running', waiting_for_user: 'waiting for you', waiting_for_auth: 'needs sign-in', waiting_for_resource: 'waiting', verifying: 'checking', completed: 'done', failed: 'failed', cancelled: 'not run', blocked: 'blocked', skipped: 'skipped' };
+
+// ---------------------------------------------------------------- v1.1: Settings → Apps
+function appsSection() {
+  const box = h('div', {}, h('p', { class: 'muted' }, 'Loading…'));
+  const draw = async (r, q) => {
+    box.innerHTML = '';
+    const search = h('input', { type: 'text', placeholder: 'Try a name: bloxstrap, vs code, my spotify…', value: q || '' });
+    const results = h('div', { class: 'app-results' });
+    const run = async () => {
+      results.innerHTML = '';
+      if (!search.value.trim()) return;
+      let x; try { x = await api('/api/apps?q=' + encodeURIComponent(search.value.trim())); } catch (e) { return results.append(h('div', { class: 'err-msg' }, e.message)); }
+      if (!(x.matches || []).length) return results.append(h('small', { class: 'muted' }, 'No match.'));
+      results.append(h('table', { class: 'rtable' }, h('tbody', {}, ...x.matches.map(c => h('tr', {},
+        h('td', {}, h('b', {}, c.name), h('small', {}, c.id)), h('td', { class: 'num' }, c.confidence.toFixed(2)),
+        h('td', {}, h('small', {}, c.reason)), h('td', {}, c.installed ? (c.running ? 'running' : 'installed') : 'not installed'))))));
+    };
+    search.onkeydown = e => { if (e.key === 'Enter') run(); };
+    const alias = h('input', { type: 'text', placeholder: 'a name you use, e.g. "my game launcher"' });
+    const target = h('input', { type: 'text', placeholder: 'app id from the search, e.g. bloxstrap' });
+    const learned = Object.entries(r.learned || {});
+    box.append(...[
+      h('p', { class: 'sec-intro' }, 'Aero finds installed apps from the Start menu, the Installed apps list, App Paths, link handlers and Store apps (Windows), .desktop entries (Linux) or /Applications (macOS). It never scans whole drives. When you name an app in a message, the model is told which program it is and how to start it.'),
+      h('div', { class: 'kv', style: 'margin-bottom:12px' },
+        h('span', {}, 'Apps found'), h('span', {}, fmtNum(r.count)),
+        h('span', {}, 'Last scan'), h('span', {}, r.scanned_at ? new Date(r.scanned_at * 1000).toLocaleString() : 'not yet')),
+      h('div', { style: 'display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap' }, search,
+        h('button', { class: 'btn ghost sm', onclick: run }, 'Find'),
+        h('button', { class: 'btn ghost sm', onclick: async () => { box.prepend(h('div', { class: 'notice' }, 'Scanning…')); draw(await api('/api/apps/scan', { method: 'POST' }), search.value); } }, 'Scan again')),
+      results,
+      field('Your names for apps', h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, alias, target,
+        h('button', { class: 'btn ghost sm', onclick: async () => { try { draw(await api('/api/apps/alias', { method: 'PUT', json: { alias: alias.value, app_id: target.value.trim() } })); } catch (e) { toast(e.message, true); } } }, 'Add')),
+        'A name you say, matched exactly before anything else.'),
+      Object.keys(r.aliases || {}).length ? h('ul', { class: 'plain' }, ...Object.entries(r.aliases).map(([a, id]) => h('li', {}, `"${a}" → ${id} `,
+        h('a', { href: '#', onclick: async e => { e.preventDefault(); draw(await api('/api/apps/alias', { method: 'PUT', json: { alias: a, app_id: '' } })); } }, 'remove')))) : null,
+      h('div', { class: 'field' }, h('label', {}, 'Launches that worked on this computer'),
+        learned.length ? h('ul', { class: 'plain' }, ...learned.map(([id, l]) => h('li', {}, `${id}: ${l.method} · ${l.ok || 0} verified start${l.ok === 1 ? '' : 's'}${l.fail ? `, ${l.fail} failed` : ''} `,
+          h('a', { href: '#', onclick: async e => { e.preventDefault(); draw(await api('/api/apps/learned?app_id=' + encodeURIComponent(id), { method: 'DELETE' })); } }, 'forget')))) : h('small', { class: 'muted' }, 'None yet. Only the launch method is kept, never what the app showed.'))].filter(Boolean));
+    if (q) run();
+  };
+  api('/api/apps').then(r => draw(r)).catch(e => { box.innerHTML = ''; box.append(h('div', { class: 'err-msg' }, e.message)); });
+  return [box];
+}
+
+// ---------------------------------------------------------------- v1.1: Remote Mode (Settings → Model & tuning)
+const RM_STATE = { NORMAL: 'Not active · normal profile', SWITCHING: 'Switching to Remote Mode', REMOTE: 'Active', RESTORE_PENDING: 'Waiting before restoring', RECOVERING: 'Restoring the normal profile', FAILED_SAFE: 'Stopped after a failed reload' };
+const mb = v => v == null ? 'unavailable' : `${fmtNum(Math.round(v))} MB`;
+function remoteRows(d) {
+  const p = d.policy || {}, det = d.detector || {}, m = p.measured || {}, pl = p.plan || {};
+  const provs = (det.providers || []).map(x => `${x.label}: ${x.viewer === true ? 'viewer connected' : x.viewer === false ? 'no viewer' : 'can\'t tell'} (${x.confidence})`).join(' · ') || 'none on this computer';
+  return [
+    ['Remote Mode', RM_STATE[p.state] || p.state || '–'],
+    ['Detected', det.state === 'remote_active' || det.state === 'remote_reconnecting' ? `remote viewer: ${(det.counted || []).join(', ')}` : det.state === 'remote_disconnected' ? 'the viewer left' : det.state === 'local' ? 'no remote viewer' : 'unknown'],
+    ['Providers', provs],
+    ['GPU model weights', pl.target != null ? `target ${Math.round(pl.target * 100)}%` + (m.weights_gpu_share != null ? ` · measured ${(m.weights_gpu_share * 100).toFixed(1)}%` : ' · measured: not yet') + (pl.after != null ? ` · planned ${(pl.after * 100).toFixed(1)}%` : '') : 'not planned yet'],
+    ['Model GPU allocation', m.gpu_model_mb != null ? `${mb(m.gpu_model_mb)} weights · ${mb(m.gpu_kv_mb)} KV · ${mb(m.gpu_compute_mb)} compute (llama.cpp's report)` : 'not measured yet'],
+    ['VRAM', d.vram ? `${mb(d.vram.used_mb)} used · ${mb(d.vram.free_mb)} free of ${mb(d.vram.total_mb)}` + (m.vram_freed_mb != null ? ` · Remote Mode freed ${mb(m.vram_freed_mb)}` : '') : 'not readable live on this GPU'],
+    ['Restore', p.state === 'RESTORE_PENDING' ? 'after the cooldown, if no viewer comes back' : p.state === 'REMOTE' ? 'when the last viewer disconnects' : '–'],
+    p.wait_note ? ['Now', p.wait_note] : null, p.error ? ['Last error', p.error] : null,
+  ].filter(Boolean);
+}
+function remoteSection(s) {
+  const status = h('div', { class: 'kv', style: 'margin:6px 0 10px' });
+  const retry = h('button', { class: 'btn ghost sm hidden', onclick: async () => { await api('/api/remote/retry', { method: 'POST' }); load(); } }, 'Try again');
+  const load = async () => {
+    let d; try { d = await api('/api/remote'); } catch { return; }
+    status.innerHTML = '';
+    for (const [k, v] of remoteRows(d)) status.append(h('span', {}, k), h('span', {}, v));
+    retry.classList.toggle('hidden', d.policy?.state !== 'FAILED_SAFE');
+  };
+  load();
+  const prov = s.remote_providers || {};
+  const pbox = h('input', { type: 'hidden', 'data-k': 'remote_providers', 'data-json': '1', value: JSON.stringify(prov) });
+  const ptoggle = (k, lab) => h('label', { class: 'toggle' }, h('input', { type: 'checkbox', checked: prov[k] !== false, onchange: e => { prov[k] = e.target.checked; pbox.value = JSON.stringify(prov); } }), lab);
+  return [
+    h('h4', { class: 'sub-h' }, h('span', { class: 'ico', html: I.remote }), 'Remote Mode'),
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'While someone views or controls this PC remotely (Remote Desktop, verified sessions only), part of the model moves to the CPU so the remote session has GPU memory. The model restarts for each switch: it waits for a reply in progress to finish, and new messages wait for it. Measured on an RTX 5080 with a 27B model at 80%: about 1.7 GB of VRAM freed, generation 59 → 21 tok/s.'),
+    status, retry,
+    h('div', { class: 'row3' },
+      field('Remote Mode', select('remote_mode', s.remote_mode || 'auto', [['auto', 'Auto: when a verified remote viewer connects'], ['on', 'On now'], ['off', 'Off']])),
+      field('Model weights on the GPU', h('input', { type: 'number', 'data-k': 'remote_gpu_weight_fraction', value: s.remote_gpu_weight_fraction ?? 0.8, step: 0.05, min: 0.05, max: 1 }), 'Share of the weight bytes, 0.05 to 1. Not the share of VRAM freed.'),
+      field('Also keep free (MB)', num('remote_min_free_vram_mb', s.remote_min_free_vram_mb ?? 0, 256), '0 = no extra rule')),
+    h('div', { class: 'row2' },
+      field('Switch after (s)', num('remote_debounce_s', s.remote_debounce_s ?? 8, 1), 'A viewer must stay connected this long.'),
+      field('Restore after (s)', num('remote_restore_cooldown_s', s.remote_restore_cooldown_s ?? 90, 5), 'After the last viewer leaves; a reconnect in this time changes nothing.')),
+    h('div', { class: 'field' }, h('label', {}, 'Detect'), h('div', { style: 'display:flex;gap:14px;flex-wrap:wrap' },
+      ptoggle('rdp', 'Windows Remote Desktop'), ptoggle('logind', 'Linux remote logins (logind, xrdp)'), ptoggle('rustdesk', 'RustDesk')), pbox),
+    toggle('remote_allow_probable', s.remote_allow_probable, 'Also act on likely but unverified signs (RustDesk\'s connection window: RustDesk offers no verified way to tell)'),
+  ];
 }
 
 // ---------------------------------------------------------------- forever-loop
@@ -1969,8 +2186,10 @@ function buildDash() {
   D.cMem = dcard('Memory · tools', D.mkv.el, D.mcp);
   D.loopTxt = h('div');
   D.cLoop = dcard('Forever-loop', D.loopTxt);
-  dash.append(D.cModels, D.cLoop, D.cGpu, D.cCpu, D.cSpeed, D.cTokens, D.cReviews, D.cCloud, D.cMem);
-  D.cLoop.classList.add('hidden');
+  D.rmkv = h('div', { class: 'kvs' });
+  D.cRemote = dcard('Remote Mode', D.rmkv);
+  dash.append(D.cModels, D.cLoop, D.cRemote, D.cGpu, D.cCpu, D.cSpeed, D.cTokens, D.cReviews, D.cCloud, D.cMem);
+  D.cLoop.classList.add('hidden'); D.cRemote.classList.add('hidden');
 }
 
 function sparkSvg(vals) {
@@ -2024,6 +2243,18 @@ function renderDash(d) {
   D.cModels.r.textContent = nwork ? `${nwork} agent${nwork === 1 ? '' : 's'} working` : eng.model ? 'ready' : '';
   const ctl = agentList.find(a => a.controlling && LIVE_ST.has(a.status));
   S.ctl.other = ctl ? ctl.controlling : null; renderControl();
+  // Remote Mode
+  const rm = d.remote || {}, rmp = rm.policy || {};
+  const rmOn = rmp.state && rmp.state !== 'NORMAL' || /^remote_/.test(rm.detector?.state || '');
+  D.cRemote.classList.toggle('hidden', !rmOn);
+  if (rmOn) {
+    const sig = JSON.stringify([rmp.state, rmp.measured, rmp.plan, rm.detector?.state, rm.vram, rmp.wait_note]);
+    if (sig !== D.rmSig) {
+      D.rmSig = sig; D.rmkv.innerHTML = '';
+      for (const [k, v] of remoteRows(rm).slice(0, 7)) D.rmkv.append(h('span', {}, k), h('b', { style: 'font-weight:500;text-align:right' }, v));
+    }
+    D.cRemote.r.textContent = RM_STATE[rmp.state] || '';
+  }
   // loop
   const lp = S.loop;
   D.cLoop.classList.toggle('hidden', !lp.active);
@@ -2113,7 +2344,7 @@ async function loadCloud() {
 }
 
 // ---------------------------------------------------------------- settings
-const SECTIONS = ['General', 'Router', 'Claude', 'ChatGPT', 'GitHub', 'Plugins & MCP', 'Skills', 'Model & tuning', 'Tools', 'Privacy & offline', 'Memory', 'Appearance', 'Hugging Face', 'Updates', 'About'];
+const SECTIONS = ['General', 'Router', 'Claude', 'ChatGPT', 'GitHub', 'Plugins & MCP', 'Skills', 'Model & tuning', 'Tools', 'Apps', 'Privacy & offline', 'Memory', 'Appearance', 'Hugging Face', 'Updates', 'About'];
 async function openSettings(start = 'General') {
   if (typeof start !== 'string') start = 'General';
   const s = await api('/api/state').then(r => r.settings);
@@ -2170,8 +2401,10 @@ async function openSettings(start = 'General') {
         h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
           e.model ? h('button', { class: 'btn ghost', onclick: () => { closeModal(); loadModel(e.model.id, true); } }, 'Re-tune current model now') : null,
           h('button', { class: 'btn ghost', onclick: () => { closeModal(); openLab(); } }, 'Open Performance Lab')),
+        ...remoteSection(s),
       ];
     },
+    'Apps': () => appsSection(),
     'Tools': () => {
       const box = h('div');
       box.append(toggle('tools_enabled', s.tools_enabled, 'Enable tools (agent mode)'),
@@ -2180,6 +2413,10 @@ async function openSettings(start = 'General') {
           field('Max tool steps per reply', num('agent_max_steps', s.agent_max_steps, 1)),
           field('Screenshots kept as images', num('keep_screenshots', s.keep_screenshots, 1), 'Older ones are dropped from context to save tokens.')),
         field('Max tool steps per subagent', num('subagent_max_steps', s.subagent_max_steps ?? 20, 1), 'A subagent has to report back after this many steps.'),
+        toggle('strict_background', s.strict_background, 'Strict Background Only: never use my real mouse and keyboard, not even when I allow it'),
+        h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 12px' }, 'Background control (UI Automation, window messages, Aero\'s browser) keeps working. Anything that would need your input stops and says so instead.'),
+        field('Aero\'s browser', select('browser_mode', s.browser_mode || 'background', [['background', 'In the background: no window, nothing on screen'], ['visible', 'Visible: a window you can watch']]),
+          'Either way it is Aero\'s own browser profile, not your browser. When a page needs your sign-in, the model opens it in a visible window so you can sign in yourself.'),
         h('label', { style: 'font-weight:600;font-size:13px;display:block;margin:6px 0' }, 'Permissions'));
       const pol = { ...s.tool_policy };
       api('/api/tools').then(t => {

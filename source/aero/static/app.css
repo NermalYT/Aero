@@ -1061,3 +1061,29 @@ pre.diff .fh { color: var(--heading); font-weight: 600; }
 .learn-row .learn-side { font-weight: 700; width: 16px; text-align: center; flex: none; }
 .learn-row.worked .learn-side { color: var(--ok); }
 .learn-row.failed .learn-side { color: var(--bad); }
+
+/* ---- v1.1: questions, foreground control, steps, verification badges, Remote Mode ---- */
+.qcard { border-radius: 14px; padding: 10px 14px; margin: 8px 0; font-size: 13px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 12%, var(--glass-3)), var(--glass-2)); border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); box-shadow: var(--hi); }
+.qcard.done { background: var(--glass-2); border-color: var(--line2); }
+.qcard .qh { display: flex; align-items: center; gap: 7px; }
+.qcard .qh .ico svg { width: 16px; height: 16px; }
+.qcard .qt { margin: 6px 0 2px; font-size: 14px; color: var(--text); }
+.qcard .qa { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.qcard .qa input { flex: 1; min-width: 160px; height: var(--ctl-h-sm); }
+.qcard .qans { margin-top: 6px; color: var(--muted); }
+.approve.fg { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.approve.fg .q b { color: var(--warn); }
+.vbadge { font-size: 11px; padding: 1px 7px; border-radius: var(--r-pill); border: 1px solid currentColor; margin-left: 6px; white-space: nowrap; }
+.vbadge.ok { color: var(--ok); } .vbadge.warn { color: var(--warn); } .vbadge.bad { color: var(--bad); }
+.tasks { margin: 4px 0 8px; font-size: 12.5px; color: var(--muted); }
+.tasks summary { cursor: pointer; }
+.tasks ol { margin: 6px 0 0; padding-left: 20px; max-height: 220px; overflow: auto; }
+.tasks li { margin: 1px 0; }
+.tasks .tsst { display: inline-block; min-width: 92px; font-variant-numeric: tabular-nums; }
+.tasks .ts-completed .tsst { color: var(--ok); } .tasks .ts-running .tsst, .tasks .ts-waiting_for_user .tsst { color: var(--warn); }
+.tasks .ts-failed .tsst, .tasks .ts-cancelled .tsst { color: var(--bad); }
+.sub-h { display: flex; align-items: center; gap: 7px; margin: 18px 0 4px; font-size: 14px; color: var(--heading); }
+.sub-h .ico svg { width: 16px; height: 16px; }
+.app-results { margin: 0 0 12px; }
+#controlBar.fg { background: linear-gradient(180deg, #ffd27a, var(--warn)); }
+@media (prefers-reduced-motion: reduce) { .qcard, .tasks { transition: none; } }

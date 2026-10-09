@@ -207,3 +207,85 @@ def kv_mb(meta: dict, ctx: int, kv_type: str = "q8_0") -> float:
     g = meta.get("swa_global", 1.0)
     eff = g * ctx + (1 - g) * min(ctx, (meta.get("sliding_window") or ctx) + 512)
     return kv_bytes_per_token(meta, kv_type) * eff / 2**20
+
+
+# ---- tensor layout (for Remote Mode's weight split) ------------------------------------------------------------
+
+def read_tensors(path):
+    """[(name, bytes)] for every tensor in a GGUF (all shards of a split file). Sizes come from the distance between
+    tensor offsets in the data section, so they are exact for every quantization type, including ones this reader
+    has never heard of (the last tensor of each shard runs to the end of the file)."""
+    out = []
+    for part in split_parts(Path(path)):
+        with open(part, "rb") as f:
+            r = _Reader(f)
+            if r.read(4) != b"GGUF":
+                raise ValueError("not a GGUF file")
+            r.u32()
+            n_tensors, n_kv = r.u64(), r.u64()
+            align = 32
+            for _ in range(n_kv):
+                key = r.string()
+                t = r.u32()
+                val = r.value(t)
+                if key == "general.alignment" and isinstance(val, int) and val > 0:
+                    align = val
+            infos = []
+            for _ in range(n_tensors):
+                name = r.string()
+                nd = r.u32()
+                for _d in range(nd):
+                    r.u64()
+                r.u32()                                       # ggml type
+                infos.append((name, r.u64()))
+            here = f.tell()
+            data_start = (here + align - 1) // align * align
+            end = f.seek(0, 2)
+        infos.sort(key=lambda x: x[1])
+        for i, (name, off) in enumerate(infos):
+            nxt = infos[i + 1][1] if i + 1 < len(infos) else end - data_start
+            out.append((name, max(0, nxt - off)))
+    return out
+
+
+_BLK = re.compile(r"^blk\.(\d+)\.")
+
+
+def layer_bytes(path, mtp_used=False):
+    """How a model's weight bytes split up: {n_layer, layers: [bytes of blk.i], experts: [bytes of blk.i's MoE expert
+    tensors], output (output.weight + output_norm), embd (token_embd, which llama.cpp keeps on the CPU), other,
+    nextn (multi-token-prediction blocks: llama.cpp counts them as layers but only loads them when MTP speculative
+    decoding is on, so they weigh 0 unless mtp_used), total}. Current llama.cpp counts the output layer as one of -ngl's layers and places it first: -ngl N puts the
+    output layer and the last N-1 repeating layers on the GPU. --n-cpu-moe N keeps the experts of the first N layers
+    on the CPU."""
+    layers, experts = {}, {}
+    out = {"output": 0, "embd": 0, "other": 0, "total": 0, "nextn": 0}
+    kv = read_metadata(split_parts(Path(path))[0])
+    arch = kv.get("general.architecture", "llama")
+    blocks = int(kv.get(f"{arch}.block_count") or 0)
+    n_mtp = int(kv.get(f"{arch}.nextn_predict_layers") or 0)
+    main = blocks - n_mtp if blocks and n_mtp else 0
+    for name, n in read_tensors(path):
+        m = _BLK.match(name)
+        if m and main and int(m.group(1)) >= main:
+            out["nextn"] += n
+            if not mtp_used:
+                layers.setdefault(int(m.group(1)), 0)
+                continue
+        out["total"] += n
+        if m:
+            i = int(m.group(1))
+            layers[i] = layers.get(i, 0) + n
+            if "_exps" in name:                              # MoE expert tensors (not shared experts)
+                experts[i] = experts.get(i, 0) + n
+        elif name.startswith("token_embd"):
+            out["embd"] += n
+        elif name.startswith("output"):
+            out["output"] += n
+        else:
+            out["other"] += n
+    nl = (max(layers) + 1) if layers else 0
+    out["n_layer"] = nl
+    out["layers"] = [layers.get(i, 0) for i in range(nl)]
+    out["experts"] = [experts.get(i, 0) for i in range(nl)]
+    return out

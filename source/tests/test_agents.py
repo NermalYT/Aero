@@ -62,7 +62,18 @@ class Control(unittest.TestCase):
     def test_target_names(self):
         self.assertEqual(control.target("open_app", {"target": "notepad"}), ("Notepad", None))
         self.assertEqual(control.target("open_app", {"target": r"C:\Windows\notepad.exe"}), ("Notepad", None))
-        self.assertEqual(control.target("browser_click", {}), ("the browser", None))
+        self.assertEqual(control.target("browser_click", {}), ("Aero's browser", None))
+        # v1.1: how it is controlled is part of the message, and background work never claims the user's input
+        self.assertEqual(control.phrase("Qwen", "Notepad", "ACCESSIBILITY_BACKGROUND"),
+                         "Qwen is controlling Notepad in the background")
+        self.assertEqual(control.phrase("Qwen", "Notepad", "FOREGROUND_CONSENT_REQUIRED"),
+                         "Qwen is controlling Notepad with your mouse and keyboard")
+        self.assertEqual(control.phrase("Qwen", "Aero's browser", "BROWSER_ISOLATED"),
+                         "Qwen is using Aero's browser in the background")
+        self.assertEqual(control.mode_of("mouse_click", {}), "FOREGROUND_CONSENT_REQUIRED")
+        self.assertEqual(control.mode_of("app_click", {"element": 3}), "ACCESSIBILITY_BACKGROUND")
+        self.assertEqual(control.mode_of("app_click", {"element": 3, "input": "real"}, physical=True),
+                         "FOREGROUND_CONSENT_REQUIRED")
         self.assertEqual(control.target("focus_window", {"title": "notes.txt - Notepad"}), ("Notepad", None))
         self.assertEqual(control.short_app("Inbox (3) - me@example.com - Outlook"), "Outlook")
 
@@ -132,7 +143,7 @@ class Listing(unittest.TestCase):
         agents.note("c1", {"t": "control", "by": "Qwen", "target": "Notepad"})
         row = agents.listing()[0]
         self.assertEqual(row["doing"], "Waiting for Photo Scout")
-        self.assertEqual(row["controlling"], {"by": "Qwen", "target": "Notepad"})
+        self.assertEqual({k: row["controlling"][k] for k in ("by", "target")}, {"by": "Qwen", "target": "Notepad"})
         self.assertEqual((row["subs"][0]["status"], row["subs"][0]["doing"]), ("working", "Listing Desktop"))
         agents.finish("c1", "stopped", "")
         row = agents.listing()[0]
@@ -220,8 +231,9 @@ class Turn(unittest.TestCase):
         self.assertTrue(report["message"]["content"].startswith("Report from subagent Photo Scout:"))
         ctl = next(e for e in evs if e["t"] == "control")
         self.assertEqual((ctl["by"], ctl["target"], ctl["tool"]), ("Qwen3.8-27B", "Notepad", "open_app"))
+        self.assertEqual((ctl["mode"], ctl["text"]), ("LAUNCH", "Qwen3.8-27B is opening Notepad"))
         self.assertEqual(kinds[-2:], ["control_end", "done"])
-        self.assertEqual(self.banners, ["Qwen3.8-27B is controlling Notepad", None])
+        self.assertEqual(self.banners, [None, None])          # starting an app puts no banner over the screen
         live = agents.LIVE["turn-1"]
         self.assertEqual((live["name"], live["status"], live["controlling"]), ("Photo Renamer", "done", None))
         self.assertEqual(live["subs"][start["id"]]["status"], "done")

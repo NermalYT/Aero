@@ -112,7 +112,10 @@ _DOING = {
     "browser_click": "Clicking", "browser_type": "Typing", "browser_select": "Choosing", "browser_press": "Pressing",
     "browser_scroll": "Scrolling", "browser_back": "Going back", "browser_screenshot": "Looking at the page",
     "browser_read": "Reading the page", "recall": "Recalling", "remember": "Remembering", "use_skill": "Loading skill",
-    "run_subagent": "Waiting for", "load_tools": "Loading tools",
+    "run_subagent": "Waiting for", "load_tools": "Loading tools", "app_find": "Finding", "app_launch": "Opening",
+    "browser_read_sections": "Reading the page", "browser_extract": "Reading data from the page",
+    "browser_tabs": "Switching tabs", "browser_wait_for": "Waiting for", "ask_user": "Asking you",
+    "get_answer": "Waiting for your answer", "meeting_doc": "Writing the meeting document",
 }
 
 
@@ -225,7 +228,17 @@ def note(chat_id, ev):
             if target.get("status") == "waiting":
                 target["status"] = "working"
         elif t == "control":
-            a["controlling"] = {"by": ev.get("by"), "target": ev.get("target")}
+            a["controlling"] = {"by": ev.get("by"), "target": ev.get("target"), "mode": ev.get("mode"),
+                                "text": ev.get("text")}
+        elif t == "foreground_request":
+            target["status"] = "waiting"
+            target["doing"] = f"Needs your permission to use the mouse and keyboard in {ev.get('target') or 'an app'}"
+        elif t == "question":
+            q = ev.get("question") or {}
+            target["doing"] = _clip("Asked you: " + (q.get("text") or ""), 140)
+        elif t == "waiting":
+            target["status"] = "waiting"
+            target["doing"] = _clip("Waiting for your answer: " + (ev.get("text") or ""), 140)
         elif t == "review" and not sid:
             m = ev.get("message") or {}
             a["doing"] = f"Review by {m.get('model') or 'the reviewer'}: {m.get('verdict')}"
