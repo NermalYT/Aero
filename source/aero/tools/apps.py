@@ -167,6 +167,8 @@ if IS_WIN:
                     ("hwndCapture", H), ("hwndMenuOwner", H), ("hwndMoveSize", H), ("hwndCaret", H),
                     ("rcCaret", wt.RECT)]
     _sig(user32.GetGUIThreadInfo, wt.BOOL, wt.DWORD, ctypes.POINTER(GUITHREADINFO))
+    _sig(user32.GetParent, H, H)
+    _sig(user32.GetDlgCtrlID, ctypes.c_int, H)
 
     class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [("biSize", wt.DWORD), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
@@ -193,6 +195,82 @@ POSTED_INPUT_IGNORED = ("chrome_widgetwin", "chrome_renderwidgethosthwnd", "appl
 
 class StaleElement(ValueError):
     pass
+
+
+_STEALS = set()          # (process name, control type, pattern) seen bringing its window to the front
+
+
+def _steal_key(c, how):
+    try:
+        return (_proc_name(c.ProcessId).lower(), c.ControlTypeName, how)
+    except Exception:
+        return None
+
+
+class FocusGuard:
+    """Some UI Automation providers focus or activate the window they act on (measured on Windows 11: the Win32 Edit
+    proxy's ValuePattern.SetValue brings its window to the front). A background action must not change the window
+    in front, so every pattern call runs inside this guard: when the window in front changed during the call and the
+    user didn't touch the mouse or keyboard meanwhile, the previous window is put back with SetForegroundWindow (no
+    synthetic input), and the result says what happened."""
+
+    def __init__(self, settle=False):
+        self.settle = settle          # whole actions: posted messages act a little later, so look again after a pause
+
+    def __enter__(self):
+        self.before = user32.GetForegroundWindow()
+        self.t0 = time.monotonic()
+        self.changed = False
+        self.restored = None
+        return self
+
+    def __exit__(self, *a):
+        if self.settle is False:
+            return self._check()
+        if self.settle:
+            time.sleep(0.15)
+            return self._check()
+        return False
+
+    def report(self, res):
+        """Add what happened to the window in front to a tool result (whole-action guard)."""
+        if not self.changed or not isinstance(res, dict):
+            return res
+        t = self.note().strip(" ()")
+        res["text"] = (res.get("text") or "") + "\n" + t[:1].upper() + t[1:] + "."
+        env = res.get("envelope")
+        if isinstance(env, dict):
+            env["focus"] = {"changed": True, "restored": self.restored}
+        return res
+
+    def _check(self):
+        now = user32.GetForegroundWindow()
+        if self.before and now != self.before:
+            self.changed = True
+            from .. import input_guard
+            idle = input_guard.idle_ms()
+            took = (time.monotonic() - self.t0) * 1000 + 50
+            if idle is None or idle >= took:              # nobody touched the input during the call: it was us
+                user32.SetForegroundWindow(self.before)
+                time.sleep(0.05)
+                self.restored = user32.GetForegroundWindow() == self.before
+                # When Windows' foreground lock refuses this, Aero does not go further: UI Automation's SetFocus would
+                # work, but it injects a keystroke (it resets the user's last-input time; measured on Windows 11).
+        return False
+
+    def note(self):
+        if not self.changed:
+            return ""
+        if self.restored:
+            return " (the app came to the front when UI Automation acted on it; Aero put your window back)"
+        if self.restored is False:
+            return " (the app came to the front when UI Automation acted on it and Aero could not put your window back)"
+        return ""
+
+    def apply(self, env):
+        if self.changed and env is not None:
+            env["focus"] = {"changed": True, "restored": self.restored}
+        return env
 
 
 def _win_only():
@@ -379,7 +457,8 @@ def _capture(hwnd):
 
 def _thumb(im):
     try:
-        return list(im.convert("L").resize((24, 24)).getdata())
+        small = im.convert("L").resize((24, 24))
+        return list(small.get_flattened_data() if hasattr(small, "get_flattened_data") else small.getdata())
     except Exception:
         return None
 
@@ -963,7 +1042,9 @@ def app_view(ctx, window="", find="", zoom=None, elements=True, restore=False):
 def app_click(ctx, element=None, x=None, y=None, button="left", clicks=1, input="auto", look=True):
     before = _snapshot_windows()
     try:
-        return _after(ctx, _click(ctx, element, x, y, button, clicks, input), before, look)
+        with FocusGuard(settle=input != "real" if "app_click" != "app_scroll" else True) as fg:
+            res = _after(ctx, _click(ctx, element, x, y, button, clicks, input), before, look)
+        return fg.report(res)
     except StaleElement as e:
         return {"text": str(e), "error": True}
 
@@ -981,11 +1062,14 @@ def _click(ctx, element, x, y, button, clicks, input):
             sx, sy = _center(c)
             _show_cursor(sx, sy, "click", f"[{element}] {c.Name[:30]}")
             if input != "real" and button == "left":
-                how, verified, method = _uia_press(c, clicks)
+                with FocusGuard() as fg:
+                    how, verified, method = _uia_press(c, clicks)
+                if fg.changed and how:
+                    _STEALS.add(_steal_key(c, how))
                 if how:
-                    env = action_results.make("accessibility_background", verified=verified, method=method,
-                                              mode="ACCESSIBILITY_BACKGROUND", target={"window_id": hwnd})
-                    return f"Pressed [{element}] \"{c.Name}\" via {how} (no real mouse).", env
+                    env = fg.apply(action_results.make("accessibility_background", verified=verified, method=method,
+                                                       mode="ACCESSIBILITY_BACKGROUND", target={"window_id": hwnd}))
+                    return f"Pressed [{element}] \"{c.Name}\" via {how} (no real mouse).{fg.note()}", env
         elif x is not None and y is not None:
             sx, sy = _to_screen(sess, x, y)
             _show_cursor(sx, sy, "click")
@@ -1020,12 +1104,19 @@ def _ui_state(c):
 
 
 def _uia_press(c, clicks):
-    """Press a control without the mouse. Returns (how, verified, method)."""
+    """Press a control without the mouse. Returns (how, verified, method).
+
+    Classic push buttons get the notification their window handles (WM_COMMAND / BN_CLICKED to the parent): BM_CLICK
+    and UI Automation's Invoke on them simulate a mouse press, which makes Windows bring an inactive window to the
+    front (measured on Windows 11)."""
     try:
         nh = c.NativeWindowHandle
         if clicks == 1 and nh and c.ControlTypeName == "ButtonControl" and _class(nh).lower() == "button":
-            if user32.PostMessageW(nh, 0x00F5, 0, 0):  # BM_CLICK, posted so a dialog it opens can't block us
-                return "button click message", None, ""
+            style = user32.GetWindowLongW(nh, -16) & 0x0F                  # BS_TYPEMASK
+            parent, cid = user32.GetParent(nh), user32.GetDlgCtrlID(nh)
+            if style in (0, 1) and parent and cid:                          # BS_PUSHBUTTON, BS_DEFPUSHBUTTON
+                if user32.PostMessageW(parent, 0x0111, (0 << 16) | (cid & 0xFFFF), nh):   # WM_COMMAND, BN_CLICKED
+                    return "button command (BN_CLICKED)", None, ""
     except Exception:
         pass
     before = _ui_state(c)
@@ -1035,6 +1126,8 @@ def _uia_press(c, clicks):
                       ("Expand/Collapse", lambda: _expand_toggle(c)),
                       ("default action", lambda: c.GetLegacyIAccessiblePattern().DoDefaultAction())):
         if clicks > 1 and name != "Invoke":
+            continue
+        if _steal_key(c, name) in _STEALS:       # this app's control took focus with this pattern before
             continue
         try:
             act()
@@ -1073,7 +1166,9 @@ def _expand_toggle(c):
 def app_type(ctx, text, element=None, mode="append", enter=False, input="auto", look=True):
     before = _snapshot_windows()
     try:
-        return _after(ctx, _type(ctx, text, element, mode, enter, input), before, look)
+        with FocusGuard(settle=input != "real" if "app_type" != "app_scroll" else True) as fg:
+            res = _after(ctx, _type(ctx, text, element, mode, enter, input), before, look)
+        return fg.report(res)
     except StaleElement as e:
         return {"text": str(e), "error": True}
 
@@ -1100,27 +1195,37 @@ def _type(ctx, text, element, mode, enter, input):
             env = action_results.make("physical_input", mode="FOREGROUND_CONSENT_REQUIRED", target={"window_id": hwnd})
             return f"Typed {len(text)} chars with the real keyboard" + (" + Enter" if enter else ""), env
         tail = ""
-        if c is not None:
-            # 1. UI Automation ValuePattern: set and read back
+        native = None
+        try:
+            native = c.NativeWindowHandle if c is not None else None
+        except Exception:
+            native = None
+        if c is not None and not _is_classic_edit(native):
+            # 1. UI Automation ValuePattern: set and read back (classic Win32 edits skip this: their UI Automation
+            #    proxy activates the window, while WM_SETTEXT below never does)
             try:
-                vp = c.GetValuePattern()
+                vp = c.GetValuePattern() if _steal_key(c, "SetValue") not in _STEALS else None
                 if vp and not vp.IsReadOnly:
                     old = vp.Value or ""
                     want = text if mode == "replace" else old + text
-                    vp.SetValue(want)
+                    with FocusGuard() as fg:
+                        vp.SetValue(want)
+                    if fg.changed:
+                        _STEALS.add(_steal_key(c, "SetValue"))
                     time.sleep(0.05)
                     got = _read_field(c, None)
                     ok = None if got is None else _norm_nl(got) == _norm_nl(want)
                     if enter:
-                        _post_key(c.NativeWindowHandle or _focus_hwnd(hwnd), 0x0D)
+                        _post_key(native or _focus_hwnd(hwnd), 0x0D)
                         tail = " + Enter (sent in the background)"
-                    env = action_results.make("accessibility_background", verified=ok, method="the field's value "
-                                              "read back", mode="ACCESSIBILITY_BACKGROUND", target={"window_id": hwnd})
-                    return f"Set [{element}] to {'' if mode == 'replace' else '…'}{text[:80]!r}{tail}", env
+                    env = fg.apply(action_results.make("accessibility_background", verified=ok, method="the field's "
+                                                       "value read back", mode="ACCESSIBILITY_BACKGROUND",
+                                                       target={"window_id": hwnd}))
+                    return f"Set [{element}] to {'' if mode == 'replace' else '…'}{text[:80]!r}{tail}{fg.note()}", env
             except Exception:
                 pass
-        target = (c.NativeWindowHandle if c is not None and c.NativeWindowHandle else None) or _focus_hwnd(hwnd)
-        # 2. classic Win32 edit control: WM_SETTEXT, read back with WM_GETTEXT
+        target = native or _focus_hwnd(hwnd)
+        # 2. classic Win32 edit control: WM_SETTEXT, read back with WM_GETTEXT (no focus, no activation)
         if _is_classic_edit(target):
             old = get_text(target)
             if old is not None:
@@ -1166,7 +1271,9 @@ def _type(ctx, text, element, mode, enter, input):
 @_on_ui_thread
 def app_keys(ctx, keys, input="auto", look=True):
     before = _snapshot_windows()
-    return _after(ctx, _keys(ctx, keys, input), before, look)
+    with FocusGuard(settle=not (input == "real" or has_chord(keys))) as fg:
+        res = _after(ctx, _keys(ctx, keys, input), before, look)
+    return fg.report(res)
 
 
 def has_chord(keys):
@@ -1217,7 +1324,9 @@ def _keys(ctx, keys, input):
 def app_scroll(ctx, amount, element=None, x=None, y=None, look=True):
     before = _snapshot_windows()
     try:
-        return _after(ctx, _scroll(ctx, amount, element, x, y), before, look)
+        with FocusGuard(settle=input != "real" if "app_scroll" != "app_scroll" else True) as fg:
+            res = _after(ctx, _scroll(ctx, amount, element, x, y), before, look)
+        return fg.report(res)
     except StaleElement as e:
         return {"text": str(e), "error": True}
 
@@ -1236,13 +1345,15 @@ def _scroll(ctx, amount, element, x, y):
                 sp = c.GetScrollPattern()
                 if sp and sp.VerticallyScrollable:
                     before = sp.VerticalScrollPercent
-                    for _ in range(abs(amount)):
-                        sp.Scroll(3, 4 if amount > 0 else 1)      # NoAmount / SmallIncrement / SmallDecrement
+                    with FocusGuard() as fg:
+                        for _ in range(abs(amount)):
+                            sp.Scroll(3, 4 if amount > 0 else 1)  # NoAmount / SmallIncrement / SmallDecrement
                     _show_cursor(sx, sy, "move")
                     after = c.GetScrollPattern().VerticalScrollPercent
-                    env = action_results.make("accessibility_background", verified=after != before,
-                                              method="scroll position read back", mode="ACCESSIBILITY_BACKGROUND")
-                    return f"Scrolled [{element}] {amount} ({before:.0f}% -> {after:.0f}%)", env
+                    env = fg.apply(action_results.make("accessibility_background", verified=after != before,
+                                                       method="scroll position read back",
+                                                       mode="ACCESSIBILITY_BACKGROUND"))
+                    return f"Scrolled [{element}] {amount} ({before:.0f}% -> {after:.0f}%){fg.note()}", env
             except Exception:
                 pass
         elif x is not None and y is not None:
