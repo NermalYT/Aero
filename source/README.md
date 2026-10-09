@@ -290,8 +290,39 @@ When a model sends input (clicks, typing, keys, scrolling, opening or switching 
 "*model* is controlling *app*" in a header across the top of its window with a **Stop** button, and the same banner
 at the top of the app being controlled (or of the screen). Looking (screenshots, reading an app or page) doesn't
 count. The banner over the other app never takes focus, is left out of screenshots so the model never sees or
-clicks it, and moves to the bottom of the window when the model needs the spot it covers. Stop on either one stops
-every running task and denies any pending approval. Both go away when the turn ends.
+clicks it, and moves to the bottom of the window when the model needs the spot it covers. The stop button under the message
+box stops that chat's task; Stop on the header and on the banner stops every running task. Stopping denies the
+pending approvals of what it stops (and only those), releases the windows and input it held, closes its browser tab,
+and the chat lists what finished and what didn't. In 1.1 the text says how the model works: "… in the background", "… with your mouse and keyboard" (only after
+you allowed it), "… is using Aero's browser in the background" (no banner over your screen), "… is opening …".
+
+### Apps by name
+
+Aero keeps a list of the apps installed on this computer (Windows: Start menu, Installed apps, App Paths, Store apps
+and link handlers; Linux: `.desktop` files; macOS: `/Applications`), re-read after something is installed or
+removed. When a message names an app ("open my Bloxstrap", "in Excel", "on Spotify"), the model is told which program
+it is, whether it runs, and how to start it. `app_find` lists matches with a confidence; `app_launch` starts one
+(without taking your focus where the app allows) and reports whether a new process or window of it really appeared.
+Settings → **Apps**: search, add your own names ("my game launcher" → bloxstrap), see and forget launches that worked.
+Programs in Downloads, temp folders or network shares need your OK first.
+
+### Questions while it works
+
+When one detail is missing and a wrong guess would matter, the model asks with a card in the chat (choices or free
+text) and keeps doing the rest. Answer whenever you like; if the reply already finished, your answer is sent into the
+same chat and the task continues from it. A step list at the top of each reply shows what is done, running or
+waiting for you.
+
+### Remote Mode
+
+While someone views or controls this PC over **Windows Remote Desktop** (or a Linux remote login), Aero can move part
+of the main model to the CPU so the remote session has GPU memory, and restore your profile when the last viewer has
+been gone for 90 seconds (a quick reconnect changes nothing). The default keeps 80 % of the model's weight bytes on
+the GPU; on an RTX 5080 with a 27B model that freed 1.7 GB of VRAM and cut generation from 59 to 21 tok/s. Each
+switch restarts the model server: a reply in progress finishes first and new messages wait. RustDesk offers no
+verified way to see viewers, so its connection window only counts if you allow likely-but-unverified signs. Settings
+→ Model & tuning → Remote Mode shows what was detected, the target and the measured share, the model's GPU memory and
+free VRAM.
 
 ### Performance Lab and HAPO
 
@@ -392,9 +423,11 @@ and tool calls, review verdicts, ChatGPT and Claude usage and spending today, an
 | Read files | `list_dir`, `read_file`, `find_files`, `search_files` | auto |
 | Write files | `write_file`, `edit_file`, `move_path`, `delete_path` | **ask** |
 | Shell | `run_command` (PowerShell or cmd) | **ask** |
-| Screen and app view | `screenshot`, `list_windows`, `wait`, `app_list`, `app_view`, `app_read` | auto |
-| Desktop and app control | `mouse_click`, `mouse_move`, `mouse_drag`, `scroll`, `type_text`, `press_keys`, `focus_window`, `open_app`, `app_click`, `app_type`, `app_keys`, `app_scroll` | **ask** |
-| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_select`, `browser_press`, `browser_scroll`, `browser_back`, `browser_screenshot`, `browser_read` | auto |
+| Screen and app view | `screenshot`, `list_windows`, `wait`, `app_list`, `app_view`, `app_read`, `app_find` | auto |
+| Desktop and app control | `mouse_click`, `mouse_move`, `mouse_drag`, `scroll`, `type_text`, `press_keys`, `focus_window`, `open_app`, `app_launch`, `app_click`, `app_type`, `app_keys`, `app_scroll` | **ask** |
+| Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_select`, `browser_press`, `browser_scroll`, `browser_back`, `browser_screenshot`, `browser_read`, `browser_read_sections`, `browser_extract`, `browser_tabs`, `browser_wait_for` | auto |
+| Documents | `meeting_doc` (in Write files) | **ask** |
+| Questions | `ask_user`, `get_answer` | auto |
 | Web | `web_search`, `fetch_url` | auto |
 | Memory | `remember`, `recall`, `forget` | auto |
 | Skills | `use_skill` | auto |
@@ -405,10 +438,18 @@ and tool calls, review verdicts, ChatGPT and Claude usage and spending today, an
   Change any category in Settings → Tools. Aero runs as administrator, so approved shell and file actions have admin
   rights; leave them on *ask* unless you trust the model.
 - **App control**: pick a window with the **App** button (or name the app). The model sees only that window, even
-  when covered, plus a numbered list of its controls; clicks and typing go to it in the background, so your mouse
-  and keyboard stay yours. A blue **Aero** cursor shows where it is acting, and the "is controlling" header and
-  banner (above) carry a Stop button. Slam the real mouse into a screen corner to abort desktop control.
-- The browser is a visible Edge window with its own profile (`C:\Aero\data\browser-profile`).
+  when covered, plus a numbered list of its controls and the window's **control mode**: background through UI
+  Automation, background through window messages, needs foreground control, or read-only (programs running as
+  administrator). Values are read back after they are set, and input the app ignored is reported as failed. A blue
+  **Aero** cursor shows where it is acting.
+- **Your real mouse and keyboard** (`mouse_*`, `type_text`, `press_keys`, `focus_window`, `input="real"`, and
+  ctrl/alt/win shortcuts) need **Foreground control required → Allow once / Allow for this task** first (a desktop
+  permission of *auto* counts as standing permission). Aero waits until you stop typing, never lets two agents use
+  them at once, and puts your window back afterwards. **Strict Background Only** in Settings → Tools refuses them
+  completely. Slam the real mouse into a screen corner to abort pyautogui.
+- **The browser** is Aero's own profile (`C:\Aero\data\browser-profile`), in the background by default (Settings →
+  Tools → Aero's browser); a visible window opens when you ask to watch or need to sign in. Each agent has its own
+  tab.
 
 ## Folders
 

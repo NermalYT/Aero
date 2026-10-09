@@ -1,5 +1,135 @@
 # Changelog
 
+## Aero 1.1.0 (2026-10-09)
+
+Real app work: Aero knows which apps you have, acts in other apps without taking your input or focus (and says so
+when it can't), reads whole pages, asks small questions while the rest of the task keeps going, and frees GPU memory
+while someone views your PC over Remote Desktop. Design, measurements and limits: `docs/V1.1_ARCHITECTURE.md`,
+`docs/V1.1_PERFORMANCE_REPORT.md`, `docs/V1.1_TEST_MATRIX.md`, `docs/V1.1_LIMITATIONS.md`.
+
+### Apps by name
+
+- **App registry** (`app_registry.py`, `app_catalog.py`). Windows: Start-menu shortcuts (read without COM), the
+  Installed apps list, App Paths, link-scheme handlers and `Get-StartApps` (Store apps); Linux: `.desktop` files;
+  macOS: `/Applications`. About 400 ms for 222 apps on the test PC, cached in `data/apps.json` and re-scanned when
+  something is installed or removed.
+- **`app_find`** ranks matches with a confidence and a reason, flags two equally good matches as ambiguous, and
+  keeps apart apps that belong together but aren't the same (Bloxstrap is not Roblox, but Roblox links open through
+  it).
+- **`app_launch`** starts an app without taking your focus where the app allows it, with an app link when given
+  (`roblox://experiences/start?placeId=…`), and reports what really happened: a new process or window of the app,
+  the app already running, or nothing. Launch methods that worked are remembered per computer (method only) and
+  forgotten when the program changes. Programs in Downloads, temp folders or network shares need your OK.
+- Names in a message ("open my Bloxstrap", "in Word", "on Spotify") are found without a model call and passed to
+  the model with how to open them; common words only count when written like a name or after "open", "my", "in"….
+- Settings → **Apps**: search, your own names for apps, launches that worked.
+
+### Background control that tells the truth
+
+- `app_view` shows each window's **control mode**: background through UI Automation, background through window
+  messages, needs foreground control, or read-only (programs running as administrator).
+- Typing sets values directly and **reads them back**. Classic Win32 text fields get `WM_SETTEXT` (UI Automation's
+  SetValue on them brought the window to the front, measured on Windows 11). Push buttons get `BN_CLICKED`
+  (`BM_CLICK` did the same). Other clicks and keys are compared before and after: input an app ignored is reported
+  as **failed verification**, not done.
+- A foreground guard around every action notices when an app took focus anyway, puts your window back where Windows
+  allows it, says when it couldn't, and avoids that app's control and route afterwards.
+- Element ids are tied to one view of one window of one process; stale ids are refused.
+- Minimized or covered GPU windows get no picture (instead of a screen grab of whatever is on top) and are not
+  un-minimized unless asked (`restore=true`).
+- Each agent has its own selected window, and **one agent per window**: another agent acting on it is told who
+  has it.
+
+### Your mouse and keyboard
+
+- Anything that uses them (`mouse_*`, `type_text`, `press_keys`, `focus_window`, `input="real"`, ctrl/alt/win
+  shortcuts) shows **Foreground control required** first: Allow once, Allow for this task, Deny. A desktop
+  permission of *auto* still counts as standing permission.
+- Aero waits until you stop typing (Windows), takes an exclusive lock so no two agents use the input at once, and
+  puts back the window you had in front.
+- **Strict Background Only** (Settings → Tools) refuses all of it, with no "just one click" exception.
+- Typing goes in short pieces so Stop works mid-text; on Windows through SendInput's Unicode mode, so the clipboard
+  is never touched; elsewhere the clipboard's previous text is restored after pasting.
+- Nothing falls back to real input on its own any more: the tool descriptions and the prompt no longer suggest
+  retrying with `input="real"`.
+
+### Questions while it works
+
+- **`ask_user`** posts a question card (choices, free text, yes/no, numbers) and returns at once; the model keeps
+  doing what doesn't depend on the answer, and **`get_answer`** waits only where it needs it (Stop still works).
+  Repeated questions are merged; questions survive a restart; an answer given after the reply finished is sent into
+  the same chat so the task continues.
+
+### Tasks, Stop and evidence
+
+- Every tool call is a node in a **task graph** (`task_graph.py`): a live step list in the chat, saved per turn,
+  and a Stop summary of what finished and what didn't. The graph's scheduler runs independent work side by side and
+  resumes a node when its question is answered.
+- Read-only tool calls from one model step run side by side (up to four), results in order.
+- Results carry an **evidence note** for the model: verified, sent but not verified, or failed verification;
+  badges on the tool cards show the same.
+- **Verify before repeating:** a send, post or other consequential call that timed out can't simply run again until
+  the agent has looked at something in between (also across turns, for three days).
+- **Stop** in one chat now stops only that chat (1.0 also denied other chats' pending approvals), releases windows,
+  input and grants, and closes the agent's browser tab.
+- The header says how a model is working: "… in the background", "… with your mouse and keyboard", "… is opening …".
+  Background browsing puts no banner over your screen.
+
+### Browser and pages
+
+- Aero's browser runs **in the background** by default (Settings → Tools → Aero's browser); `browser_open(show=true)`
+  opens a visible window, for example for you to sign in. It is Aero's own profile; password fields are refused.
+- **One tab per agent**, `browser_tabs` to list, switch or close; refs from an older snapshot are refused.
+- **`browser_read_sections`** reads the whole page (below the fold too) as numbered sections under their headings,
+  with links, tables, the source URL and the time; `query` for matching sections, `sections` for exact ones.
+  Navigation, headers, footers and repeated blocks are left out and counted; unreadable frames and cut content are
+  flagged. **`browser_extract`** returns tables (all rows), links, form fields or page metadata as data;
+  **`browser_wait_for`** waits for text or a load state.
+- `fetch_url` returns the same sections (no JavaScript) and serves later section requests from its cache.
+- Strict offline is also enforced inside the browser: every request to anything but this computer is aborted and
+  logged.
+
+### Documents from email
+
+- **`meeting_doc`**: meetings for a week in your time zone from emails the model read: invitations (with their own
+  time zones), updates, cancellations, conflicts, links and prep; mentions without an invitation are listed without
+  a time. Writes a `.docx`, never over an existing file, reopens it and counts the meetings.
+- Built-in skills (`aero/skills_builtin`, can be switched off in Settings → Skills): *meetings-from-email*,
+  *roblox-launch*, *code-project-tests*.
+
+### Remote Mode
+
+- **Detects remote viewers** (`remote_sessions.py`): Windows Remote Desktop through the WTS API and Linux remote
+  logins through logind are verified; RustDesk's connection window is a *probable* sign, used only if you allow it;
+  other remote tools are only seen running. Installed or running is never treated as a viewer.
+- **Runs part of the model on the CPU** while a viewer is connected (default: 80 % of the weight bytes on the GPU),
+  planned from the GGUF's real tensor sizes and llama.cpp's offload order, then measured from llama.cpp's own buffer
+  report. Waits for replies in progress, holds new messages during the restart, restores the exact previous profile
+  after the last viewer has been gone 90 s, ignores reconnects inside that time, rolls back a profile that fails to
+  load, and stops trying when RAM can't hold the moved weights. Measured on an RTX 5080 with a 27B model: 1,748 MB
+  freed, 58.9 → 21.2 tok/s.
+- Settings → Model & tuning → Remote Mode (auto / on / off, share, minimum free VRAM, timings, detectors) and a
+  dashboard card while it's active.
+
+### Router
+
+- **Capability hints**: plain patterns ("remember that…", "in the browser", "click … button", "open X") add the
+  tools a request obviously needs when the CPU router picked none. On 25 requests written after tuning was done:
+  22 routed well (1.0: 14). The bigger catalog costs about 0.3 s per decision.
+
+### Other
+
+- llama-server starts with `-lv 4` where supported: newer llama.cpp only logs its buffer sizes at that level, which
+  Aero needs for VRAM accounting on AMD/Intel and for Remote Mode.
+- `tzdata` is installed on Windows (time zones for invitations).
+- Prompt: tool output is data, not instructions; evidence notes; questions; apps; the browser's background mode.
+  An unedited 1.0 prompt is recognised on every OS and replaced.
+- CI runs the tests on Windows, Ubuntu and macOS for every push (`.github/workflows/ci.yml`).
+- Fixes found by CI: Windows paths in app records parsed the same on every OS; hardware tests fake the whole
+  platform (they failed on macOS runners).
+- 100 new tests (218 in total); live Windows desktop checks and real-browser checks are opt-in
+  (`AERO_LIVE_UI=1`, `AERO_LIVE_BROWSER=1`).
+
 ## Aero 1.0.0 (2026-10-09)
 
 The first public release. Aero is the app that was called Halcyon (and VRAMpire before that), rebuilt as a

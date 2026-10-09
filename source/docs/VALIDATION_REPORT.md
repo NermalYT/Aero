@@ -1,5 +1,30 @@
 # Validation report
 
+## Aero 1.1.0 (2026-10-09)
+
+Ran on a real Windows 11 Pro PC (build 26200; Ryzen 9 9950X3D2, 62 GB RAM, RTX 5080 16 GB, driver 616.92; Python
+3.12) and in GitHub Actions on Windows Server 2025, Ubuntu 24.04 and macOS 15. Per-scenario detail, with every
+NOT RUN item: [V1.1_TEST_MATRIX.md](V1.1_TEST_MATRIX.md). Measurements: [V1.1_PERFORMANCE_REPORT.md](V1.1_PERFORMANCE_REPORT.md).
+
+| Check | Where | Result |
+|---|---|---|
+| Unit and mocked tests (`python -m unittest discover -s tests`) | Windows 11 PC | 218 tests, OK (8 opt-in live checks skipped) |
+| Same | CI: Windows, Ubuntu, macOS | passed on all three |
+| Live background control (`AERO_LIVE_UI=1`, `tests/test_app_background.py`) | Windows 11 PC desktop | 6 / 6 passed: window in front, cursor and clipboard unchanged |
+| Real browser (`AERO_LIVE_BROWSER=1`) | Edge through Playwright 1.63, background mode | 2 / 2 passed |
+| Remote Mode split (`validation/measure_remote_mode.py`) | RTX 5080, 27B IQ2_M model | planned 79.83 %, measured 79.83 %, 1,748 MB freed |
+| Router (`validation/bench_router_intents.py`) | MiniCPM5-2B on the CPU | held-out 22/25 (1.0: 14/25) |
+| UI | real server, scripted model, browser pane | question card, foreground-control card, step list, Apps and Remote Mode settings; no console errors |
+| Lint (ruff E4/E7/E9/F) | Windows 11 PC | the same 15 findings as 1.0, none new |
+
+Not run for 1.1: a real Remote Desktop or RustDesk session from another machine (simulated only), real mail
+accounts, a real Roblox launch, macOS and Linux desktops, AMD and Intel GPUs, an elevated target window, and a full
+agent session with a real main model on the new tools.
+
+---
+
+# Aero 1.0.0
+
 Aero 1.0.0, 2026-10-09, the first public release. What was actually tested, where, and what still needs a Windows
 PC, a Mac or a person.
 

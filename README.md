@@ -61,8 +61,24 @@ everything in it.
   Investigator"). An agent can hand a self-contained part of the job to a subagent (a fresh copy of the local model
   with its own context) and gets back its report. The dashboard lists models, agents and subagents in one scrolling
   card: hover for what each is doing, click to talk to it.
-- **You always know when it's driving.** While a model clicks, types or opens apps, a header across the top of Aero
-  and a banner over the app it's using say "*model* is controlling *app*", each with a **Stop** button.
+- **Name an app, Aero finds it.** It reads what's installed (Start menu, Installed apps, Store apps and link
+  handlers on Windows, `.desktop` files on Linux, `/Applications` on macOS) and tells the model which program you
+  mean and how to start it, then checks that it really started. "Open my Bloxstrap" finds Bloxstrap and knows Roblox
+  links open through it.
+- **Background means background.** In other apps, Aero works through UI Automation and window messages, reads values
+  back after setting them, and reports input an app ignored as failed. Using your real mouse and keyboard needs your
+  OK first (**Foreground control required**), waits until you stop typing, and puts your window back; **Strict
+  Background Only** turns it off entirely. One agent per window.
+- **You always know when it's driving.** A header across the top of Aero (and a banner over the app, when there is
+  one on screen) says who is working and how: "*model* is controlling *app* in the background", "… with your mouse
+  and keyboard", "… is using Aero's browser in the background". **Stop** stops it and releases everything it held.
+- **Questions that don't stop the task.** When one detail is missing ("Which Gmail account should I check?"), the
+  model asks with a card in the chat and keeps working on everything else; your answer, even later, continues the
+  same task.
+- **Whole web pages, with sources.** Aero's own browser runs in the background, gives each agent its own tab, and
+  reads entire pages as sections with headings, tables and links, saying exactly what was left out.
+- **Remote Mode.** While someone views your PC over Remote Desktop, part of the model moves to the CPU so the remote
+  session has GPU memory, and comes back when they leave (measured on an RTX 5080: 1.7 GB freed, at a speed cost).
 - **Optional cloud reviews, two buttons.** **ChatGPT**: GPT-6 Astra reviews, GPT-6.1 Sol repairs. **Claude**: Claude
   Fable 5.1 reviews, Claude Opus 5.5 repairs. With both on, ChatGPT goes first and Claude reviews the final state with
   ChatGPT's findings. Every problem found becomes a lesson for your local model. Connect with an API key or your
@@ -109,13 +125,29 @@ everything in it.
   tools, troubleshooting.
 - [Changelog](source/CHANGELOG.md)
 - [Validation report](source/docs/VALIDATION_REPORT.md): what has been tested, and what still needs a Windows PC.
+- 1.1: [architecture](source/docs/V1.1_ARCHITECTURE.md), [test matrix](source/docs/V1.1_TEST_MATRIX.md),
+  [performance](source/docs/V1.1_PERFORMANCE_REPORT.md), [limits](source/docs/V1.1_LIMITATIONS.md),
+  [baseline](source/docs/V1.1_BASELINE.md), [open-source research](source/docs/V1.1_OPEN_SOURCE_RESEARCH.md),
+  [third-party notices](THIRD_PARTY_NOTICES.md).
 - [Local execution audit](source/docs/LOCAL_EXECUTION_AUDIT.md), [HAPO](source/docs/HAPO_ARCHITECTURE.md),
   [performance report](source/docs/PERFORMANCE_REPORT.md), [inference research](source/docs/INFERENCE_RESEARCH.md),
   [design system](source/docs/AERO_DESIGN_SYSTEM.md).
 
 ## Status
 
-1.0.0 is the first public release. What has passed:
+1.1.0 adds app discovery, honest background control, questions during a task, whole-page reading and Remote Mode.
+What has passed for 1.1:
+
+- 218 automated tests on Windows 11, and in CI on Windows, Ubuntu and macOS.
+- Live on Windows 11: background typing and button presses verified with the window in front, the cursor and the
+  clipboard unchanged; ignored input reported as failed; stale controls refused; minimized windows handled.
+- Live in Edge (Playwright): a long page read below the fold, table rows, a form filled and checked.
+- Remote Mode's GPU/CPU split measured on an RTX 5080 (planned 79.83 %, measured 79.83 %).
+
+Not tested for 1.1: a real Remote Desktop or RustDesk session from another machine, real Gmail accounts, macOS and
+Linux desktops, AMD and Intel GPUs ([test matrix](source/docs/V1.1_TEST_MATRIX.md)).
+
+From 1.0.0:
 
 - All 118 automated tests, on Linux (Python 3.11 and 3.12) and on Windows 11 (Python 3.12).
 - On Windows 11: Aero's Installed apps entry and its uninstaller, end to end (listed by Windows and winget,
@@ -140,6 +172,11 @@ cd source
 pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
+
+CI (`.github/workflows/ci.yml`) runs the tests on Windows, Ubuntu and macOS for every push. Two opt-in checks need a
+real desktop: `AERO_LIVE_UI=1` (Windows background control, `tests/test_app_background.py`) and
+`AERO_LIVE_BROWSER=1` (Playwright with Edge or Chrome). `validation/measure_remote_mode.py` and
+`validation/bench_router_intents.py` measure Remote Mode and the router on your own hardware.
 
 `python tools/build_release.py` builds every release file into `dist/` (the Windows, macOS and Linux archives, the
 `.deb`, the `.rpm`, the `PKGBUILD` and `SHA256SUMS.txt`). The `.deb` needs `dpkg-deb`, the `.rpm` needs `rpmbuild`.
