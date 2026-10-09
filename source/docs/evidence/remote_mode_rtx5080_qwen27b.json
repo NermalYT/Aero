@@ -1,6 +1,6 @@
 {
  "at": "2026-10-09 15:43:37",
- "model": "Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-IQ2_M.gguf",
+ "model": "Qwen3.8-27B, IQ2_M GGUF (11.5 GB, 64 layers + 1 MTP block)",
  "llama_server": "0.6.0-dev",
  "gpu": "NVIDIA GeForce RTX 5080",
  "vram_total_mb": 16303,
