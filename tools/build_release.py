@@ -32,7 +32,7 @@ from pathlib import Path
 REPO_DIR = Path(__file__).resolve().parent.parent
 SRC = REPO_DIR / "source"
 DIST = REPO_DIR / "dist"
-SKIP_DIRS = {"__pycache__", ".pytest_cache", "data", "models", "llama", "venv", "node_modules"}
+SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", "data", "models", "llama", "venv", "node_modules"}
 SKIP_FILES = {".DS_Store", "mods-applied.json"}
 CRLF_EXT = {".bat", ".cmd", ".ps1"}
 EXEC_EXT = {".sh", ".command"}
