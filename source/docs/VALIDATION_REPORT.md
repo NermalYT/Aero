@@ -110,7 +110,10 @@ fallback (a private Python 3.12 from uv) was what got tested, not the distro's o
 | Ubuntu 22.04 | Passed: system Python 3.10; prebuilt llama.cpp; started; all unit tests passed |
 | Fedora 42 | Passed with the private Python (dnf mirrors blocked here); prebuilt llama.cpp ran; started; all unit tests passed |
 | Arch Linux | Passed with the private Python (pacman mirrors blocked here); prebuilt llama.cpp ran; started; all unit tests passed |
+| AlmaLinux 9 | Passed with the private Python (its own Python is 3.9 and dnf mirrors were blocked here) and `--skip-llama`; started; all unit tests passed. llama.cpp's prebuilt Linux build needs a newer C++ runtime (GLIBCXX 3.4.30) than RHEL 9 ships, so the installer switches to compiling it; the compilers couldn't be installed here |
+| Alpine 3.22 (musl) | Passed with the private Python (musl build) and `--skip-llama`; started; all unit tests passed. llama.cpp would be compiled here; apk mirrors were blocked |
 | openSUSE Tumbleweed | Python environment and app installed with the private Python; stopped at llama.cpp, which needs the OpenMP runtime from zypper (mirrors blocked here) |
+| Compiling llama.cpp (Ubuntu 24.04, `--build-llama`) | Passed: the installer installed build-essential, CMake, Ninja and git, fetched llama.cpp b11514 (by git when the source archive was unreachable), compiled the CPU build, and Aero started with it; all unit tests passed. This is the path RHEL 9, Alpine and ARM boards take |
 | Debian 12 and 11 | Not testable here: the image has no curl or wget and Debian's mirrors were blocked, so nothing could be downloaded |
 | `.deb` on Ubuntu 24.04 | Passed: `apt install ./aero_*_all.deb` pulled in Python, venv and the OpenMP runtime; the first `aero` start as a new non-root user with no terminal set Aero up in that user's `~/.local/share/aero` (58 s) and served the app |
 
