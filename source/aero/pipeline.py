@@ -542,6 +542,9 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         return _sse(ev)
 
     try:
+        from . import vram_policy
+        async for ev in vram_policy.wait_for_model():
+            yield out(ev)
         for ev in mod_events:
             yield out(ev)
         if mod:

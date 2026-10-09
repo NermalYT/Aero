@@ -12,8 +12,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import (advisor, agent, agents, attachments, bench, claude_code, cloud, experience, fit, gguf, github, hapo, hardware, hf,
-               localonly, looplog, memory, migrate, models, mods, osinfo, pipeline, router, skills, stats, tools, tuner, updater, vault)
+from . import (advisor, agent, agents, app_registry, attachments, bench, claude_code, clarifications, cloud, experience, fit,
+               gguf, github, hapo, hardware, hf, input_guard, localonly, looplog, memory, migrate, models, mods, osinfo,
+               pipeline, remote_sessions, resources, router, skills, stats, task_graph, tools, tuner, updater, vault,
+               vram_policy)
 from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, VERSION, load_settings, save_settings)
 from .engine import LlamaServer, build_args, server_binary, server_version, spec_args
 from .tools import mcp_client, mcp_import
@@ -22,7 +24,7 @@ localonly.install()          # every outbound request from this process is check
 app = FastAPI(title=APP_NAME)
 ENGINE = LlamaServer(LLAMA_PORT, "main")
 STATE = {"status": "idle", "model": None, "ctx": 0, "vision": False, "desc": "", "error": None,
-         "url": ENGINE.url, "tune": None, "warning": None}
+         "url": ENGINE.url, "tune": None, "warning": None, "cfg": None, "remote": False}
 _job = {"cancel": threading.Event(), "busy": False}
 _hw_cache = {"t": 0, "v": None}
 _last_ping = {"t": time.time(), "ui": 0.0, "bye": 0.0, "chat": 0.0}   # ui/bye: heartbeat from the app window
@@ -356,7 +358,7 @@ def cancel_job():
 
 def unload():
     ENGINE.stop()
-    STATE.update(status="idle", model=None, ctx=0, vision=False, desc="", warning=None)
+    STATE.update(status="idle", model=None, ctx=0, vision=False, desc="", warning=None, cfg=None, remote=False)
 
 
 @app.post("/api/unload")
@@ -551,7 +553,8 @@ async def load(req: Request):
                        "slow shared memory. Close them or re-tune.")
         desc = prof["desc"] if prof else entry["desc"]
         tg, pp = (prof["tg"], prof["pp"]) if prof else (entry["tg"], entry["pp"])
-        STATE.update(status="ready", model=m, ctx=cfg["ctx"], vision=bool(m.get("mmproj")), desc=desc,
+        STATE.update(status="ready", model=m, ctx=cfg["ctx"], vision=bool(m.get("mmproj")), desc=desc, cfg=dict(cfg),
+                     remote=False,
                      tune={"tg": tg, "pp": pp, "at": entry["tuned_at"],
                            "trials": len(entry["trials"]), "limit_gb": round(entry.get("limit_mb", 0) / 1024, 2),
                            "depth": entry.get("depth"), "advisor": (entry.get("advisor") or {}).get("name"),
@@ -771,7 +774,7 @@ def del_memory_summary(cid: str):
 @app.post("/api/chat")
 async def chat(req: Request):
     body = await req.json()
-    if STATE["status"] != "ready":
+    if STATE["status"] != "ready" and not vram_policy.holding():
         raise HTTPException(409, "No model loaded")
     _last_ping["chat"] = time.time()
     opts = body.get("opts") or {}
@@ -1171,7 +1174,17 @@ def get_stats():
             "memory": {"facts": sum(1 for f in d["facts"] if f.get("kind") != "lesson"),
                        "lessons": sum(1 for f in d["facts"] if f.get("kind") == "lesson"), "chats": len(d["summaries"])},
             "mcp": {k: v.get("state") for k, v in mcp_client.status().items()},
-            "tools": len(tools.REGISTRY), "skills": len(skills.enabled()), "agents": agents.listing()}
+            "tools": len(tools.REGISTRY), "skills": len(skills.enabled()), "agents": agents.listing(),
+            "remote": _remote_brief()}
+
+
+def _remote_brief():
+    r = _REMOTE.get("runner")
+    if r is None:
+        return {}
+    snap = r.snapshot or {}
+    return {"policy": r.policy.public(), "detector": {k: snap.get(k) for k in ("state", "counted", "providers")},
+            "vram": _vram() if r.policy.state != "NORMAL" else None}
 
 
 # ---- router ----------------------------------------------------------------------------------
@@ -1656,6 +1669,193 @@ def lab_report(mid: str, fmt: str = "md"):
                     headers={"Content-Disposition": f'attachment; filename="aero-lab-{name}.md"'})
 
 
+# ---- v1.1: questions, tasks, apps, Remote Mode ------------------------------------------------------------
+
+@app.get("/api/questions")
+def list_questions(chat_id: str = ""):
+    return {"questions": [clarifications.public(q) for q in clarifications.pending(chat_id or None)]}
+
+
+@app.post("/api/answer")
+async def answer_question(req: Request):
+    b = await req.json()
+    try:
+        q = clarifications.answer(str(b.get("question_id") or ""), b.get("answer"))
+    except KeyError:
+        raise HTTPException(404, "No such question")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"question": clarifications.public(q)}
+
+
+@app.post("/api/questions/{qid}/cancel")
+def cancel_question(qid: str):
+    clarifications.cancel(qid, "dismissed by the user")
+    return {"ok": True}
+
+
+@app.get("/api/tasks/{cid}")
+def chat_tasks(cid: str):
+    return {"graphs": task_graph.latest_for_chat(cid), "questions": [clarifications.public(q) for q in
+                                                                     clarifications.pending(cid)]}
+
+
+@app.get("/api/resources")
+def resource_state():
+    return {"locks": resources.snapshot(), "foreground_grants": input_guard.grants(),
+            "input_owner": input_guard.owner_of_input(), "idle_ms": input_guard.idle_ms()}
+
+
+@app.get("/api/apps")
+def apps_overview(q: str = ""):
+    out = app_registry.overview()
+    if q:
+        out["matches"] = [{k: v for k, v in c.items() if k != "record"} for c in app_registry.resolve(q)]
+    return out
+
+
+@app.post("/api/apps/scan")
+async def apps_scan():
+    await asyncio.to_thread(app_registry.scan, True)
+    return app_registry.overview()
+
+
+@app.put("/api/apps/alias")
+async def apps_alias(req: Request):
+    b = await req.json()
+    alias = str(b.get("alias") or "").strip()
+    if not alias or len(alias) > 60:
+        raise HTTPException(400, "An alias is a short name, 1 to 60 characters.")
+    app_registry.set_alias(alias, str(b.get("app_id") or ""))
+    return app_registry.overview()
+
+
+@app.post("/api/apps/{aid}/disable")
+async def apps_disable(aid: str, req: Request):
+    b = await req.json()
+    app_registry.set_disabled(aid, bool(b.get("off", True)))
+    return app_registry.overview()
+
+
+@app.delete("/api/apps/learned")
+def apps_forget(app_id: str = ""):
+    app_registry.forget_learned(app_id or None)
+    return app_registry.overview()
+
+
+def _vram():
+    g = hardware.gpus()
+    meas = [x for x in g if x.get("measured")]
+    if not g or len(meas) != len(g):
+        return None
+    return {"used_mb": sum(x["used_mb"] for x in g), "free_mb": sum(x["free_mb"] for x in g),
+            "total_mb": sum(x["total_mb"] for x in g),
+            "per_gpu": [{"index": x["index"], "name": x["name"], "used_mb": x["used_mb"], "free_mb": x["free_mb"],
+                         "total_mb": x["total_mb"]} for x in g]}
+
+
+def _engine_reload(cfg):
+    """Restart the loaded model with another llama-server config (Remote Mode). Blocking. (ok, info)."""
+    m = STATE.get("model")
+    if not m:
+        return False, {"error": "no model loaded"}
+    if _job["busy"]:
+        return False, {"error": "another download, tune or load is running"}
+    _job["busy"] = True
+    t0 = time.time()
+    try:
+        s = load_settings()
+        spec = spec_args(m["path"], s)
+        h = hw(force=True)
+        STATE.update(status="loading", error=None)
+        ENGINE.stop()
+        before = hardware.settle_vram() if h["gpus"] else 0
+        ENGINE.start(build_args(m["path"], cfg, LLAMA_PORT, m.get("mmproj"), final=True, settings=s, spec=spec))
+        ok, why = ENGINE.wait_ready(900)
+        try:
+            log = ENGINE.log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            log = ""
+        if not ok:
+            tail = ENGINE.log_tail(25)
+            ENGINE.stop()
+            STATE.update(status="error", error="Remote Mode reload failed: " + tuner.classify_failure(tail))
+            return False, {"error": tuner.classify_failure(tail) + f" ({why})", "log": log}
+        if h["gpus"] and h.get("vram_measured", True):
+            ENGINE_VRAM["mb"] = max(0, (hardware.gpu_used_mb() or 0) - before)
+        elif h["gpus"]:
+            ENGINE_VRAM["mb"] = ENGINE.device_mb()
+        normal = vram_policy_runner().policy.normal_cfg
+        remote = bool(normal) and cfg != normal
+        desc = re.sub(r" · Remote Mode.*$", "", STATE.get("desc") or "")
+        STATE.update(status="ready", cfg=dict(cfg), ctx=cfg["ctx"], error=None, remote=remote,
+                     desc=desc + (f" · Remote Mode ({cfg.get('ngl')} GPU layers)" if remote else ""))
+        return True, {"log": log, "load_s": round(time.time() - t0, 1)}
+    finally:
+        _job["busy"] = False
+
+
+class _Hooks:
+    def engine(self):
+        h = hw()
+        return {"ready": STATE["status"] == "ready" and ENGINE.running(), "model_id": (STATE.get("model") or {}).get("id"),
+                "gpu": bool(h["gpus"]), "unified": bool(h.get("unified_memory"))}
+
+    def current(self):
+        try:
+            log = ENGINE.log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            log = ""
+        return {"model_path": (STATE.get("model") or {}).get("path"), "cfg": dict(STATE.get("cfg") or {}), "log": log}
+
+    def reload(self, cfg):
+        return _engine_reload(cfg)
+
+    def busy(self):
+        return agent.active()
+
+    def hold(self, on):
+        vram_policy.hold(on)
+
+    def vram(self):
+        return _vram()
+
+    def ram_free_mb(self):
+        import psutil
+        return psutil.virtual_memory().available // 2**20
+
+
+_REMOTE = {"runner": None}
+
+
+def vram_policy_runner():
+    if _REMOTE["runner"] is None:
+        det = remote_sessions.Detector(load_settings)
+        _REMOTE["runner"] = vram_policy.Runner(_Hooks(), det)
+    return _REMOTE["runner"]
+
+
+@app.get("/api/remote")
+def remote_state():
+    r = vram_policy_runner()
+    s = load_settings()
+    snap = r.snapshot or remote_sessions.snapshot(s)
+    return {"detector": snap, "policy": r.policy.public(), "vram": _vram(),
+            "settings": {k: s.get(k) for k in ("remote_mode", "remote_gpu_weight_fraction", "remote_min_free_vram_mb",
+                                               "remote_debounce_s", "remote_restore_cooldown_s", "remote_providers",
+                                               "remote_allow_probable")},
+            "engine": {"cfg": STATE.get("cfg"), "remote": STATE.get("remote"), "model": (STATE.get("model") or {}).get("name")}}
+
+
+@app.post("/api/remote/retry")
+def remote_retry():
+    p = vram_policy_runner().policy
+    if p.state == "FAILED_SAFE":
+        p.state, p.error, p.failed_for = ("REMOTE" if STATE.get("remote") else "NORMAL"), None, None
+        p.note("retry requested")
+    return {"policy": p.public()}
+
+
 @app.on_event("startup")
 async def _startup():
     try:
@@ -1664,6 +1864,9 @@ async def _startup():
         pass
     tools.load_all()
     router.start()
+    app_registry.scan_async()
+    task_graph.prune()
+    vram_policy_runner().start()
 
 
 app.mount("/", StaticFiles(directory=str(PKG_DIR / "static"), html=True), name="static")
