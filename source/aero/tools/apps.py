@@ -404,13 +404,13 @@ def _uniform(im):
 
 def unoccluded(hwnd, grid=5):
     """True when every sampled point of the window belongs to it: nothing else covers it on screen."""
-    l, t, r, b = _rect(hwnd)
-    if r - l < 4 or b - t < 4:
+    left, top, right, bottom = _rect(hwnd)
+    if right - left < 4 or bottom - top < 4:
         return False
     for i in range(grid):
         for j in range(grid):
-            x = l + (r - l) * (i + 0.5) / grid
-            y = t + (b - t) * (j + 0.5) / grid
+            x = left + (right - left) * (i + 0.5) / grid
+            y = top + (bottom - top) * (j + 0.5) / grid
             h = user32.WindowFromPoint(wt.POINT(int(x), int(y)))
             if not h or user32.GetAncestor(h, 2) != hwnd:      # GA_ROOT
                 return False

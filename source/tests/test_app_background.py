@@ -132,9 +132,9 @@ class Background(unittest.TestCase):
     def test_3_posted_input_that_is_ignored_is_a_failure(self):
         self.view()
         panel = next(c for c in self.child_windows() if self.apps._class(c) == "AeroToyDeaf")
-        l, t, r_, b = self.apps._rect(panel)
+        left, top, right, bottom = self.apps._rect(panel)
         sess = self.apps.session("live-ui")
-        x, y = ((l + r_) / 2 - sess["left"]) / sess["scale"], ((t + b) / 2 - sess["top"]) / sess["scale"]
+        x, y = ((left + right) / 2 - sess["left"]) / sess["scale"], ((top + bottom) / 2 - sess["top"]) / sess["scale"]
         r = self.tools.run("app_click", {"x": x, "y": y}, self.ctx)
         self.assertIs(r["envelope"]["verified"], False, r["text"][:500])
         self.assertIn("FAILED", self.tools_evidence(r))

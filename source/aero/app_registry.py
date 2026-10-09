@@ -620,10 +620,11 @@ def trust_of(exe):
     p = os.path.normcase(os.path.abspath(os.path.expandvars(str(exe))))
     if p.startswith("\\\\"):
         return "untrusted"
-    home = os.path.normcase(str(Path.home()))
-    bad = [os.path.join(home, "downloads"), os.path.normcase(os.environ.get("TEMP", "") or "/tmp"),
-           os.path.normcase(os.environ.get("TMP", "") or "/tmp"), "/tmp", "/var/tmp"]
-    if any(b and p.startswith(b) for b in bad):
+    low = p.lower()                       # "Downloads" on case-sensitive file systems too
+    home = str(Path.home()).lower()
+    bad = [os.path.join(home, "downloads"), (os.environ.get("TEMP", "") or "/tmp").lower(),
+           (os.environ.get("TMP", "") or "/tmp").lower(), "/tmp", "/var/tmp"]
+    if any(b and low.startswith(os.path.normcase(b).lower()) for b in bad):
         return "untrusted"
     sysroots = [os.environ.get(k, "") for k in ("ProgramFiles", "ProgramFiles(x86)", "SystemRoot", "ProgramW6432")]
     sysroots += ["/usr", "/opt", "/Applications", "/System", "/snap", "/var/lib/flatpak", "/bin", "/sbin"]

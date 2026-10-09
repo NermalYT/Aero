@@ -198,7 +198,7 @@ class Concurrency(unittest.TestCase):
                    ("ok", [])])
         with mock.patch.object(agent.tools, "run", run):
             t0 = time.monotonic()
-            evs = run_turn(m, settings(tool_policy={"files_read": "auto"}))
+            run_turn(m, settings(tool_policy={"files_read": "auto"}))
             took = time.monotonic() - t0
         self.assertLess(max(starts.values()) - min(starts.values()), 0.3)
         self.assertLess(took, 1.1)                                     # not 3 x 0.4 s one after another

@@ -1804,8 +1804,8 @@ function askForeground(card, ev, chat, who) {
   };
   ap.append(
     h('div', { class: 'q' }, h('b', {}, 'Foreground control required. '),
-      `${who ? 'Subagent ' + who : ev.by || 'Aero'} needs your real mouse and keyboard for ${toolInfo(ev.name).name}${ev.label ? ' → ' + ev.label : ''} in ${ev.target || 'an app'}. ` +
-      'Aero waits until you stop typing, uses them, then puts back the window you were using. No background route could do this.'),
+      `${who ? 'Subagent ' + who : ev.by || 'Aero'} wants your real mouse and keyboard for ${toolInfo(ev.name).name}${ev.label ? ' → ' + ev.label : ''} ${!ev.target || ev.target === 'your PC' ? 'on your PC' : 'in ' + ev.target}. ` +
+      'If you allow it, Aero waits until you stop typing, uses them, then puts back the window you were using.'),
     h('button', { class: 'btn sm', onclick: () => decide('allow') }, 'Allow once'),
     h('button', { class: 'btn ghost sm', onclick: () => decide('allow_task'), 'data-tip': 'Allow it for the rest of this task (until the reply ends or you press Stop)' }, 'Allow for this task'),
     h('button', { class: 'btn danger sm', onclick: () => decide('deny') }, 'Deny'));
@@ -1827,12 +1827,12 @@ function taskProgress(ctx, ev) {
   }
   const all = [...ctx.tasks.nodes.values()], count = st => all.filter(x => x.state === st).length;
   const bits = [`${count('completed')} done`];
-  for (const [st, word] of [['running', 'running'], ['waiting_for_user', 'waiting for you'], ['failed', 'failed'], ['cancelled', 'stopped']]) if (count(st)) bits.push(`${count(st)} ${word}`);
+  for (const [st, word] of [['running', 'running'], ['waiting_for_user', 'waiting for you'], ['failed', 'failed'], ['cancelled', 'not run']]) if (count(st)) bits.push(`${count(st)} ${word}`);
   ctx.tasks.sum.textContent = `Steps · ${bits.join(' · ')}`;
   ctx.tasks.list.innerHTML = '';
   for (const x of all.slice(-40)) ctx.tasks.list.append(h('li', { class: 'ts-' + x.state }, h('span', { class: 'tsst' }, TASK_WORD[x.state] || x.state), ' ', x.label || x.action));
 }
-const TASK_WORD = { pending: 'queued', ready: 'ready', running: 'running', waiting_for_user: 'waiting for you', waiting_for_auth: 'needs sign-in', waiting_for_resource: 'waiting', verifying: 'checking', completed: 'done', failed: 'failed', cancelled: 'stopped', blocked: 'blocked', skipped: 'skipped' };
+const TASK_WORD = { pending: 'queued', ready: 'ready', running: 'running', waiting_for_user: 'waiting for you', waiting_for_auth: 'needs sign-in', waiting_for_resource: 'waiting', verifying: 'checking', completed: 'done', failed: 'failed', cancelled: 'not run', blocked: 'blocked', skipped: 'skipped' };
 
 // ---------------------------------------------------------------- v1.1: Settings → Apps
 function appsSection() {
@@ -1854,7 +1854,7 @@ function appsSection() {
     const alias = h('input', { type: 'text', placeholder: 'a name you use, e.g. "my game launcher"' });
     const target = h('input', { type: 'text', placeholder: 'app id from the search, e.g. bloxstrap' });
     const learned = Object.entries(r.learned || {});
-    box.append(
+    box.append(...[
       h('p', { class: 'sec-intro' }, 'Aero finds installed apps from the Start menu, the Installed apps list, App Paths, link handlers and Store apps (Windows), .desktop entries (Linux) or /Applications (macOS). It never scans whole drives. When you name an app in a message, the model is told which program it is and how to start it.'),
       h('div', { class: 'kv', style: 'margin-bottom:12px' },
         h('span', {}, 'Apps found'), h('span', {}, fmtNum(r.count)),
@@ -1870,7 +1870,7 @@ function appsSection() {
         h('a', { href: '#', onclick: async e => { e.preventDefault(); draw(await api('/api/apps/alias', { method: 'PUT', json: { alias: a, app_id: '' } })); } }, 'remove')))) : null,
       h('div', { class: 'field' }, h('label', {}, 'Launches that worked on this computer'),
         learned.length ? h('ul', { class: 'plain' }, ...learned.map(([id, l]) => h('li', {}, `${id}: ${l.method} · ${l.ok || 0} verified start${l.ok === 1 ? '' : 's'}${l.fail ? `, ${l.fail} failed` : ''} `,
-          h('a', { href: '#', onclick: async e => { e.preventDefault(); draw(await api('/api/apps/learned?app_id=' + encodeURIComponent(id), { method: 'DELETE' })); } }, 'forget')))) : h('small', { class: 'muted' }, 'None yet. Only the launch method is kept, never what the app showed.')));
+          h('a', { href: '#', onclick: async e => { e.preventDefault(); draw(await api('/api/apps/learned?app_id=' + encodeURIComponent(id), { method: 'DELETE' })); } }, 'forget')))) : h('small', { class: 'muted' }, 'None yet. Only the launch method is kept, never what the app showed.'))].filter(Boolean));
     if (q) run();
   };
   api('/api/apps').then(r => draw(r)).catch(e => { box.innerHTML = ''; box.append(h('div', { class: 'err-msg' }, e.message)); });
@@ -1878,7 +1878,7 @@ function appsSection() {
 }
 
 // ---------------------------------------------------------------- v1.1: Remote Mode (Settings → Model & tuning)
-const RM_STATE = { NORMAL: 'Off · normal profile', SWITCHING: 'Switching to Remote Mode', REMOTE: 'Active', RESTORE_PENDING: 'Waiting before restoring', RECOVERING: 'Restoring the normal profile', FAILED_SAFE: 'Stopped after a failed reload' };
+const RM_STATE = { NORMAL: 'Not active · normal profile', SWITCHING: 'Switching to Remote Mode', REMOTE: 'Active', RESTORE_PENDING: 'Waiting before restoring', RECOVERING: 'Restoring the normal profile', FAILED_SAFE: 'Stopped after a failed reload' };
 const mb = v => v == null ? 'unavailable' : `${fmtNum(Math.round(v))} MB`;
 function remoteRows(d) {
   const p = d.policy || {}, det = d.detector || {}, m = p.measured || {}, pl = p.plan || {};
@@ -2416,7 +2416,7 @@ async function openSettings(start = 'General') {
         toggle('strict_background', s.strict_background, 'Strict Background Only: never use my real mouse and keyboard, not even when I allow it'),
         h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 12px' }, 'Background control (UI Automation, window messages, Aero\'s browser) keeps working. Anything that would need your input stops and says so instead.'),
         field('Aero\'s browser', select('browser_mode', s.browser_mode || 'background', [['background', 'In the background: no window, nothing on screen'], ['visible', 'Visible: a window you can watch']]),
-          'Either way it is Aero\'s own browser profile, not your browser. A page that needs your sign-in opens visibly.'),
+          'Either way it is Aero\'s own browser profile, not your browser. When a page needs your sign-in, the model opens it in a visible window so you can sign in yourself.'),
         h('label', { style: 'font-weight:600;font-size:13px;display:block;margin:6px 0' }, 'Permissions'));
       const pol = { ...s.tool_policy };
       api('/api/tools').then(t => {

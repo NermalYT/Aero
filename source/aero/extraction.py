@@ -356,7 +356,7 @@ def build(raw, method, seen=None, accessed=None):
             cur["parts"].append(("quote", "> " + b["text"], b))
         else:
             cur["parts"].append(("p", b["text"], b))
-        cur["links"] += [l for l in b.get("links") or [] if l and l[1]][:20]
+        cur["links"] += [lk for lk in b.get("links") or [] if lk and lk[1]][:20]
     out, n = [], 0
     for s in sections:
         if not s["parts"] and s["level"] > 0:
