@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "Aero"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 IS_WIN = sys.platform == "win32"
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -117,6 +117,7 @@ DEFAULTS = {
     "extra_server_args": "",
     "auto_load_last": False,
     "agent_max_steps": 40,
+    "subagent_max_steps": 20,     # tool steps one subagent may take before it has to report back
     "tools_enabled": True,
     "tool_policy": {               # ask | auto | off
         "files_read": "auto",
@@ -129,6 +130,7 @@ DEFAULTS = {
         "memory": "auto",
         "mcp": "ask",
         "skills": "auto",
+        "agents": "auto",
     },
     "work_dir": str(Path.home()),
     "screenshot_max_side": 1568,

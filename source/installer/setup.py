@@ -261,7 +261,7 @@ def make_shortcuts(dest: Path, ico: Path):
         lnk = folder / "Aero.lnk"
         cmd = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
                f"$s.TargetPath='{target}';$s.Arguments='-m aero';$s.WorkingDirectory='{dest / 'app'}';"
-               + (f"$s.IconLocation='{ico},0';" if ico else "") + "$s.Description='Aero: a calm, local LLM bootstrapper';$s.Save()")
+               + (f"$s.IconLocation='{ico},0';" if ico else "") + "$s.Description='Aero: local LLM bootstrapper';$s.Save()")
         r = ps(cmd)
         if r.returncode != 0 or not lnk.exists():
             say(f"Could not create {lnk}: {r.stderr.strip()[:300]}")

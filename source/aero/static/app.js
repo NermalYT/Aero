@@ -27,6 +27,7 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 const I = {
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  agents: '<svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9M8.2 6.3l7.6 4.4"/></svg>',
   clip: '<svg viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
   send: '<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   stop: '<svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
@@ -649,7 +650,7 @@ function newChat() {
   if (S.loop?.active) stopLoop('Forever-loop stopped.');
   leaveChat();
   S.chat = { id: uid(), title: '', messages: [], created: Date.now() / 1000 };
-  renderMessages(); renderChatList(); $('#chatTitle').textContent = ''; $('#input').focus();
+  renderMessages(); renderChatList(); setTitleBar(); $('#input').focus();
 }
 
 async function openChat(id) {
@@ -658,7 +659,20 @@ async function openChat(id) {
   if (S.chat?.id !== id) { leaveChat(); if (S.loop?.active) stopLoop('Forever-loop stopped because you switched chats.'); }
   try { S.chat = await api('/api/chats/' + id); } catch (e) { return toast(e.message, true); }
   if (PHONE.matches) setSidebar(false);
-  renderMessages(); renderChatList(); $('#chatTitle').textContent = S.chat.title || '';
+  renderMessages(); renderChatList(); setTitleBar();
+}
+
+/** The top bar: the chat's title and, once it has one, the name of the agent you're talking to. */
+function setTitleBar() {
+  $('#chatTitle').textContent = S.chat?.title || '';
+  const a = S.chat?.agent, chip = $('#agentChip');
+  chip.classList.toggle('hidden', !a?.name);
+  if (!a?.name) return;
+  const sub = a.kind === 'subagent';
+  chip.textContent = sub ? `Subagent · ${a.name}` : a.name;
+  chip.classList.toggle('sub', sub);
+  chip.dataset.tip = sub ? `You're talking to the subagent ${a.name}${a.parent_name ? `, which ${a.parent_name} started` : ''}. It remembers its task and what it did.`
+    : `The agent working in this chat. Its name says what it does.`;
 }
 
 async function saveChat() {
@@ -695,7 +709,7 @@ const isReviewerMsg = m => REVIEW_LANES.has(m.from);
 const PHASE_NOW = { work: 'working', fix: 'fixing', lesson: 'learning', review: 'reviewing', execute: 'taking over' };
 const PHASE_DONE = { work: 'done', fix: 'fixed', lesson: 'learned', review: 'reviewed', execute: 'done' };
 const CAT_ICON = { files_read: 'file', files_write: 'edit', shell: 'text', screen: 'app', desktop: 'app', browser: 'ext', web: 'search',
-  memory: 'mem', mcp: 'plug', skills: 'bulb', meta: 'tools', cloud: 'review', claude_code: 'spark' };
+  memory: 'mem', mcp: 'plug', skills: 'bulb', meta: 'tools', cloud: 'review', claude_code: 'spark', agents: 'agents' };
 
 function laneModelName(lane, model) {
   if (model) return model;
@@ -746,7 +760,9 @@ function closeLane(ctx) { if (ctx.lane) finishLane(ctx.lane); ctx.lane = null; }
 function renderMessages() {
   const box = $('#messages'); box.innerHTML = '';
   const msgs = S.chat?.messages || [];
-  $('#empty').classList.toggle('hidden', msgs.length > 0 || !!S.chat?.carry);
+  const subChat = S.chat?.agent?.kind === 'subagent';
+  $('#empty').classList.toggle('hidden', msgs.length > 0 || !!S.chat?.carry || subChat);
+  if (subChat) box.append(subChatCard(S.chat.agent));
   if (S.chat?.carry) box.append(carryCard(S.chat.carry));
   let ctx = null;
   const need = () => ctx || (ctx = newTurn(box));
@@ -769,6 +785,7 @@ function renderItem(ctx, m) {
     case 'user': closeLane(ctx); ctx.el.append(fixCard(m)); ctx.afterFix = true; break;      // from a reviewer
     case 'lesson': closeLane(ctx); ctx.el.append(lessonCard(m)); break;
     case 'notice': appendNotice(ctx, m); break;
+    case 'subagent': placeSub(ctx, subBlock(m, false)); break;
   }
 }
 
@@ -876,11 +893,11 @@ function attachToolResult(ctx, m) {
     const L = ctx.lane && ctx.lane.name === (m.lane || 'local') ? ctx.lane : ensureLane(ctx, m.lane, null);
     L.el.append(card);
   }
-  $('.approve', card)?.remove();
-  const st = $('.tstat', card);
+  $(':scope > .approve', card)?.remove();
+  const st = $(':scope > .tool-head .tstat', card);
   st.className = 'tstat ' + (m.denied || m.error ? 'err' : 'ok');
   st.textContent = m.denied ? 'denied' : m.error ? 'error' : 'done';
-  const body = $('.tool-body', card);
+  const body = $(':scope > .tool-body', card);
   $$('.res', body).forEach(x => x.remove());
   body.append(h('div', { class: 'lbl res' }, 'Output'), h('pre', { class: 'res' }, m.content || ''));
   if (m.image && !$('img.shot', card)) card.append(h('img', { class: 'shot', src: '/api/uploads/' + m.image, onclick: () => viewImage('/api/uploads/' + m.image) }));
@@ -1017,7 +1034,7 @@ function adoptChat(c, list = true) {
   S.chat = c;
   if (list && !S.chats.find(x => x.id === c.id)) S.chats.unshift({ id: c.id, title: c.title, updated: Date.now() / 1000, continued: true });
   if (S.loop.active) S.loop.chatId = c.id;
-  $('#chatTitle').textContent = c.title || '';
+  setTitleBar();
   renderMessages(); renderChatList();
 }
 
@@ -1105,6 +1122,7 @@ function bindChatUI() {
     saveSetting({ dashboard: !S.settings.dashboard }).then(renderDashVisibility);
   };
   NARROW.addEventListener?.('change', () => { S.dashNarrow = undefined; renderDashVisibility(); });
+  $('#controlStop').onclick = stopControl;
   $$('.suggest button').forEach(b => b.onclick = () => { ta.value = b.dataset.s; autosize(); send(); });
   // drag & drop anywhere
   let dragN = 0;
@@ -1247,10 +1265,11 @@ async function send() {
 async function makeTitle(text) {
   const chat = S.chat;
   try {
-    const r = await api('/api/title', { method: 'POST', json: { text } });
+    const r = await api('/api/title', { method: 'POST', json: { text, chat_id: chat.id } });
     chat.title = r.title || text.slice(0, 48);
+    if (r.agent && chat.agent?.kind !== 'subagent') chat.agent = { ...(chat.agent || {}), name: r.agent };
   } catch { chat.title = text.slice(0, 48); }
-  if (S.chat === chat) $('#chatTitle').textContent = chat.title;
+  if (S.chat === chat) setTitleBar();
   if (S.streaming && S.chat === chat) { const ex = S.chats.find(c => c.id === chat.id); if (ex) ex.title = chat.title; renderChatList(); return; }
   await api('/api/chats/' + chat.id, { method: 'PUT', json: chat }).catch(() => { });
   const ex = S.chats.find(c => c.id === chat.id); if (ex) ex.title = chat.title; renderChatList();
@@ -1285,10 +1304,12 @@ async function runAgent(loop) {
     if (lane && ctx.lane?.name === lane) ctx.lane.orb.classList.add('live');
   };
   const push = m => chat.messages.push(m);
+  const subs = {};       // subagent id -> its live block
   const opts = { think: thinkMode(), review: S.settings.review_mode || 'off', chatgpt_review: S.settings.chatgpt_review_mode || 'off', loop: loop || null };
 
   try {
-    await sseFetch('/api/chat', { chat_id: chat.id, messages: chat.messages, carry: chat.carry || null, title: chat.title || '', opts }, ev => {
+    await sseFetch('/api/chat', { chat_id: chat.id, messages: chat.messages, carry: chat.carry || null, title: chat.title || '', opts, agent: chat.agent || null }, ev => {
+      if (typeof ev.sub === 'string') return subEvent(subs, ev, chat);
       switch (ev.t) {
         case 'router_start': routerEl = routerPending(); ctx.el.append(routerEl); S.activeLane = 'router'; scrollBottom(); break;
         case 'router': {
@@ -1326,7 +1347,7 @@ async function runAgent(loop) {
           old.compacted_into = ev.new_chat_id;
           api('/api/chats/' + old.id, { method: 'PUT', json: old }).catch(() => { });
           chat = { id: ev.new_chat_id, title: (old.title || 'Chat').replace(/ · part (\d+)$/, (m, n) => ` · part ${+n + 1}`) + (/ · part \d+$/.test(old.title || '') ? '' : ' · part 2'),
-            messages: ev.keep, carry: ev.carry, created: Date.now() / 1000 };
+            messages: ev.keep, carry: ev.carry, created: Date.now() / 1000, agent: old.agent };
           if (S.chat === old) adoptChat(chat); else S.chats.unshift({ id: chat.id, title: chat.title, updated: Date.now() / 1000 });
           api('/api/chats/' + chat.id, { method: 'PUT', json: chat }).catch(() => { });
           const last = $('#messages').lastElementChild;
@@ -1379,27 +1400,14 @@ async function runAgent(loop) {
             card = toolCard(ev.call_id, ev.name, ev.args, ev.category, ev.label); L.el.append(card);
           }
           if (ev.label) $('.targ', card).textContent = ev.label;
-          if (ev.needs_approval && !$('.approve', card)) {
-            $('.tstat', card).className = 'tstat ask'; $('.tstat', card).textContent = 'needs approval';
-            const ap = h('div', { class: 'approve' });
-            const decide = d => {
-              api('/api/approve', { method: 'POST', json: { call_id: ev.call_id, decision: d, chat_id: chat.id, category: ev.category } }).catch(() => { });
-              ap.remove(); $('.tstat', card).className = 'tstat run'; $('.tstat', card).textContent = d === 'deny' ? 'denying…' : 'running…';
-            };
-            const detail = ev.args?.command || ev.args?.content || ev.args?.text || ev.args?.new_text || ev.args?.new_string || null;
-            ap.append(...[
-              h('div', { class: 'q' }, `Allow `, h('b', { 'data-tool': ev.name }, toolInfo(ev.name).name), ` ${ev.label ? '→ ' + ev.label : ''}?`,
-                ev.lane && ev.lane !== 'local' ? h('small', { class: 'muted' }, ` (asked by ${LANE[ev.lane]?.label || ev.lane})`) : null),
-              h('button', { class: 'btn sm', onclick: () => decide('allow') }, 'Allow'),
-              ev.category ? h('button', { class: 'btn ghost sm', onclick: () => decide('allow_chat'), 'data-tip': `Auto-allow every "${ev.category}" action for the rest of this chat` }, 'Always in this chat') : null,
-              h('button', { class: 'btn danger sm', onclick: () => decide('deny') }, 'Deny'),
-              detail && String(detail).length > 60 ? h('pre', {}, String(detail).slice(0, 4000)) : null].filter(Boolean));
-            card.append(ap); scrollBottom(true);
-            notify('Aero needs your approval', `${toolInfo(ev.name).name} ${ev.label || ''}`);
-          }
+          if (ev.needs_approval) askApproval(card, ev, chat);
           break;
         }
         case 'tool_result': push(ev.message); attachToolResult(ctx, ev.message); scrollBottom(); break;
+        case 'subagent_start': { const sb = subBlock(ev.sub, true); subs[ev.sub.id] = sb; placeSub(ctx, sb); scrollBottom(); break; }
+        case 'subagent_done': push(ev.sub); if (subs[ev.sub.id]) subFinish(subs[ev.sub.id], ev.sub); scrollBottom(); break;
+        case 'control': setControl(ev); break;
+        case 'control_end': setControl(null); break;
         case 'review': {
           push(ev.message); closeLane(ctx); S.activeLane = null;
           ctx.el.append(reviewCard(ev.message)); ctx.afterFix = false; scrollBottom(); break;
@@ -1438,6 +1446,8 @@ async function runAgent(loop) {
     } else cur.md.remove();
   }
   pendingLabel.remove(); lessonNote?.remove(); routerEl?.remove();
+  setControl(null);
+  for (const sb of Object.values(subs)) if (sb.live) subFinish(sb, { ...sb.rec, status: 'stopped' });
   const stopped = S.userStopped;
   $$('.tstat.run, .tstat.ask', ctx.el).forEach(s => { s.className = 'tstat err'; s.textContent = 'stopped'; });
   $$('.approve', ctx.el).forEach(a => a.remove());
@@ -1452,6 +1462,29 @@ async function runAgent(loop) {
   return { stopped, error: failed };
 }
 
+/** Allow / Always in this chat / Deny under a tool card. `who` names a subagent when one is asking. */
+function askApproval(card, ev, chat, who) {
+  if ($(':scope > .approve', card)) return;
+  const st = $(':scope > .tool-head .tstat', card);
+  st.className = 'tstat ask'; st.textContent = 'needs approval';
+  const ap = h('div', { class: 'approve' });
+  const decide = d => {
+    api('/api/approve', { method: 'POST', json: { call_id: ev.call_id, decision: d, chat_id: chat.id, category: ev.category } }).catch(() => { });
+    ap.remove(); st.className = 'tstat run'; st.textContent = d === 'deny' ? 'denying…' : 'running…';
+  };
+  const detail = ev.args?.command || ev.args?.content || ev.args?.text || ev.args?.new_text || ev.args?.new_string || null;
+  const by = who ? `subagent ${who}` : ev.lane && ev.lane !== 'local' ? LANE[ev.lane]?.label || ev.lane : '';
+  ap.append(...[
+    h('div', { class: 'q' }, `Allow `, h('b', { 'data-tool': ev.name }, toolInfo(ev.name).name), ` ${ev.label ? '→ ' + ev.label : ''}?`,
+      by ? h('small', { class: 'muted' }, ` (asked by ${by})`) : null),
+    h('button', { class: 'btn sm', onclick: () => decide('allow') }, 'Allow'),
+    ev.category ? h('button', { class: 'btn ghost sm', onclick: () => decide('allow_chat'), 'data-tip': `Auto-allow every "${ev.category}" action for the rest of this chat` }, 'Always in this chat') : null,
+    h('button', { class: 'btn danger sm', onclick: () => decide('deny') }, 'Deny'),
+    detail && String(detail).length > 60 ? h('pre', {}, String(detail).slice(0, 4000)) : null].filter(Boolean));
+  card.append(ap); scrollBottom(true);
+  notify('Aero needs your approval', `${toolInfo(ev.name).name} ${ev.label || ''}`);
+}
+
 /** A desktop notification while the window is in the background (only if the user allowed them). */
 function notify(title, body) {
   try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification(title, { body, icon: 'icons/aero-192.png' }); } catch { }
@@ -1463,6 +1496,153 @@ function stopGen() {
   S.userStopped = true;
   api('/api/stop', { method: 'POST', json: { chat_id: S.chat.id } }).catch(() => { });
   setTimeout(() => S.abort?.abort(), 1500);   // hard-abort if the server doesn't close the stream
+}
+
+// ---------------------------------------------------------------- subagents
+// A subagent is a fresh copy of the local model that the agent hands one part of its task to (the run_subagent
+// tool). Its steps show inside that tool's card while it works, then fold into one line with its report.
+const STATUS_WORD = { working: 'working', waiting: 'needs you', done: 'done', stopped: 'stopped', error: 'failed', idle: 'idle' };
+
+function subBlock(rec, live) {
+  const orb = h('span', { class: 'orb' + (live ? ' live' : '') });
+  const st = h('span', { class: 'phase' }, live ? 'working' : STATUS_WORD[rec.status] || rec.status || 'done');
+  const sum = h('div', { class: 'sub-sum' });
+  const body = h('div', { class: 'sub-body' });
+  const talk = h('button', { class: 'btn ghost sm sub-talk', 'data-tip': `Open a chat with ${rec.name}. It remembers its task and what it did.`,
+    onclick: e => { e.stopPropagation(); openSubChat({ id: S.chat?.id, title: S.chat?.title, name: S.chat?.agent?.name }, sb.rec); } }, 'Chat');
+  const el = h('div', { class: 'subagent' + (live ? '' : ' folded'), 'data-sid': rec.id },
+    h('div', { class: 'sub-head', onclick: () => el.classList.toggle('folded') }, orb, h('b', {}, rec.name), h('span', { class: 'sub-kind' }, 'subagent'), st, talk),
+    h('div', { class: 'sub-task' }, rec.task || ''), sum, body);
+  const sb = { el, body, orb, st, sum, talk, rec, live, cur: null, raf: 0, ctx: { el: body, lane: { name: 'local', el: body }, lanes: [] } };
+  talk.classList.toggle('hidden', live);
+  if (!live) { subReplay(sb, rec); subSummary(sb, rec); }
+  return sb;
+}
+/** Inside the run_subagent card that started it (or at the end of the turn when that card is missing). */
+function placeSub(ctx, sb) {
+  const card = sb.rec.call_id && findCard(ctx.el, sb.rec.call_id);
+  if (card) { card.classList.add('has-sub'); card.append(sb.el); } else (ctx.lane?.el || ctx.el).append(sb.el);
+}
+function subSummary(sb, rec) {
+  const steps = rec.steps ?? (rec.messages || []).filter(m => m.role === 'tool').length;
+  sb.sum.textContent = (rec.result ? brief(rec.result) : 'No report.') + (steps ? ` · ${steps} step${steps === 1 ? '' : 's'}` : '');
+}
+function subReplay(sb, rec) {
+  for (const m of (rec.messages || []).slice(1)) {
+    if (m.role === 'assistant') {
+      if (m.reasoning) sb.body.append(thinkBlock(m.reasoning, false));
+      if (m.content) { const md = h('div', { class: 'md' }); renderMd(md, m.content); sb.body.append(md); }
+      for (const tc of m.tool_calls || []) sb.body.append(toolCard(tc.id, tc.function.name, parseArgs(tc.function.arguments)));
+    } else if (m.role === 'tool') attachToolResult(sb.ctx, m);
+    else if (m.role === 'notice') sb.body.append(h('div', { class: m.error ? 'err-msg' : 'notice' }, m.content));
+  }
+}
+function subFinish(sb, rec) {
+  if (sb.raf) { cancelAnimationFrame(sb.raf); sb.raf = 0; }
+  if (sb.cur) { sb.cur.md.classList.remove('cursor'); if (!sb.cur.content) sb.cur.md.remove(); sb.cur = null; }
+  sb.rec = { ...sb.rec, ...rec }; sb.live = false;
+  sb.orb.classList.remove('live');
+  sb.st.textContent = STATUS_WORD[rec.status] || rec.status || 'done';
+  sb.el.classList.toggle('failed', rec.status === 'error');
+  $$('.tstat.run, .tstat.ask', sb.body).forEach(x => { x.className = 'tstat err'; x.textContent = 'stopped'; });
+  $$('.approve', sb.body).forEach(a => a.remove());
+  subSummary(sb, sb.rec);
+  sb.talk.classList.remove('hidden');
+  sb.el.classList.add('folded');
+}
+/** One streamed event of a running subagent. */
+function subEvent(subs, ev, chat) {
+  const sb = subs[ev.sub];
+  if (ev.t === 'control') return setControl(ev);
+  if (!sb) return;
+  const flush = () => {
+    sb.raf = 0; const c = sb.cur; if (!c) return;
+    if (c.reasoning && !c.think) { c.thinkBody = h('div', { class: 'think-body' }); c.think = h('details', { class: 'think', open: true }, h('summary', {}, 'Thinking…'), c.thinkBody); sb.body.insertBefore(c.think, c.md); }
+    if (c.think) { c.thinkBody.textContent = c.reasoning; c.thinkBody.scrollTop = 1e9; }
+    if (c.content) renderMd(c.md, c.content, true);
+    scrollBottom();
+  };
+  const sched = () => { if (!sb.raf) sb.raf = requestAnimationFrame(flush); };
+  switch (ev.t) {
+    case 'assistant_start':
+      if (sb.cur && !sb.cur.content && !sb.cur.reasoning) { sb.cur.md.remove(); sb.cur.think?.remove(); }
+      sb.cur = { md: h('div', { class: 'md cursor' }), content: '', reasoning: '', t0: Date.now() };
+      sb.body.append(sb.cur.md); break;
+    case 'reasoning': if (sb.cur) { sb.cur.reasoning += ev.d; sched(); } break;
+    case 'content':
+      if (!sb.cur) break;
+      sb.cur.content += ev.d;
+      if (sb.cur.think?.open) { sb.cur.think.open = false; $('summary', sb.cur.think).textContent = `Thought for ${((Date.now() - sb.cur.t0) / 1000).toFixed(1)}s`; }
+      sched(); break;
+    case 'assistant_done': {
+      if (sb.raf) { cancelAnimationFrame(sb.raf); sb.raf = 0; }
+      const m = ev.message, c = sb.cur; sb.cur = null;
+      if (m.discard) { c?.md.remove(); c?.think?.remove(); break; }
+      if (c) {
+        c.md.classList.remove('cursor');
+        if (c.think) { $('summary', c.think).textContent = 'Thought process'; c.think.open = false; c.thinkBody.textContent = m.reasoning || c.reasoning; }
+        else if (m.reasoning) sb.body.insertBefore(thinkBlock(m.reasoning, false), c.md);
+        if (m.content) renderMd(c.md, m.content); else c.md.remove();
+      }
+      for (const tc of m.tool_calls || []) if (!findCard(sb.body, tc.id)) sb.body.append(toolCard(tc.id, tc.function.name, parseArgs(tc.function.arguments)));
+      break;
+    }
+    case 'tool_start': {
+      let card = findCard(sb.body, ev.call_id);
+      if (!card) { card = toolCard(ev.call_id, ev.name, ev.args, ev.category, ev.label); sb.body.append(card); }
+      if (ev.label) $('.targ', card).textContent = ev.label;
+      if (ev.needs_approval) { sb.el.classList.remove('folded'); askApproval(card, ev, chat, sb.rec.name); }
+      break;
+    }
+    case 'tool_result': attachToolResult(sb.ctx, ev.message); break;
+    case 'notice': sb.body.append(h('div', { class: ev.level === 'error' ? 'err-msg' : 'notice' }, ev.text)); break;
+    case 'error': sb.body.append(h('div', { class: 'err-msg' }, ev.error)); break;
+  }
+  scrollBottom();
+}
+
+/** A chat with one subagent: it starts from the subagent's task, steps and report (the server adds them). */
+function openSubChat(parent, sub) {
+  if (sub.chat) return openChat(sub.chat);
+  if (S.streaming) return toast('Wait for this reply to finish, or stop it first.', true);
+  if (S.compacting) return toast('Still compacting this chat…');
+  if (!parent?.id) return;
+  if (S.loop?.active) stopLoop('Forever-loop stopped.');
+  leaveChat();
+  if (PHONE.matches) setSidebar(false);
+  S.chat = { id: uid(), title: `${sub.name} · ${parent.title || parent.name || 'subagent'}`.slice(0, 80), messages: [], created: Date.now() / 1000,
+    agent: { name: sub.name, kind: 'subagent', parent: parent.id, sub_id: sub.id, parent_name: parent.name || '', parent_title: parent.title || '',
+      task: sub.task || '', result: sub.result ? brief(sub.result) : '' } };
+  renderMessages(); renderChatList(); setTitleBar(); $('#input').focus();
+}
+function subChatCard(a) {
+  const back = h('a', { href: '#', onclick: e => { e.preventDefault(); openChat(a.parent); } }, a.parent_title || a.parent_name || 'its agent’s chat');
+  const body = h('div', { class: 'carry-body' });
+  renderMd(body, (a.task ? `**Task**\n\n${a.task}` : '') + (a.result ? `\n\n**Report**\n\n${a.result}` : ''));
+  return h('details', { class: 'carry sub-card', open: !S.chat?.messages?.length },
+    h('summary', {}, h('span', { class: 'ico', html: I.agents }), h('span', {}, h('b', {}, a.name), ` is a subagent from `, back, '. It answers from its own task and work.')), body);
+}
+
+// ---------------------------------------------------------------- "is controlling" header
+// While a model drives the mouse, keyboard, an app or the browser, the top of Aero says who and what, with a Stop
+// button. The same banner shows over the app being controlled (overlay.py).
+S.ctl = { own: null, other: null };
+function setControl(ev) {
+  S.ctl.own = ev ? { by: ev.by, target: ev.target } : null;
+  renderControl();
+}
+function renderControl() {
+  const c = S.ctl.own || S.ctl.other;
+  $('#controlBar').classList.toggle('hidden', !c);
+  document.body.classList.toggle('controlled', !!c);
+  if (!c) { $('#controlStop').disabled = false; $('#controlStop').textContent = 'Stop'; return; }
+  const what = !c.target || c.target === 'your PC' ? 'your PC' : c.target === 'the browser' ? 'the browser' : c.target;
+  $('#controlText').textContent = `${c.by || 'Aero'} is controlling ${what}`;
+}
+function stopControl() {
+  const b = $('#controlStop'); b.disabled = true; b.textContent = 'Stopping…';
+  if (S.streaming) stopGen();
+  api('/api/stop_all', { method: 'POST' }).catch(() => { });
 }
 
 // ---------------------------------------------------------------- forever-loop
@@ -1632,12 +1812,75 @@ function mrowEl(lane, name) {
     if (title != null) b.textContent = title; st.textContent = state; st.className = 'st ' + (cls || ''); sm.textContent = sub || '';
     orb.classList.toggle('live', !!live); } };
 }
+/** A collapsible section of the Models · Agents card; open or closed is remembered per section. */
+function dsec(key, title, kids) {
+  const n = h('small'), body = h('div', { class: 'dsec-body' }, ...kids);
+  let closed = false; try { closed = localStorage.getItem('aero.dsec.' + key) === '0'; } catch { }
+  const el = h('div', { class: 'dsec' + (closed ? ' closed' : '') },
+    h('button', { class: 'dsec-head', onclick: () => { el.classList.toggle('closed'); try { localStorage.setItem('aero.dsec.' + key, el.classList.contains('closed') ? '0' : '1'); } catch { } } },
+      h('span', { class: 'caret' }), title, n), body);
+  return { el, n };
+}
+const LIVE_ST = new Set(['working', 'waiting']);
+const agoText = t => { const s = Date.now() / 1000 - (t || 0); return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`; };
+function arowEl({ name, status, desc, tip, sub, current, onclick }) {
+  const live = LIVE_ST.has(status);
+  const cls = status === 'waiting' ? 'busy' : live ? 'busy' : status === 'error' ? 'err' : status === 'done' ? 'on' : 'off';
+  return h('button', { class: 'arow' + (sub ? ' sub' : '') + (current ? ' cur' : ''), 'data-tip': tip, onclick },
+    h('span', { class: 'orb' + (live ? ' live' : '') }), h('b', {}, name), h('span', { class: 'st ' + cls }, STATUS_WORD[status] || status || ''),
+    h('small', {}, desc || ''));
+}
+function renderAgents(list) {
+  const sig = JSON.stringify([list, S.chat?.id]);
+  if (sig === D.agentSig) return;
+  D.agentSig = sig;
+  const working = list.filter(a => LIVE_ST.has(a.status)).length;
+  D.secs.agents.n.textContent = list.length ? (working ? `${working} working` : String(list.length)) : '';
+  D.agentsBox.innerHTML = '';
+  for (const a of list) {
+    const live = LIVE_ST.has(a.status);
+    const desc = live ? (a.doing || 'Working') : (a.title || a.task || a.summary);
+    const tip = [a.name + (a.model ? ` · ${a.model}` : ''),
+      live ? `Now: ${a.doing || 'working'}` : `${STATUS_WORD[a.status] || a.status || 'idle'} · ${agoText(a.updated)}`,
+      a.controlling ? `Controlling ${a.controlling.target}` : '',
+      a.task ? `Task: ${a.task}` : '', !live && a.summary ? `Result: ${a.summary}` : '',
+      a.subs?.length ? `Subagents: ${a.subs.map(x => x.name).join(', ')}` : '',
+      S.chat?.id === a.id ? 'This is the chat you have open.' : 'Click to open its chat and talk to it.'].filter(Boolean).join('\n');
+    D.agentsBox.append(arowEl({ name: a.name, status: a.status, desc, tip, current: S.chat?.id === a.id, onclick: () => openAgent(a) }));
+  }
+  if (!list.length) D.agentsBox.append(h('div', { class: 'aempty' }, 'None yet. Each chat\u2019s task gets an agent.'));
+  const withSubs = list.filter(a => a.subs?.length);
+  const nsub = withSubs.reduce((n, a) => n + a.subs.length, 0), subWorking = withSubs.reduce((n, a) => n + a.subs.filter(x => LIVE_ST.has(x.status)).length, 0);
+  D.secs.subs.n.textContent = nsub ? (subWorking ? `${subWorking} working` : String(nsub)) : '';
+  D.subsBox.innerHTML = '';
+  for (const a of withSubs) {
+    D.subsBox.append(h('div', { class: 'agroup', 'data-tip': `Subagents ${a.name} started for: ${a.title || a.task}` }, a.name, h('span', { class: 'chev' }, '›')));
+    for (const x of a.subs) {
+      const live = LIVE_ST.has(x.status);
+      const tip = [`${x.name} · subagent of ${a.name}`, live ? `Now: ${x.doing || 'working'}` : `${STATUS_WORD[x.status] || x.status}${x.steps ? ` · ${x.steps} step${x.steps === 1 ? '' : 's'}` : ''}`,
+        x.task ? `Task: ${x.task}` : '', !live && x.result ? `Report: ${x.result}` : '',
+        x.chat ? 'Click to open your chat with it.' : live ? 'You can talk to it once it reports back.' : 'Click to open a chat with it. It remembers its task and what it did.'].filter(Boolean).join('\n');
+      D.subsBox.append(arowEl({ name: x.name, status: x.status, desc: live ? (x.doing || 'Working') : (x.result || x.task), tip, sub: true, current: S.chat?.id === x.chat,
+        onclick: () => live && !x.chat ? toast(`${x.name} is still working. You can talk to it once it reports back.`) : openSubChat({ id: a.id, title: a.title, name: a.name }, x) }));
+    }
+  }
+  if (!nsub) D.subsBox.append(h('div', { class: 'aempty' }, 'None yet. Agents start them for big jobs with separate parts.'));
+}
+function openAgent(a) {
+  if (S.chat?.id === a.id) return scrollBottom(true);
+  openChat(a.id);
+}
+
 function dcard(title, ...kids) { const r = h('span', { class: 'r' }); const c = h('div', { class: 'dcard' }, h('h4', {}, title, r), ...kids); c.r = r; return c; }
 
 function buildDash() {
   const dash = $('#dash'); dash.innerHTML = ''; D.built = true;
   D.rows = { router: mrowEl('router', 'Router'), local: mrowEl('local', 'Local model'), astra: mrowEl('astra', 'GPT-6 Astra'), sol: mrowEl('sol', 'GPT-6.1 Sol'), fable: mrowEl('fable', 'Claude Fable 5.1'), opus: mrowEl('opus', 'Claude Opus 5.5') };
-  D.cModels = dcard('Models', ...Object.values(D.rows).map(r => r.el));
+  D.agentsBox = h('div', { class: 'alist' }); D.subsBox = h('div', { class: 'alist' });
+  D.secs = { models: dsec('models', 'Models', Object.values(D.rows).map(r => r.el)), agents: dsec('agents', 'Agents', [D.agentsBox]),
+    subs: dsec('subs', 'Subagents', [D.subsBox]) };
+  D.cModels = dcard('Models · Agents', h('div', { class: 'dscroll' }, ...Object.values(D.secs).map(x => x.el)));
+  D.cModels.classList.add('dmodels');
   D.vram = meterEl('VRAM'); D.gload = meterEl('Load'); D.temp = meterEl('Temp'); D.power = meterEl('Power');
   D.gkv = kvsEl([['sm', 'Core clock'], ['mem', 'Memory clock'], ['fan', 'Fan']]);
   D.cGpu = dcard('GPU', D.vram.el, D.gload.el, D.temp.el, D.power.el, D.gkv.el);
@@ -1710,7 +1953,14 @@ function renderDash(d) {
     const live = act === lane && S.streaming;
     D.rows[lane].set({ live, state: live ? (REVIEW_LANES.has(lane) ? 'reviewing' : 'working') : b ? 'standby' : 'off', cls: live ? 'busy' : b ? 'on' : 'off', sub: laneSub(key, role, b, plan) });
   }
-  D.cModels.r.textContent = `${[rs.ready, eng.status === 'ready'].filter(Boolean).length} local · ${[gback && 'ChatGPT', back && 'Claude'].filter(Boolean).join(' + ') || 'no cloud'}`;
+  const nloc = [rs.ready, eng.status === 'ready'].filter(Boolean).length;
+  D.secs.models.n.textContent = `${nloc} local · ${[gback && 'ChatGPT', back && 'Claude'].filter(Boolean).join(' + ') || 'no cloud'}`;
+  const agentList = d.agents || [];
+  renderAgents(agentList);
+  const nwork = agentList.filter(a => LIVE_ST.has(a.status)).length;
+  D.cModels.r.textContent = nwork ? `${nwork} agent${nwork === 1 ? '' : 's'} working` : eng.model ? 'ready' : '';
+  const ctl = agentList.find(a => a.controlling && LIVE_ST.has(a.status));
+  S.ctl.other = ctl ? ctl.controlling : null; renderControl();
   // loop
   const lp = S.loop;
   D.cLoop.classList.toggle('hidden', !lp.active);
@@ -1865,6 +2115,7 @@ async function openSettings(start = 'General') {
         h('div', { class: 'row2' },
           field('Max tool steps per reply', num('agent_max_steps', s.agent_max_steps, 1)),
           field('Screenshots kept as images', num('keep_screenshots', s.keep_screenshots, 1), 'Older ones are dropped from context to save tokens.')),
+        field('Max tool steps per subagent', num('subagent_max_steps', s.subagent_max_steps ?? 20, 1), 'A subagent has to report back after this many steps.'),
         h('label', { style: 'font-weight:600;font-size:13px;display:block;margin:6px 0' }, 'Permissions'));
       const pol = { ...s.tool_policy };
       api('/api/tools').then(t => {

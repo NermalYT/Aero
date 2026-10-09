@@ -1,5 +1,37 @@
 # Changelog
 
+## Aero 1.0.1 (2026-10-09)
+
+### Agents and subagents
+
+- Each chat's task gets an **agent** named for what it does ("Photo Renamer", "Desktop Organizer", "Bug Fixer"),
+  first from the request's wording, then from the model along with the chat title. The name shows next to the chat
+  title.
+- New `run_subagent` tool: the agent hands a self-contained part of a job to a **subagent**, a fresh copy of the local
+  model with its own context and the same tools and approvals, and gets back only its report. Its steps stream
+  inside the tool card, then fold into one line. Subagents can't start subagents. Settings → Tools has its
+  permission (auto) and a step limit (20). The router suggests it for big jobs with separate parts.
+- **Talk to any agent or subagent.** Clicking an agent opens its chat. A subagent's **Chat** button (on its card or in
+  the dashboard) opens a chat where it answers as that subagent, from its task, steps and report.
+
+### Dashboard
+
+- The Models card is now **Models · Agents**: one scrolling card with three foldable sections, Models, Agents and
+  Subagents (grouped under their agent). Working ones come first. Hover any row for what it is doing, its task and
+  its result; click to open its chat.
+
+### Control header and Stop
+
+- While a model clicks, types, presses keys, scrolls, opens or switches apps, or drives the browser, a header across
+  the top of Aero says "*model* is controlling *app*" with a **Stop** button. The same banner appears at the top of
+  the app being controlled (or the screen) on Windows: it never takes focus, is left out of screenshots, and moves
+  down when the model needs the spot. Stop on either one stops every running task.
+
+### Removed
+
+- The "Calm seas. What are we building?" heading and other filler wording (the shortcut description, the manual's
+  tagline). The empty chat shows the model line and the suggestion buttons only.
+
 ## Aero 1.0.0 (2026-10-08)
 
 The first public release. Aero is the app that was called Halcyon (and VRAMpire before that), rebuilt as a

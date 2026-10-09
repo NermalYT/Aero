@@ -16,6 +16,11 @@ Files: `aero/static/app.css` (tokens, materials, every component), `aero/static/
 3. **Day and night are the same place.** Night is the same hills and pond by moonlight, not a different theme.
 4. **The scenery serves the app.** It never covers a control, it pauses while the model works, and it can be
    turned down to Still or Off, or have its glass blur turned off.
+5. **Frutiger Aero is the look and the speed, not the wording.** No slogans, mood lines or filler copy anywhere in the
+   UI: every string says what something is, what it is doing, or what a button does.
+6. **Control is always visible.** While a model drives input, the "is controlling" header (a blue gel bar across the
+   top, 34 px, blinking red dot, red gel Stop pill) sits above everything, including modals, and the same banner
+   sits over the controlled app.
 
 ## 2. Tokens
 
@@ -97,7 +102,7 @@ front legs, a simple happy closed mouth. The source photo itself is never shown.
 
 The app icon is an iridescent soap-glass bubble, never a frog. Masters (editable SVG, original art):
 
-- `brand/aero-bubble.svg` (512 viewBox): soft shadow, clear blue-cyan body, aqua caustic, a calm wave inside,
+- `brand/aero-bubble.svg` (512 viewBox): soft shadow, clear blue-cyan body, aqua caustic, a wave inside,
   iridescent rim (pink, violet, sky, mint, butter), top gloss cap, upper-left specular crescent, a second reflection.
 - `brand/aero-bubble-small.svg`: the same bubble simplified for 16 to 32px (fewer layers, a thicker rim, a
   bigger highlight) so it stays a bubble at taskbar size.

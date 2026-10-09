@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import (advisor, agent, attachments, bench, claude_code, cloud, fit, gguf, github, hapo, hardware, hf, localonly,
+from . import (advisor, agent, agents, attachments, bench, claude_code, cloud, fit, gguf, github, hapo, hardware, hf, localonly,
                memory, migrate, models, pipeline, router, skills, stats, tools, tuner)
 from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, VERSION, load_settings, save_settings)
 from .engine import LlamaServer, build_args, server_binary, server_version, spec_args
@@ -769,7 +769,8 @@ async def chat(req: Request):
     if (opts.get("loop") or {}).get("stop"):
         stats.SESSION["loop"]["active"] = False
     gen = pipeline.run_turn(body.get("chat_id") or uuid.uuid4().hex, body["messages"], load_settings(), STATE,
-                            carry=body.get("carry"), title=body.get("title") or "", opts=opts)
+                            carry=body.get("carry"), title=body.get("title") or "", opts=opts,
+                            agent_meta=body.get("agent"))
     return StreamingResponse(gen, media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
@@ -793,24 +794,56 @@ async def stop_chat(req: Request):
     return {"ok": True}
 
 
+@app.post("/api/stop_all")
+def stop_everything():
+    """Stop every running chat: the Stop button on the "is controlling" banner over another app."""
+    return {"ok": True, "stopped": agent.stop_all()}
+
+
+_TITLE_PROMPT = ("A chat starts with the message below. Reply with JSON only: {\"title\": a 3-6 word title for the "
+                 "chat, \"agent\": a 1-3 word job title for whoever does this task, naming what it does (e.g. "
+                 "\"Photo Renamer\", \"Desktop Organizer\", \"Bug Fixer\", \"Trip Planner\")}\n\nMessage:\n")
+
+
+def parse_title(t):
+    """{"title", "agent"} from the model's reply: JSON, or a plain title line when it ignored the format."""
+    t = re.sub(r"<think>.*?</think>", "", t or "", flags=re.S).strip()
+    m = re.search(r"\{.*\}", t, flags=re.S)
+    if m:
+        try:
+            j = json.loads(m.group(0))
+            if isinstance(j, dict):
+                title = str(j.get("title") or "").strip().strip('"')[:60]
+                return {"title": title or None, "agent": agents.clean_name(j.get("agent")) or None}
+        except ValueError:
+            pass
+    title = re.search(r'"?title"?\s*:\s*"([^"]+)', t, flags=re.I)
+    agent_ = re.search(r'"?agent"?\s*:\s*"([^"]+)', t, flags=re.I)
+    line = title.group(1) if title else next((x for x in t.splitlines() if x.strip()), "").strip().strip('"')
+    return {"title": line.strip()[:60] or None, "agent": agents.clean_name(agent_.group(1)) if agent_ else None}
+
+
 @app.post("/api/title")
 async def make_title(req: Request):
-    """Ask the loaded model for a 3-6 word chat title (non-streaming, tiny)."""
+    """Ask the loaded model for a 3-6 word chat title and a job title for the chat's agent (non-streaming, tiny)."""
     import httpx
     b = await req.json()
+    text = b.get("text", "")
+    fallback = {"title": None, "agent": agents.name_from_text(text) if text else None}
     if STATE["status"] != "ready":
-        return {"title": None}
+        return fallback
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(ENGINE.url + "/v1/chat/completions", json={
-                "messages": [{"role": "user", "content": "Write a 3-6 word title for a chat that starts with this "
-                              "message. Reply with the title only, no quotes.\n\n" + b.get("text", "")[:1500]}],
-                "max_tokens": 24, "temperature": 0.3, "chat_template_kwargs": {"enable_thinking": False}})
-            t = r.json()["choices"][0]["message"]["content"] or ""
-            t = re.sub(r"<think>.*?</think>", "", t, flags=re.S).strip().strip('"').splitlines()[0][:60]
-            return {"title": t or None}
+                "messages": [{"role": "user", "content": _TITLE_PROMPT + text[:1500]}],
+                "max_tokens": 60, "temperature": 0.3, "chat_template_kwargs": {"enable_thinking": False}})
+            out = parse_title(r.json()["choices"][0]["message"]["content"])
     except Exception:
-        return {"title": None}
+        return fallback
+    out["agent"] = out["agent"] or fallback["agent"]
+    if b.get("chat_id") and out["agent"]:
+        agents.set_name(b["chat_id"], out["agent"])
+    return out
 
 
 # ---- uploads ---------------------------------------------------------------------------------
@@ -914,7 +947,7 @@ def get_stats():
             "memory": {"facts": sum(1 for f in d["facts"] if f.get("kind") != "lesson"),
                        "lessons": sum(1 for f in d["facts"] if f.get("kind") == "lesson"), "chats": len(d["summaries"])},
             "mcp": {k: v.get("state") for k, v in mcp_client.status().items()},
-            "tools": len(tools.REGISTRY), "skills": len(skills.enabled())}
+            "tools": len(tools.REGISTRY), "skills": len(skills.enabled()), "agents": agents.listing()}
 
 
 # ---- router ----------------------------------------------------------------------------------

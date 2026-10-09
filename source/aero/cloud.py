@@ -187,8 +187,9 @@ def read_only_names(settings):
 
 
 def all_names(settings):
+    """Every enabled tool for a takeover model, except subagents (those run the local model's own loop)."""
     pol = settings.get("tool_policy", {})
-    return [n for n, t in tools.REGISTRY.items() if pol.get(t.category, "ask") != "off"]
+    return [n for n, t in tools.REGISTRY.items() if pol.get(t.category, "ask") != "off" and t.category != "agents"]
 
 
 _TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "array": list, "object": dict}
@@ -327,6 +328,10 @@ def _render_work(msgs, per_tool=1500, skip_lanes=("fable", "astra")):
         elif r == "tool":
             flag = " [ERROR]" if m.get("error") else ""
             out.append(f"TOOL RESULT {m.get('name')}{flag}: {_clip(m.get('content'), per_tool)}")
+        elif r == "subagent":
+            inner = _render_work((m.get("messages") or [])[1:], per_tool=min(per_tool, 600), skip_lanes=skip_lanes)
+            out.append(f"SUBAGENT {m.get('name')} ({m.get('status')}) worked on: {_clip(m.get('task'), 800)}\n"
+                       + _clip(inner, 6000).replace("LOCAL MODEL", "SUBAGENT"))
     return "\n\n".join(out)
 
 

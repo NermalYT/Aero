@@ -98,6 +98,12 @@
     <div id="repoPanel" class="repo-panel hidden"></div>
   </section>
 
+  <!-- shown while a model drives the mouse, keyboard, an app or the browser -->
+  <div id="controlBar" class="control-bar hidden" role="status" aria-live="polite">
+    <span class="cb-dot"></span><span class="cb-text" id="controlText"></span>
+    <button class="cb-stop" id="controlStop" title="Stop the model now">Stop</button>
+  </div>
+
   <!-- ============ CHAT ============ -->
   <section id="chat" class="view hidden">
     <aside id="sidebar" class="glass">
@@ -122,6 +128,7 @@
       <div class="topbar">
         <button class="icon-btn hidden" id="sbExpand" title="Show sidebar"></button>
         <div class="tb-title" id="chatTitle"></div>
+        <span class="agent-chip hidden" id="agentChip"></span>
         <div class="grow"></div>
         <div class="ctx-meter" id="ctxMeter" title="Context used"><div class="ctx-bar"><i></i></div><span></span></div>
         <button class="btn ghost sm hidden" id="compactBtn" title="Save this chat to memory and continue in a fresh chat with an empty context">Compact</button>
@@ -135,7 +142,6 @@
         <div id="messages"></div>
         <div id="empty" class="empty"><div class="empty-card">
           <img src="icons/aero-bubble.svg" alt="">
-          <h1>Calm seas. What are we building?</h1>
           <p id="emptySub"></p>
           <div class="suggest">
             <button data-s="Take a screenshot and tell me what's on my screen.">Look at my screen</button>

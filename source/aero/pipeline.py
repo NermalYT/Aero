@@ -18,7 +18,7 @@ import uuid
 
 import httpx
 
-from . import agent, chatgpt, cloud, memory, router, stats, tools
+from . import agent, agents, chatgpt, cloud, control, memory, router, stats, tools
 from .config import DATA
 
 CORE_TOOLS = ["list_dir", "read_file", "find_files", "search_files", "run_command", "web_search", "fetch_url",
@@ -33,7 +33,7 @@ def _sse(obj):
 def extra(turn):
     """Text appended to the system prompt: only things that stay fixed for the whole chat."""
     parts = [agent.profile_for(turn.settings, turn.chat_id, turn.ctx_size)[0],
-             memory.carry_block(turn.carry) if turn.carry else ""]
+             memory.carry_block(turn.carry) if turn.carry else "", getattr(turn, "persona", "")]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -398,30 +398,57 @@ async def review_passes(turn):
             yield ev
 
 
-async def run_turn(chat_id, history, settings, engine_state, carry=None, title="", opts=None):
-    """Async generator of SSE strings for one user message."""
+async def run_turn(chat_id, history, settings, engine_state, carry=None, title="", opts=None, agent_meta=None):
+    """Async generator of SSE strings for one user message. agent_meta: the chat's "agent" field (its name, and for
+    a chat with a subagent which one)."""
     opts = opts or {}
+    meta = agent_meta if isinstance(agent_meta, dict) else {}
     turn = agent.Turn(chat_id, history, settings, engine_state, carry, title)
+    if meta.get("kind") == "subagent":
+        turn.persona = agents.persona(meta)
+    task = agent._last_user_text(history)
+    first = next((m.get("content") for m in history if m.get("role") == "user" and m.get("from") not in
+                  agent.REVIEWER_NAMES and m.get("content")), "") or task
+    name = agents.clean_name(meta.get("name")) or agents.name_from_text(first or title)
+    agents.start(chat_id, name, title, turn.model_name, task, {**meta, "named": bool(meta.get("name"))})
     stats.SESSION["turns"] += 1
     loop = opts.get("loop") or {}
     if loop:
         stats.SESSION["loop"] = {"active": True, "iteration": int(loop.get("iteration") or 1),
                                  "started": loop.get("started") or time.time(), "chat_id": chat_id}
+    ids = {"chat": chat_id}
+    failed = False
+
+    def out(ev):
+        agents.note(ids["chat"], ev)
+        if ev.get("t") == "compacted" and ev.get("new_chat_id"):
+            ids["chat"] = ev["new_chat_id"]
+        return _sse(ev)
+
     try:
         async for ev in route(turn, opts):
-            yield _sse(ev)
+            yield out(ev)
         turn.memory_text = agent.memory_recall(settings, turn.history, carry, chat_id, turn.ctx_size)
-        yield _sse({"t": "lane", "lane": "local", "phase": "work", "model": turn.model_name,
-                    "think": turn.think, "tools": len(turn.exposed) if turn.exposed is not None else None})
+        yield out({"t": "lane", "lane": "local", "phase": "work", "model": turn.model_name,
+                   "think": turn.think, "tools": len(turn.exposed) if turn.exposed is not None else None})
         async for ev in agent.run_local(turn):
-            yield _sse(ev)
+            yield out(ev)
         if (turn.review or turn.gpt_review) and not turn.cancel.is_set():
             async for ev in review_passes(turn):
-                yield _sse(ev)
+                yield out(ev)
     except httpx.ConnectError:
-        yield _sse({"t": "error", "error": "The model server is not running. Load a model first."})
+        failed = True
+        yield out({"t": "error", "error": "The model server is not running. Load a model first."})
     except Exception as e:  # noqa: BLE001
-        yield _sse({"t": "error", "error": f"{type(e).__name__}: {e}"})
+        failed = True
+        yield out({"t": "error", "error": f"{type(e).__name__}: {e}"})
     finally:
         turn.close()
+        if turn.controlling:
+            control.banner_off()
+        final = next((m.get("content") for m in reversed(turn.history) if m.get("role") == "assistant"
+                      and not m.get("tool_calls") and (m.get("content") or "").strip()), "")
+        agents.finish(ids["chat"], "stopped" if turn.cancel.is_set() else "error" if failed else "done", final)
+    if turn.controlling:
+        yield _sse({"t": "control_end"})
     yield _sse({"t": "done", "today_usd": cloud.spent_today()})

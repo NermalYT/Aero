@@ -21,7 +21,7 @@ from pathlib import Path
 
 import httpx
 
-from . import attachments, memory, stats, tools
+from . import agents, attachments, control, memory, stats, tools
 from .config import IS_WIN
 
 _approvals = {}        # call_id -> Future
@@ -54,6 +54,16 @@ def stop(chat_id):
     for cid, fut in list(_approvals.items()):
         if not fut.done():
             fut.set_result("deny")
+
+
+def stop_all():
+    """Stop every running task (the Stop button on the "is controlling" banner)."""
+    for ev in list(_cancel.values()):
+        ev.set()
+    for fut in list(_approvals.values()):
+        if not fut.done():
+            fut.set_result("deny")
+    return len(_cancel)
 
 
 _screen = {}
@@ -165,7 +175,7 @@ def local_view(history):
     out = []
     for i, m in enumerate(history):
         r, lane = m.get("role"), m.get("lane") or "local"
-        if r in ("router", "review", "lesson", "notice"):
+        if r in ("router", "review", "lesson", "notice", "subagent"):
             continue
         if lane in REVIEWER_NAMES:
             continue
@@ -343,6 +353,9 @@ class Turn:
         self.flow = None
         self.codex_final = ""
         self.cloud_result = None
+        self.persona = ""            # system-prompt block when the user talks to a subagent directly
+        self.controlling = None      # {"by", "target"} once a model has driven an app in this turn
+        self.blocked = set()         # tools this turn may not use
 
     def rebind(self, new_id):
         self.chat_id = new_id
@@ -352,6 +365,44 @@ class Turn:
     def close(self):
         for k in [k for k, v in _cancel.items() if v is self.cancel]:
             _cancel.pop(k, None)
+
+
+class SubTurn:
+    """A subagent's turn: a fresh context with its own task, sharing the parent turn's model, tools, settings,
+    approvals, file-change tracking and Stop."""
+    is_sub = True
+
+    def __init__(self, parent, sid, name, task):
+        self.root = getattr(parent, "root", parent)
+        self.chat_id = parent.chat_id
+        self.history = [{"role": "user", "content": task, "ts": time.time(), "id": uuid.uuid4().hex[:10]}]
+        self.settings = parent.settings
+        self.engine = parent.engine
+        self.carry = None
+        self.title = name
+        self.cancel = parent.cancel
+        self.vision = parent.vision
+        self.ctx_size = parent.ctx_size
+        self.tctx = parent.tctx
+        self.exposed = None if parent.exposed is None else [n for n in parent.exposed if n != "run_subagent"]
+        self.blocked = {"run_subagent"}             # one level deep: a subagent can't start subagents
+        self.think = parent.think
+        self.memory_text = ""
+        self.changes = parent.changes
+        self.calib = parent.calib
+        self.decision = None
+        self.start_index = 1
+        self.model_name = parent.model_name
+        self.persona = agents.SUB_PERSONA.format(name=name)
+        self.sub_id, self.sub_name = sid, name
+
+    @property
+    def controlling(self):
+        return self.root.controlling
+
+    @controlling.setter
+    def controlling(self, v):
+        self.root.controlling = v
 
 
 # ------------------------------------------------------------------------------------------------ tools
@@ -440,6 +491,12 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
             res = {"text": "The user denied this action. Ask what they want instead, or try another approach.",
                    "error": True, "denied": True}
         else:
+            if name in control.CONTROL_TOOLS:
+                by = control.actor(turn, lane)
+                what, rect = await asyncio.to_thread(control.target, name, args)
+                turn.controlling = {"by": by, "target": what}
+                await asyncio.to_thread(control.banner_on, f"{by} is controlling {what}", rect)
+                yield {"t": "control", "by": by, "target": what, "tool": name, "lane": lane}
             if name in WRITE_TOOLS:
                 _track(turn, name, args, before=True)
             res = await asyncio.to_thread(tools.run, name, args, turn.tctx)
@@ -480,7 +537,8 @@ def load_tools_schema(turn, all_schemas):
 def current_schemas(turn):
     if not turn.settings.get("tools_enabled", True):
         return []
-    allv = tools.schemas(turn.settings)
+    blocked = getattr(turn, "blocked", None) or ()
+    allv = [x for x in tools.schemas(turn.settings) if x["function"]["name"] not in blocked]
     if turn.exposed is None:
         return allv
     keep = set(turn.exposed)
@@ -514,7 +572,7 @@ async def run_local(turn, lane="local", max_steps=None):
     url = turn.engine["url"] + "/v1/chat/completions"
     settings = turn.settings
     max_steps = int(max_steps or settings.get("agent_max_steps") or 40)
-    compact_at = float(settings.get("auto_compact_at") or 0)
+    compact_at = 0 if getattr(turn, "is_sub", False) else float(settings.get("auto_compact_at") or 0)
     overflow = 0
     tools_rejected = False
     for step in range(max_steps):
@@ -664,6 +722,12 @@ async def run_local(turn, lane="local", max_steps=None):
                     args = {"value": args}
             except Exception:
                 args = None
+            if name == "run_subagent":
+                async for ev in run_subagent(turn, tc["id"], args, lane):
+                    yield ev
+                if turn.cancel.is_set():
+                    return
+                continue
             if name == "load_tools" and turn.exposed is not None:
                 text = _do_load_tools(turn, args or {})
                 tmsg = {"role": "tool", "tool_call_id": tc["id"], "name": name, "content": text, "error": False,
@@ -681,3 +745,79 @@ async def run_local(turn, lane="local", max_steps=None):
             if turn.cancel.is_set():
                 return
     yield {"t": "notice", "text": f"Stopped after {max_steps} tool steps (Settings → Agent max steps)."}
+
+
+# ------------------------------------------------------------------------------------------------ subagents
+
+def _final_reply(history):
+    return next((m.get("content") for m in reversed(history) if m.get("role") == "assistant"
+                 and not m.get("tool_calls") and (m.get("content") or "").strip()), "") or ""
+
+
+def _lean(msgs, per_tool=4000):
+    """A subagent's transcript as stored in the chat: tool outputs cut, images kept by id."""
+    out = []
+    for m in msgs:
+        m = dict(m)
+        if m.get("role") == "tool" and len(m.get("content") or "") > per_tool:
+            m["content"] = m["content"][:per_tool] + "\n... [cut]"
+        out.append(m)
+    return out
+
+
+async def run_subagent(turn, call_id, args, lane="local"):
+    """The run_subagent tool: a fresh copy of the local model does one part of the task and reports back. Its steps
+    stream to the UI tagged with "sub"; the parent only gets the report as the tool result."""
+    args = args if isinstance(args, dict) else {}
+    task = str(args.get("task") or "").strip()
+    name = agents.clean_name(args.get("name")) or agents.name_from_text(task)
+    label = f"{name}: {task}"[:160]
+    pol = tools.policy("run_subagent", turn.settings)
+    needs = pol == "ask" and "agents" not in _chat_allow.get(turn.chat_id, set())
+    yield {"t": "tool_start", "call_id": call_id, "name": "run_subagent", "args": args, "label": label,
+           "category": "agents", "needs_approval": needs and bool(task), "lane": lane}
+    err = None
+    if getattr(turn, "is_sub", False):
+        err = "A subagent can't start its own subagents. Do this part yourself."
+    elif not task:
+        err = "run_subagent needs a task: the full brief for the subagent (it can't see this chat)."
+    elif pol == "off":
+        err = "Subagents are turned off in Settings → Tools."
+    elif needs:
+        fut = asyncio.get_running_loop().create_future()
+        _approvals[call_id] = fut
+        if await fut == "deny" or turn.cancel.is_set():
+            err = "The user denied starting this subagent. Do the work yourself or ask what they want."
+    if err:
+        tmsg = {"role": "tool", "tool_call_id": call_id, "name": "run_subagent", "content": err, "error": True,
+                "label": label, "lane": lane}
+        turn.history.append(tmsg)
+        yield {"t": "tool_result", "message": tmsg}
+        return
+    sid = uuid.uuid4().hex[:8]
+    rec = {"role": "subagent", "id": sid, "name": name, "task": task, "call_id": call_id, "lane": lane,
+           "model": turn.model_name, "status": "working", "ts": time.time()}
+    yield {"t": "subagent_start", "sub": dict(rec)}
+    sub = SubTurn(turn, sid, name, task)
+    failure = ""
+    try:
+        async for ev in run_local(sub, lane="local", max_steps=int(turn.settings.get("subagent_max_steps") or 20)):
+            yield {**ev, "sub": sid}
+    except Exception as e:  # noqa: BLE001  (a failed subagent is reported to the parent, not fatal)
+        failure = f"{type(e).__name__}: {e}"[:600]
+    report = _final_reply(sub.history)
+    status = "stopped" if turn.cancel.is_set() else "error" if failure else "done"
+    rec.update(status=status, result=report or failure, ended=time.time(), messages=_lean(sub.history),
+               steps=sum(1 for m in sub.history if m.get("role") == "tool"))
+    turn.history.append(rec)
+    yield {"t": "subagent_done", "sub": rec}
+    if status == "done":
+        text = f"Report from subagent {name}:\n{report or '(it finished without a report)'}"
+    elif status == "stopped":
+        text = f"Subagent {name} was stopped before it finished." + (f" Its last words:\n{report}" if report else "")
+    else:
+        text = f"Subagent {name} failed: {failure}" + (f"\nIts last words:\n{report}" if report else "")
+    tmsg = {"role": "tool", "tool_call_id": call_id, "name": "run_subagent", "content": text,
+            "error": status != "done", "label": label, "lane": lane}
+    turn.history.append(tmsg)
+    yield {"t": "tool_result", "message": tmsg}

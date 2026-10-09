@@ -58,6 +58,7 @@ Rules
 - An app window ("in Notepad", "click", "this window", "my app"): app_list, app_view, app_click, app_type, app_keys, app_read.
 - The web: web_search and fetch_url for facts and pages; browser_* to log in, click or fill forms on websites.
 - Earlier chats or personal facts: recall (and remember to save new lasting facts).
+- Big jobs with separate parts or a lot of reading (many files, long logs, several searches, checking work): add run_subagent.
 - If the user continues an earlier task ("do it again", "now fix that", "continue"), choose the same kind of tools as the context shows."""
 
 _state = {"server": None, "ready": False, "error": None, "model": None, "threads": None, "warm": False,

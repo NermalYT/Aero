@@ -1,6 +1,6 @@
 # Aero
 
-*A calm, lightweight bootstrapper for local AI on Windows. Your hardware does the work, a tiny CPU model makes the
+*A lightweight bootstrapper for local AI on Windows. Your hardware does the work, a tiny CPU model makes the
 decisions, and ChatGPT or Claude check it only when you ask.*
 
 Aero scans your PC, recommends a model and quant that fit it, installs the right llama.cpp build for your GPU
@@ -183,6 +183,28 @@ Settings → Claude → Connection:
 4. Chat. **Think** cycles *auto* (router decides) → *on* → *off*. Paste big text and it becomes a chip; attach
    images, PDFs, Office files, code or zips with the paperclip or drag-and-drop. Esc stops a reply.
 
+### Agents and subagents
+
+- **Agents.** Each chat's task is worked by an agent with a job title for a name, from the request at once ("Tidy my
+  Desktop" → Desktop Organizer) and then from the model when it titles the chat. The name shows next to the chat
+  title. Clicking an agent in the dashboard opens its chat, where you talk to it with everything it did in context.
+- **Subagents.** For a big job with separate parts, the agent can call `run_subagent` with a name and a full brief.
+  A fresh copy of the local model (empty context, same tools, same approvals) does that part and reports back; the
+  agent sees only the report, which keeps its own context small. The subagent's steps stream inside the
+  `run_subagent` card, then fold into one line with its report. Subagents can't start subagents. Settings → Tools
+  has the permission (*auto* by default) and the step limit (20).
+- **Talk to a subagent.** **Chat** on its card, or its row in the dashboard, opens a chat with it. It answers as
+  that subagent, from its task, its steps and its report, and can keep working with its tools.
+
+### "Is controlling" header and Stop
+
+When a model sends input (clicks, typing, keys, scrolling, opening or switching apps, browser actions), Aero shows
+"*model* is controlling *app*" in a header across the top of its window with a **Stop** button, and the same banner
+at the top of the app being controlled (or of the screen). Looking (screenshots, reading an app or page) doesn't
+count. The banner over the other app never takes focus, is left out of screenshots so the model never sees or
+clicks it, and moves to the bottom of the window when the model needs the spot it covers. Stop on either one stops
+every running task and denies any pending approval. Both go away when the turn ends.
+
 ### Performance Lab and HAPO
 
 **Lab** in the top bar. **Profiles** lists what the tuner's measured trials offer: Maximum Speed, Balanced, Maximum
@@ -225,10 +247,13 @@ window is hidden. Theme follows Windows unless you pick Day or Night.
 
 ## The dashboard
 
-The glass panel on the right (the dashboard button in the top bar shows or hides it) updates live: models and which
-one is working, the forever-loop, GPU (VRAM used by Aero vs other apps, load, temperature, power, clocks; NVIDIA
-only), CPU and RAM, local speed, this session's tokens and tool calls, review verdicts, ChatGPT and Claude usage and
-spending today, and memory, tool and MCP counts.
+The glass panel on the right (the dashboard button in the top bar shows or hides it) updates live. The first card,
+**Models · Agents**, scrolls through three sections you can fold: **Models** (router, local model, ChatGPT and Claude
+lanes, and which one is working), **Agents** (each chat's agent, its status and what it is doing; hover for the
+task, result and subagents, click to open its chat) and **Subagents** (grouped under the agent that started them;
+hover for the task and report, click to talk to one). The other cards show the forever-loop, GPU (VRAM used by
+Aero vs other apps, load, temperature, power, clocks; NVIDIA only), CPU and RAM, local speed, this session's tokens
+and tool calls, review verdicts, ChatGPT and Claude usage and spending today, and memory, tool and MCP counts.
 
 ## Built-in tools
 
@@ -243,6 +268,7 @@ spending today, and memory, tool and MCP counts.
 | Web | `web_search`, `fetch_url` | auto |
 | Memory | `remember`, `recall`, `forget` | auto |
 | Skills | `use_skill` | auto |
+| Subagents | `run_subagent` | auto |
 | MCP and GitHub | everything from connected servers | **ask** |
 
 - *ask* shows Allow / Always in this chat / Deny on the tool card, for your model and for the cloud models alike.
@@ -250,8 +276,8 @@ spending today, and memory, tool and MCP counts.
   rights; leave them on *ask* unless you trust the model.
 - **App control**: pick a window with the **App** button (or name the app). The model sees only that window, even
   when covered, plus a numbered list of its controls; clicks and typing go to it in the background, so your mouse
-  and keyboard stay yours. A blue **Aero** cursor shows where it is acting. Slam the real mouse into a screen corner
-  to abort desktop control.
+  and keyboard stay yours. A blue **Aero** cursor shows where it is acting, and the "is controlling" header and
+  banner (above) carry a Stop button. Slam the real mouse into a screen corner to abort desktop control.
 - The browser is a visible Edge window with its own profile (`C:\Aero\data\browser-profile`).
 
 ## Folders

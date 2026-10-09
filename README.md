@@ -8,7 +8,7 @@ shell, screen, apps and browser. Everything local runs on 127.0.0.1, and with **
 the PC at all. When you want a second opinion, ChatGPT and/or Claude review the finished work, and your local model
 learns from what they found.
 
-![Aero by day](screenshots/day.jpg)
+![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
 
 ## Download and install
 
@@ -31,6 +31,12 @@ install and model downloads. A GPU is optional.
 - **Tunes for real.** Measures llama.cpp settings on your PC within a VRAM limit you choose. HAPO turns the measured
   trials into profiles (Maximum Speed, Balanced, Maximum Context, Maximum Quality, Agent Optimized, Efficiency).
 - **A tiny router on the CPU** reads each request first and gives the main model only the tools it needs.
+- **Agents and subagents.** Each chat's task gets an agent named for what it does ("Photo Renamer", "Crash
+  Investigator"). An agent can hand a self-contained part of the job to a subagent (a fresh copy of the local model
+  with its own context) and gets back its report. The dashboard lists models, agents and subagents in one scrolling
+  card: hover for what each is doing, click to talk to it.
+- **You always know when it's driving.** While a model clicks, types or opens apps, a header across the top of Aero
+  and a banner over the app it's using say "*model* is controlling *app*", each with a **Stop** button.
 - **Optional cloud reviews, two buttons.** **ChatGPT**: GPT-6 Astra reviews, GPT-6.1 Sol repairs. **Claude**: Claude
   Fable 5.1 reviews, Claude Opus 5.5 repairs. With both on, ChatGPT goes first and Claude reviews the final state with
   ChatGPT's findings. Every problem found becomes a lesson for your local model. Connect with an API key or your
@@ -42,13 +48,21 @@ install and model downloads. A GPU is optional.
 - **Frutiger Aero.** Glass over a day or night landscape with a frog pond. Scenery Full, Still or Off; it pauses
   while a model is working.
 
-| Night | Both review passes (demo chat) |
+| Day | Night |
 |---|---|
-| ![Night](screenshots/night.jpg) | ![Review passes](screenshots/review-passes.jpg) |
+| ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
-| Performance Lab | Narrow window |
+| Talking to a subagent | Models, agents and subagents |
 |---|---|
-| ![Performance Lab](screenshots/performance-lab.jpg) | ![Narrow window](screenshots/narrow.jpg) |
+| ![A chat with the subagent Photo Scout](screenshots/subagent-chat.jpg) | ![Hovering a subagent shows its task and report](screenshots/agents-panel.jpg) |
+
+| Both review passes (demo chat) | Performance Lab |
+|---|---|
+| ![Review passes](screenshots/review-passes.jpg) | ![Performance Lab](screenshots/performance-lab.jpg) |
+
+| Narrow window |
+|---|
+| ![Narrow window](screenshots/narrow.jpg) |
 
 ![A frog meeps](screenshots/frog-meep.jpg)
 

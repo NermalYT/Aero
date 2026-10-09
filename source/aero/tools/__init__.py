@@ -36,6 +36,7 @@ CATEGORIES = {
     "memory": "Long-term memory (remember, recall, forget)",
     "mcp": "External MCP servers (GitHub, plugins, apps)",
     "skills": "Skills (task instructions loaded on demand)",
+    "agents": "Subagents (the local model hands part of a task to a fresh copy of itself)",
 }
 
 
@@ -124,6 +125,6 @@ def run(name, args, ctx):
 
 
 def load_all():
-    from . import files, shell, desktop, apps, web, browser, memory_tools, skill_tools  # noqa: F401  (registration side effects)
+    from . import files, shell, desktop, apps, web, browser, memory_tools, skill_tools, agent_tools  # noqa: F401  (registration side effects)
     from . import mcp_client
     mcp_client.start_all_async()
