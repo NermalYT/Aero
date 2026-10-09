@@ -86,8 +86,11 @@ def _prev_exposed(history):
     return None
 
 
-def choose_exposure(decision, settings, prev, available):
-    chosen = router.expand([n for n in decision.get("tools") or [] if n in available], available)
+def choose_exposure(decision, settings, prev, available, text=""):
+    from . import capabilities
+    picked = [n for n in decision.get("tools") or [] if n in available]
+    picked += [n for n in capabilities.hint_tools(text, available) if n not in picked]   # see capabilities.HINTS
+    chosen = router.expand(picked, available)
     floor = int(settings.get("router_tools_min") or 0)
     if decision.get("complexity") != "trivial" and len(chosen) < floor:
         for n in CORE_TOOLS:
@@ -157,7 +160,7 @@ async def route(turn, opts):
     if rec:
         d = rec["decision"]
         turn.decision = d
-        exposed = choose_exposure(d, s, prev, available) if catalog else []
+        exposed = choose_exposure(d, s, prev, available, agent._last_user_text(turn.history)) if catalog else []
         if think_pref == "auto":
             turn.think = bool(d.get("think"))
         in_loop = loop.get("iteration", 0) > 1 and not s.get("review_in_loop")

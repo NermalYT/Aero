@@ -199,3 +199,58 @@ def read_only(name, args=None):
 
 def public(name, category=None):
     return caps_of(name, category).public()
+
+
+# ---- capability hints: a safety net under the router ------------------------------------------------------------
+# The CPU router (a 1-3B model) often returns no tools for plain action requests (measured: 17 of 50 benchmark
+# requests, docs/V1.1_PERFORMANCE_REPORT.md). These patterns name the capability a request plainly needs; the tools
+# that provide it are added to the router's pick. They only ever add tools (the model can still load_tools), cost no
+# model call, and app names are handled separately by app_registry.mentions.
+import re as _re  # noqa: E402
+
+HINTS = [
+    (r"\b(remember (that|this|my|i)|don'?t forget|keep in mind|note that|save (this|that) to memory)\b",
+     ["memory.learn"]),
+    (r"\b(yesterday|last (time|week|chat|session)|earlier (chat|today|conversation)|we (talked|discussed|spoke)|you "
+     r"(said|told me)|do you remember|remember when)\b", ["memory.recall"]),
+    (r"(https?://\S+|\b(browser|web ?page|website|web site|this site|the site|tab|sign ?in to|log ?in to|scroll (down|up)"
+     r"|go back|previous page|the form|on the page)\b)", ["browser.navigate", "browser.read", "browser.interact"]),
+    (r"\b(click|press|tap|type|toggle|tick|untick|select)\b.{0,60}\b(button|field|box|window|menu|dialog|tab|app|"
+     r"checkbox)\b", ["app.inspect", "app.interact", "app.read"]),
+    (r"^\s*(please\s+)?(open|start|launch|run|fire up|boot up)\s+(?!the\s+(file|folder|tests?))\w", ["app.launch", "app.discover"]),
+    (r"\b(e-?mails?|inbox|mailbox|gmail|outlook)\b", ["email.read", "browser.navigate"]),
+    (r"\b(meetings?|calendar|schedule)\b.{0,80}\b(doc|document|report|summary|list)\b|\b(doc|document)\b.{0,80}"
+     r"\bmeetings?\b", ["document.create", "calendar.read"]),
+    (r"\b(organi[sz]e|sort|tidy|clean up|move|rename|delete|remove|archive)\b.{0,60}\b(files?|folders?|desktop|"
+     r"downloads|documents|photos|pictures)\b", ["filesystem.search", "filesystem.modify"]),
+    (r"\b(run|re-?run)\b.{0,30}\btests?\b|\b(pip|npm|git|winget|apt|brew)\b", ["terminal.execute"]),
+    (r"\b(find|look up|search( for)?|recommend|suggest|what'?s new|latest)\b.{0,50}\b(game|experience|song|playlist|"
+     r"video|article|news|review|price|place|restaurant|release)s?\b", ["browser.search"]),
+]
+_HINTS = [(_re.compile(p, _re.I), caps) for p, caps in HINTS]
+# what each hinted capability brings, in addition to the router's pick (the most useful few, not everything)
+HINT_TOOLS = {
+    "memory.learn": ["remember"], "memory.recall": ["recall"],
+    "browser.navigate": ["browser_open", "browser_back"], "browser.read": ["browser_snapshot", "browser_read_sections"],
+    "browser.interact": ["browser_click", "browser_type", "browser_scroll"],
+    "app.inspect": ["app_list", "app_view"], "app.interact": ["app_click", "app_type", "app_keys"], "app.read": ["app_read"],
+    "app.launch": ["app_launch", "open_app"], "app.discover": ["app_find"],
+    "email.read": [], "document.create": ["meeting_doc", "write_file"], "calendar.read": [],
+    "filesystem.search": ["list_dir", "find_files"], "filesystem.modify": ["move_path", "write_file", "delete_path"],
+    "terminal.execute": ["run_command"], "browser.search": ["web_search", "fetch_url"],
+}
+
+
+def hint_tools(text, available):
+    """Tools to add for the capabilities a request plainly needs (registry order). MCP tools whose names mention mail
+    come with email requests."""
+    av = list(available or [])
+    want = []
+    for rx, caps in _HINTS:
+        if rx.search(text or ""):
+            for c in caps:
+                want += HINT_TOOLS.get(c, [])
+                if c == "email.read":
+                    want += [n for n in av if n.startswith("mcp_") and ("mail" in n.lower() or "gmail" in n.lower())]
+    s = set(want)
+    return [n for n in av if n in s]

@@ -736,6 +736,7 @@ def mentions(text, limit=4):
     if not t.strip():
         return []
     low = " " + re.sub(r"[^\w+#.]+", " ", t.lower()) + " "
+    low = re.sub(r"\.(?=\s)", " ", low)                      # "Spotify." ends a sentence; "battle.net" keeps its dot
     found = []
     for k, e in app_catalog.CATALOG.items():
         for a in e["aliases"]:
