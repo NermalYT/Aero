@@ -110,7 +110,10 @@ class Physical(unittest.TestCase):
             if name in ("type_text", "mouse_click", "press_keys"):
                 return {"text": f"did {name}", "error": False}
             return real(name, args, ctx)
-        self.ps = [mock.patch.object(agent.tools, "run", run),
+        # the desktop tools need a display; CI runners have none, so pretend they are usable here
+        self.ps = [mock.patch.object(tools.REGISTRY[n], "available", lambda: True)
+                   for n in ("mouse_click", "type_text", "press_keys")]
+        self.ps += [mock.patch.object(agent.tools, "run", run),
                    mock.patch.object(input_guard, "idle_ms", lambda: 10 ** 6),
                    mock.patch.object(input_guard, "restore_foreground", lambda h: True),
                    mock.patch.object(agent.control, "banner_on", lambda *a, **k: None),

@@ -55,8 +55,18 @@ def norm(s):
     return re.sub(r"\s+", " ", s)
 
 
+def fname(path):
+    """'C:\\x\\Bloxstrap.exe' -> 'Bloxstrap.exe' on any OS (records can hold Windows paths)."""
+    return re.split(r"[\\/]", str(path or ""))[-1]
+
+
+def stem(path):
+    n = fname(path)
+    return n[:n.rindex(".")] if "." in n else n
+
+
 def _rid(name, exe=""):
-    base = norm(Path(exe).stem if exe else name) or norm(name)
+    base = norm(stem(exe) if exe else name) or norm(name)
     return re.sub(r"[^a-z0-9]+", "-", base).strip("-")[:48] or "app"
 
 
@@ -285,7 +295,7 @@ def _scan_protocols():
     for sch in schemes:
         exe = protocol_handler(sch)
         if exe:
-            recs.append(_rec(Path(exe).stem, "win32", "protocol_handler", exe=exe, protocols=[sch],
+            recs.append(_rec(stem(exe), "win32", "protocol_handler", exe=exe, protocols=[sch],
                              launch=[{"method": "exe", "target": exe}]))
     return recs
 
@@ -505,13 +515,13 @@ def _merge(recs):
             hit["name"] = r["name"]                       # the Start menu name is what people call it
     ids = {}
     for r in out:
-        cid = app_catalog.by_exe(Path(r["exe"]).name) if r.get("exe") else None
+        cid = app_catalog.by_exe(fname(r["exe"])) if r.get("exe") else None
         if not cid:
             n = norm(r["name"])
             cid = next((k for k, e in app_catalog.CATALOG.items() if n == norm(e["name"]) or n in e["aliases"]), None)
         if cid:
             r["catalog"] = cid
-            if r.get("exe") and norm(r["name"]) == norm(Path(r["exe"]).stem):
+            if r.get("exe") and norm(r["name"]) == norm(stem(r["exe"])):
                 r["name"] = app_catalog.CATALOG[cid]["name"]      # "notepad" (a program file name) -> "Notepad"
         base = r["id"]
         i = ids.get(base, 0)
@@ -617,9 +627,10 @@ def trust_of(exe):
     shares, removable roots) or '' when there is no program file."""
     if not exe:
         return ""
-    p = os.path.normcase(os.path.abspath(os.path.expandvars(str(exe))))
-    if p.startswith("\\\\"):
+    raw = os.path.expandvars(str(exe))
+    if raw.startswith(("\\\\", "//")):              # a network share
         return "untrusted"
+    p = os.path.normcase(os.path.abspath(raw))
     low = p.lower()                       # "Downloads" on case-sensitive file systems too
     home = str(Path.home()).lower()
     bad = [os.path.join(home, "downloads"), (os.environ.get("TEMP", "") or "/tmp").lower(),
@@ -639,7 +650,7 @@ def _aliases(r):
     out = {norm(r["name"])}
     out.update(norm(a) for a in r.get("aliases") or [])
     if r.get("exe"):
-        out.add(norm(Path(r["exe"]).stem))
+        out.add(norm(stem(r["exe"])))
     e = app_catalog.entry(r.get("catalog")) if r.get("catalog") else None
     if e:
         out.update(norm(a) for a in e["aliases"])
@@ -692,7 +703,7 @@ def resolve(phrase, running=None, limit=5):
         installed = r.get("installed", True)
         is_run = False
         if r.get("exe"):
-            is_run = Path(r["exe"]).name.lower() in run_names or os.path.normcase(r["exe"]) in run_exes
+            is_run = fname(r["exe"]).lower() in run_names or os.path.normcase(r["exe"]) in run_exes
         elif r.get("catalog"):
             e = app_catalog.entry(r["catalog"])
             is_run = any(x.lower() in run_names for x in e.get("exe", []) + e.get("procs", []))
@@ -701,7 +712,7 @@ def resolve(phrase, running=None, limit=5):
             why += "; not installed" if r.get("kind") != "service" else "; web service"
         elif r.get("handler"):
             score -= 0.05
-            why += f'; opens through {Path(r["handler"]).name} (registered for its links)'
+            why += f'; opens through {fname(r["handler"])} (registered for its links)'
         if is_run:
             score += 0.03
             why += "; running now"
@@ -793,7 +804,7 @@ def context_line(text, ms=None):
         if m.get("running"):
             bits.append("running")
         if m.get("handler"):
-            bits.append(f"opens through {Path(m['handler']).name}")
+            bits.append(f"opens through {fname(m['handler'])}")
         if m.get("related"):
             bits.append("related: " + ", ".join(app_catalog.CATALOG[r]["name"] for r in m["related"]
                                                 if r in app_catalog.CATALOG))
@@ -823,7 +834,7 @@ def windows_of(pids):
 def _expected_procs(r):
     names = set()
     if r.get("exe"):
-        names.add(Path(r["exe"]).name.lower())
+        names.add(fname(r["exe"]).lower())
     e = app_catalog.entry(r.get("catalog")) if r.get("catalog") else None
     if e:
         names.update(x.lower() for x in e.get("exe", []) + e.get("procs", []) if x.lower().endswith(".exe") or not IS_WIN)
@@ -938,7 +949,7 @@ def launch(app_id_or_phrase, method=None, args=None, uri=None, background=True, 
         handler = protocol_handler(scheme) if IS_WIN else ""
         ms = [{"method": "protocol", "target": uri, "handler": handler}]
         if handler:
-            expect.add(Path(handler).name.lower())
+            expect.add(fname(handler).lower())
     if method:
         ms = [m for m in ms if m.get("method") == method] or ms
     if not ms:
@@ -978,7 +989,7 @@ def launch(app_id_or_phrase, method=None, args=None, uri=None, background=True, 
     else:
         note = "no new process of this app appeared within %ds" % timeout
     if used.get("handler"):
-        note += f'; the link was handled by {Path(used["handler"]).name}'
+        note += f'; the link was handled by {fname(used["handler"])}'
     _learn(r, used, ok=verified)
     return {"ok": verified or bool(already), "verified": verified, "app": r["name"], "id": r["id"],
             "method": used["method"], "target": used.get("target"), "pids": [p["pid"] for p in new],
