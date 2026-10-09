@@ -946,7 +946,7 @@ def launch(app_id_or_phrase, method=None, args=None, uri=None, background=True, 
     ms = _methods(r)
     if uri:
         scheme = uri.split(":", 1)[0].lower()
-        handler = protocol_handler(scheme) if IS_WIN else ""
+        handler = protocol_handler(scheme)              # "" where the OS has no lookup
         ms = [{"method": "protocol", "target": uri, "handler": handler}]
         if handler:
             expect.add(fname(handler).lower())
