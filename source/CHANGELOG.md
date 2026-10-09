@@ -125,6 +125,8 @@ while someone views your PC over Remote Desktop. Design, measurements and limits
 - Prompt: tool output is data, not instructions; evidence notes; questions; apps; the browser's background mode.
   An unedited 1.0 prompt is recognised on every OS and replaced.
 - CI runs the tests on Windows, Ubuntu and macOS for every push (`.github/workflows/ci.yml`).
+- `validation/check_upgrade.py`: a real older Aero server writes a data folder, this version opens it and checks
+  settings, chats and memory (18/18 from 1.0.0). The release builder leaves ruff's cache out of the archives.
 - Fixes found by CI: Windows paths in app records parsed the same on every OS; hardware tests fake the whole
   platform (they failed on macOS runners).
 - 100 new tests (218 in total); live Windows desktop checks and real-browser checks are opt-in

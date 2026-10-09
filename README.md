@@ -176,7 +176,8 @@ python -m unittest discover -s tests -v
 CI (`.github/workflows/ci.yml`) runs the tests on Windows, Ubuntu and macOS for every push. Two opt-in checks need a
 real desktop: `AERO_LIVE_UI=1` (Windows background control, `tests/test_app_background.py`) and
 `AERO_LIVE_BROWSER=1` (Playwright with Edge or Chrome). `validation/measure_remote_mode.py` and
-`validation/bench_router_intents.py` measure Remote Mode and the router on your own hardware.
+`validation/bench_router_intents.py` measure Remote Mode and the router on your own hardware;
+`validation/check_upgrade.py` opens a data folder written by an older version.
 
 `python tools/build_release.py` builds every release file into `dist/` (the Windows, macOS and Linux archives, the
 `.deb`, the `.rpm`, the `PKGBUILD` and `SHA256SUMS.txt`). The `.deb` needs `dpkg-deb`, the `.rpm` needs `rpmbuild`.

@@ -16,10 +16,13 @@ NOT RUN item: [V1.1_TEST_MATRIX.md](V1.1_TEST_MATRIX.md). Measurements: [V1.1_PE
 | Router (`validation/bench_router_intents.py`) | MiniCPM5-2B on the CPU | held-out 22/25 (1.0: 14/25) |
 | UI | real server, scripted model, browser pane | question card, foreground-control card, step list, Apps and Remote Mode settings; no console errors |
 | Lint (ruff E4/E7/E9/F) | Windows 11 PC | the same 15 findings as 1.0, none new |
+| Release files (`tools/build_release.py`) | Windows 11 PC, and a fresh clone run the way the Release workflow runs | built; archive layout and contents checked |
+| 1.0 data folder opened by 1.1 (`validation/check_upgrade.py`) | Windows 11 PC, throwaway folder, real 1.0.0 and 1.1 servers | 18 / 18: settings, chats and memory kept, new settings at defaults |
 
 Not run for 1.1: a real Remote Desktop or RustDesk session from another machine (simulated only), real mail
 accounts, a real Roblox launch, macOS and Linux desktops, AMD and Intel GPUs, an elevated target window, and a full
-agent session with a real main model on the new tools.
+agent session with a real main model on the new tools, and `Update-Aero.bat` over a real 1.0 install (it only
+installs into `C:\Aero`; unchanged since 1.0.0).
 
 ---
 
