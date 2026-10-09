@@ -9,6 +9,7 @@ title Aero Installer
 ::   - copies the app to C:\Aero and builds a private Python environment
 ::   - downloads the right llama.cpp build for your GPU (CUDA for NVIDIA)
 ::   - creates Desktop + Start Menu shortcuts that launch as administrator
+::   - lists Aero under Settings > Apps > Installed apps, where it uninstalls like any other program
 ::   - lets you pick the CPU decision router and a main model, then opens Aero
 :: Update later with C:\Aero\Update-Aero.bat. Models, chats and settings are always kept.
 :: ---------------------------------------------------------------------------
@@ -140,6 +141,7 @@ echo [7/7] Done.
 echo.
 echo  Aero is installed. Desktop icon: Aero (asks for admin on launch).
 echo  Update later with %DEST%\Update-Aero.bat   Models: %DEST%\models   Chats/settings: %DEST%\data
+echo  Uninstall: Settings ^> Apps ^> Installed apps ^> Aero ^> Uninstall
 if defined FROMOLD echo  Your models, chats, memory and settings moved here from %FROMOLD%.
 where codex >nul 2>&1 || echo  Optional: to use your ChatGPT plan for reviews, install OpenAI's Codex CLI with
 where codex >nul 2>&1 || echo            npm install -g @openai/codex   ^(then Settings ^> ChatGPT ^> Sign in^)

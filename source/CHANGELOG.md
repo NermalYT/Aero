@@ -5,6 +5,20 @@
 The first public release. Aero is the app that was called Halcyon (and VRAMpire before that), rebuilt as a
 Frutiger Aero styled, lightweight bootstrapper for local LLMs on Windows, Linux and macOS.
 
+### Windows: a regular installed app
+
+- Aero is listed under **Settings → Apps → Installed apps** (and Control Panel → Programs and Features) with its
+  bubble icon, version, publisher, size and links. Installing registers it; every update refreshes the version.
+- **Uninstall** from there removes Aero completely: a dialog shows what goes, with *Delete downloaded models* and
+  *Delete chats, memory, settings and saved keys* both ticked (untick one to keep that folder). It asks for
+  administrator rights, stops Aero, its llama.cpp servers and its app window (including the Python process the venv
+  launcher starts), deletes the Start menu and desktop shortcuts, `C:\Aero`, Aero's temporary files and the Installed
+  apps entry. A file Windows still holds open is deleted at the next sign-in.
+- A quiet uninstall for scripts and winget (`Uninstall-Aero.ps1 -Quiet`, plus `-All` to delete models and chats).
+  `C:\Aero\Uninstall-Aero.bat` runs the same uninstaller.
+- The uninstaller refuses any folder that isn't an Aero install, and never touches a drive root, Windows, Program
+  Files or your profile folders.
+
 ### Linux and macOS
 
 - Aero now installs and runs on **Linux** and **macOS** (Apple Silicon and Intel) as well as Windows. One

@@ -55,8 +55,22 @@ the uninstaller in `source\installer`).
 
 4. Then the **model chooser** runs in the same window (below), and Aero opens.
 
-Run `C:\Aero\Update-Aero.bat` later for packages, llama.cpp and the chooser. Uninstall: `C:\Aero\Uninstall-Aero.bat`
-(asks whether to keep models and chats).
+Run `C:\Aero\Update-Aero.bat` later for packages, llama.cpp and the chooser.
+
+**Uninstall** like any other program: **Settings → Apps → Installed apps → Aero → ⋯ → Uninstall**, or Control Panel →
+Programs and Features. The installer registers Aero there with its icon, version, publisher and size (every update
+refreshes the version). Uninstalling:
+
+1. asks for administrator rights (Aero was installed for every user of the PC);
+2. shows what it removes, with two boxes, both ticked: **Delete downloaded models** and **Delete chats, memory,
+   settings and saved keys**. Untick one to keep that folder; installing Aero again picks it up;
+3. stops Aero, its llama.cpp servers and its app window;
+4. deletes the Start menu and desktop shortcuts, `C:\Aero` (or all of it except the folders you kept), Aero's
+   temporary files and its Installed apps entry. A file Windows still has open is deleted at your next sign-in.
+
+`C:\Aero\Uninstall-Aero.bat` does the same. For scripts and winget, the entry's quiet uninstall
+(`Uninstall-Aero.ps1 -Quiet`) keeps models and chats; add `-All` to delete them too. Python, the Codex CLI and
+Claude Code are separate programs and stay installed.
 
 ### macOS
 
@@ -406,7 +420,7 @@ C:\Aero\
   models\     downloaded GGUFs; models\_router holds the decision router
   data\       settings.json, models.json, router.json, tune_cache.json, hapo.json, mcp.json, memory.json,
               cloud_usage.json, secrets.json (encrypted), chats\, skills\, training\, bench\, audit\, uploads\, logs\
-  aero-bubble.ico   Update-Aero.bat   Uninstall-Aero.bat   README.md
+  aero-bubble.ico   Update-Aero.bat   Uninstall-Aero.bat   Uninstall-Aero.ps1   README.md
 ```
 
 Linux (`~/.local/share/aero`) and macOS (`~/Library/Application Support/Aero`) have the same `app`, `venv`, `llama`,

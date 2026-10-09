@@ -5,8 +5,8 @@ PC, a Mac or a person.
 
 **Where the tests ran.** A Linux cloud container: Intel Xeon at 2.8 GHz, 4 cores, 16 GB RAM, **no GPU**, Python 3.11,
 Node 22, Chromium (software rendering), PowerShell 7.4.6, llama.cpp 0.5.0-dev (a portable CPU build), and Docker
-for the Linux install tests (section 3c). Nothing in this report ran on Windows or macOS. Every "Passed" below means
-passed in that container.
+for the Linux install tests (section 3c). Every "Passed" below means passed in that container, except section 3d,
+which ran on a real Windows 11 PC (build 26200, Windows PowerShell 5.1, Python 3.12.10). Nothing ran on macOS.
 
 The live model in these runs is `tinytest-f16`, a tiny model with random weights. It loads, tunes and streams tokens
 like a real model, so it proves the plumbing works, but its answers are noise: its speed numbers say nothing about a
@@ -14,8 +14,9 @@ real model on a real PC, and quality scores (recall, JSON and tool-call accuracy
 
 ## 1. Automated tests
 
-`python -m unittest discover -s tests -v` from `source/`: **113 tests, all passed** (also inside each Linux install
-in section 3c, and in a clean Ubuntu 24.04 container with Python 3.12 and an HTTP proxy set). None reaches the network: the
+`python -m unittest discover -s tests -v` from `source/`: **118 tests, all passed**: in the container, inside each Linux install
+in section 3c, in a clean Ubuntu 24.04 container with Python 3.12 and an HTTP proxy set, and on Windows 11 with
+Python 3.12.10 (section 3d; the first Windows run of the suite). None reaches the network: the
 OpenAI API and the local model are answered by in-process mock transports, the Codex CLI is a small fake script,
 nvidia-smi and the Windows registry are faked, desktop actions are faked, and every test uses a throwaway data
 folder.
@@ -27,7 +28,7 @@ folder.
 | `tests/test_experience.py` | 8 | Shared learning: a run record from tool results (worked, failed with its error, refused by the user, speed); a model call only after a failure, a refusal or feedback; notes counted instead of repeated, and a note that failed before and works now moves sides; notes and tool trouble reach only similar tasks, labelled with the model that learned them; reflection saves notes and puts a stated preference in every model's profile; per-model numbers; a whole turn with the scripted model whose Notepad call fails, then a second turn under another model name that starts with the first model's notes; switched off |
 | `tests/test_hapo_bench_offline.py` | 14 | HAPO profile rules, Pareto set, goals with no measurement, apply and restore after a failed load, old tuning caches; benchmark JSON and tool-call scoring, router suite scoring, reports mark missing results; strict offline (remote blocked, loopback allowed, async client blocked, network tools hidden); loopback detection |
 | `tests/test_hardware.py` | 6 | Hardware scan on PCs other than the reference one: NVIDIA live through nvidia-smi and not listed twice; AMD from the registry's 64-bit VRAM size; Intel Arc found, integrated GPUs and the basic display adapter left out; iGPU-only means CPU-only; two GPUs pooled; a recommendation that fits each sample PC (table below) |
-| `tests/test_installer.py` | 10 | llama.cpp build choice: newest CUDA build the driver supports, never newer; RTX 50-series needs 12.8+, else Vulkan; AMD and Intel get Vulkan; no GPU gets the CPU build; registry scan for AMD and Intel cards with iGPUs left out |
+| `tests/test_installer.py` | 15 | llama.cpp build choice: newest CUDA build the driver supports, never newer; RTX 50-series needs 12.8+, else Vulkan; AMD and Intel get Vulkan; no GPU gets the CPU build; registry scan for AMD and Intel cards with iGPUs left out. Installed apps entry: every value Settings shows (name, version, publisher, icon, size, uninstall and quiet uninstall commands, no Modify/Repair) in the 64-bit view, HKLM as administrator and HKCU otherwise, an update keeps the first install date, a test entry passes its id to the uninstaller, and the uninstaller ships as ASCII with CRLF line endings |
 | `tests/test_local_only.py` | 6 | Local Only: web, browser and MCP tools hidden from every model and refused if called anyway (with the reason), other tools kept; strict offline implies it; the model's instructions say it has no internet; a whole turn with both reviews switched on runs neither and sends no web tools, and the same turn with Local Only off reaches both reviews and offers web search |
 | `tests/test_mods_updates.py` | 27 | Mod Aero against a stand-in app: edit, check, apply, undo; checks catch broken Python; a Python change needs a restart and a mod that breaks startup is undone; a mod that started fine is kept; `--safe` turns every mod off; mods come back after an update, and a mod whose line the update rewrote is marked *needs redo*; a draft made before an update doesn't undo it; an applied mod gets a follow-up mod; the three-way patch; a mod turn writes only inside its copy; a whole mod chat with the scripted model. Updates against a fake GitHub: version compare, a newer release found, the switch and strict offline skip the check, download verified and unpacked, a bad checksum, a mismatched version and paths outside the folder refused, a source checkout can't replace itself, the hand-off runs the release's installer. Forever-loop journal: newest side wins, written after a round and read by the next, switched off. OS layer: shell, OS name and kind, Windows-only tools hidden elsewhere |
 | `tests/test_migrate.py` | 6 | Move from `C:\Halcyon`: saved paths rewritten (case-insensitive), model ids follow their new paths, MCP config updated, safe to run twice; old built-in "About you" text carried over only when the user never saved one; an unreadable legacy file is kept; settings upgraded once |
@@ -133,6 +134,38 @@ numbers); Local Only (Off to On with both reviews on: the ChatGPT and Claude but
 pressed without changing their setting, a whole chat ran with no review and no notice about one, Settings → Privacy
 & offline shows the switch on, back Off restores both buttons; day, night and 820 px). No page errors.
 
+## 3d. Windows 11: Installed apps entry and uninstaller (live, real PC)
+
+On dom's PC, in throwaway folders under `%USERPROFILE%\HalcyonTest\uninstall-test`, with test entries named
+`AeroTest*` registered for the current user (no administrator rights in that session). Each test install held the
+real app code, a real Python venv, a 64 MB model file, a router file, a data folder, a stand-in `llama-server.exe`
+and a path longer than 260 characters; `setup.py --skip-llama --no-shortcuts` registered it. The uninstall was run
+with the exact `UninstallString` / `QuietUninstallString` the entry holds, and the dialog was driven with button
+clicks sent to its window. On the final files, **all 43 checks passed**: 36 in the main run (rows 1 to 11), 3 for
+the administrator hand-off, 2 for `Uninstall-Aero.bat` and 2 parser checks under Windows PowerShell 5.1.
+
+| Check | Result |
+|---|---|
+| `setup.py` registers the entry: display name, version 1.0.0, publisher, icon file, size (80,671 KB), uninstaller copied to the install root | Passed |
+| Windows lists it as an installed program (`Get-Package -ProviderName Programs`) and `winget list` shows it (`ARP\User\X64\AeroTestA 1.0.0`) | Passed |
+| Settings' Uninstall command opens the dialog: "Uninstall Aero 1.0.0", *Delete downloaded models (64 MB)*, *Delete chats, memory, settings and saved keys*, both ticked | Passed |
+| **Uninstall** with the defaults: exit 0 in 4 s; the whole folder gone, including the >260-character path; the entry gone; a desktop shortcut pointing into the install deleted; nothing left for the next sign-in | Passed |
+| A running copy is stopped first: the venv's `pythonw.exe` launcher, the real `Python312\pythonw.exe` it started (outside the folder), and a `llama-server.exe` inside it | Passed |
+| **Cancel** changes nothing (exit 1602, the standard "cancelled by user" code) | Passed |
+| Unticking *models* keeps only `models` and removes everything else and the entry | Passed |
+| Quiet uninstall keeps `models` and `data` (model file intact), removes the rest and the entry; `-Quiet -All` removes everything | Passed |
+| A file held open: the rest is removed, the entry is removed, exit 0, and a `RunOnce` command deletes the folder at the next sign-in (the command was run and removed it) | Passed |
+| Refuses a folder that isn't an Aero install, and the user profile folder (exit 1, nothing deleted) | Passed |
+| dom's own Desktop and Start menu shortcuts (including `Halcyon.lnk`) unchanged; no test entries left; `C:\Aero` never created; `C:\Halcyon` untouched | Passed |
+| The administrator hand-off, with a copy whose only change is that `-Verb RunAs` is left out: the uninstaller restarts itself with `-Elevated`, an install path containing a space and the `-RemoveModels -RemoveData` choices arrive intact, the child removes everything and its exit code reaches the caller | Passed |
+| `C:\Aero\Uninstall-Aero.bat -Quiet -All` removes everything, exit 0, with no "cannot find" message after it deletes itself | Passed |
+| `Uninstall-Aero.ps1` and `Validate-Aero.ps1` parse under Windows PowerShell 5.1 | Passed |
+
+Not covered there: the normal **HKLM** entry an administrator install writes, and the real UAC prompt (the session
+had no administrator rights, and the prompt sits on the secure desktop, which needs a person). Apart from the hive,
+which the unit tests cover, that is the same code. `Validate-Aero.ps1` now checks the entry on a real install
+(read-only).
+
 ## 4. Screens
 
 29 screenshots of the running app in Chromium, all with no page errors, in `screens/aero-1.0/` next to the release
@@ -181,6 +214,8 @@ checks it.
   Solus, Gentoo, Clear Linux, NixOS and the immutable distros were not tried.
 - **Desktop control on Linux** (X11 clicks, typing and screenshots) and the app window in a real desktop session.
 
+- **The administrator path of the Windows uninstaller**: an HKLM entry written by a real `Update-Aero.bat` install and
+  the UAC prompt Uninstall raises for it (section 3d covered the per-user entry and everything after elevation).
 - **Install and upgrade on Windows**: `Update-Aero.bat`, `Install-Aero.bat`, the Python environment build, the
   llama.cpp download for each GPU kind, the move from `C:\Halcyon` or `C:\VRAMpire` to `C:\Aero` on a real disk
   (the path rewriting itself is unit-tested), Desktop and Start Menu shortcuts, the icon in Explorer and the

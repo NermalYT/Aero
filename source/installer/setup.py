@@ -9,7 +9,8 @@
      macOS    Apple Silicon: the Metal build · Intel Macs: the x64 build
 2. Puts the app icon next to the app folder.
 3. Creates shortcuts:
-     Windows  Desktop and Start Menu shortcuts that always launch as administrator
+     Windows  Desktop and Start Menu shortcuts that always launch as administrator, and registers Aero under
+              Settings > Apps > Installed apps (name, version, publisher, icon, size, Uninstall)
      Linux    an app-menu entry (~/.local/share/applications/aero.desktop) and the `aero` command (~/.local/bin)
      macOS    ~/Applications/Aero.app and the `aero` command (~/.local/bin)
 
@@ -40,6 +41,9 @@ NO_WIN = 0x08000000 if IS_WIN else 0
 LLAMA_REPO = "ggml-org/llama.cpp"
 GH = f"https://api.github.com/repos/{LLAMA_REPO}/releases?per_page=30"
 ICON_NAME = "aero-bubble.ico"
+APP_ID = "Aero"                                   # key under ...\CurrentVersion\Uninstall
+UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
+REPO_URL = "https://github.com/NermalYT/Aero"
 EXE = "llama-server.exe" if IS_WIN else "llama-server"
 
 
@@ -661,6 +665,97 @@ def make_shortcuts(dest: Path, ico: Path):
         say(f"Shortcut: {m}")
 
 
+# ---------------------------------------------------------------------------------------------------- Installed apps
+
+def _folder_kb(path: Path):
+    """Size of a folder in KB, for the size Settings shows. Unreadable files are skipped."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(root, f)).st_size
+            except OSError:
+                pass
+    return total // 1024
+
+
+def _powershell_exe():
+    root = os.environ.get("SystemRoot", r"C:\Windows")
+    return str(Path(root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
+
+
+def uninstall_commands(dest: Path, app_id=APP_ID):
+    """(UninstallString, QuietUninstallString). Settings > Installed apps > Uninstall runs the first; winget and
+    other silent tools run the second, which keeps models and chats unless -All is added."""
+    base = (f'"{_powershell_exe()}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden '
+            f'-File "{dest / "Uninstall-Aero.ps1"}"')
+    if app_id != APP_ID:
+        base += f' -AppId "{app_id}"'
+    return base, base + " -Quiet"
+
+
+def uninstall_values(dest: Path, ico, app_id=APP_ID, display_name="Aero", install_date=None):
+    """Every value of Aero's entry under the Uninstall registry key, as {name: (kind, value)}."""
+    loud, quiet = uninstall_commands(dest, app_id)
+    return {
+        "DisplayName": ("sz", display_name),
+        "DisplayVersion": ("sz", _app_version(dest)),
+        "Publisher": ("sz", "NermalYT"),
+        "DisplayIcon": ("sz", f"{ico},0" if ico else str(dest / "venv" / "Scripts" / "pythonw.exe")),
+        "InstallLocation": ("sz", str(dest)),
+        "UninstallString": ("sz", loud),
+        "QuietUninstallString": ("sz", quiet),
+        "URLInfoAbout": ("sz", REPO_URL),
+        "HelpLink": ("sz", REPO_URL + "/issues"),
+        "URLUpdateInfo": ("sz", REPO_URL + "/releases"),
+        "Comments": ("sz", "Local LLM bootstrapper and desktop agent"),
+        "InstallDate": ("sz", install_date or time.strftime("%Y%m%d")),
+        "EstimatedSize": ("dword", min(_folder_kb(dest), 0xFFFFFFFF)),
+        "NoModify": ("dword", 1),
+        "NoRepair": ("dword", 1),
+    }
+
+
+def _is_admin():
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def register_windows_app(dest: Path, ico, app_id=APP_ID, display_name="Aero", winreg=None):
+    """Lists Aero under Settings > Apps > Installed apps (and Control Panel > Programs and Features) so it uninstalls
+    like any other program. The installer and updater run as administrator, so the entry goes to HKLM for every user;
+    without admin rights it goes to HKCU, which Settings also lists. Each update rewrites it with the new version."""
+    if winreg is None:
+        import winreg  # noqa: PLC0415  (Windows only)
+    uninstaller = dest / "app" / "installer" / "Uninstall-Aero.ps1"
+    try:
+        shutil.copyfile(uninstaller, dest / "Uninstall-Aero.ps1")
+    except OSError as e:
+        say(f"Could not copy the uninstaller ({e}); Aero is not listed under Installed apps.")
+        return None
+    hive = winreg.HKEY_LOCAL_MACHINE if _is_admin() else winreg.HKEY_CURRENT_USER
+    path = UNINSTALL_KEY + "\\" + app_id
+    access = winreg.KEY_ALL_ACCESS | getattr(winreg, "KEY_WOW64_64KEY", 0)
+    try:
+        key = winreg.CreateKeyEx(hive, path, 0, access)
+    except OSError as e:
+        say(f"Could not register Aero under Installed apps ({e}).")
+        return None
+    with key:
+        try:
+            first = winreg.QueryValueEx(key, "InstallDate")[0]   # an update keeps the first install's date
+        except OSError:
+            first = None
+        for name, (kind, value) in uninstall_values(dest, ico, app_id, display_name, first).items():
+            winreg.SetValueEx(key, name, 0, winreg.REG_DWORD if kind == "dword" else winreg.REG_SZ, value)
+    where = "HKLM" if hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
+    say(f"Listed under Settings > Apps > Installed apps ({where}\\{path}); uninstall Aero from there.")
+    return where
+
+
 def _sh_quote(s):
     return "'" + str(s).replace("'", "'\"'\"'") + "'"
 
@@ -800,6 +895,9 @@ def main():
     ap.add_argument("--no-vulkan", action="store_true", help="the Vulkan loader couldn't be installed: skip that build")
     ap.add_argument("--no-openmp", action="store_true", help="the OpenMP runtime couldn't be installed: compile instead")
     ap.add_argument("--no-shortcuts", action="store_true", help="leave the shortcuts and the aero command alone")
+    ap.add_argument("--no-register", action="store_true", help="Windows: don't list Aero under Installed apps")
+    ap.add_argument("--app-id", default=APP_ID, help=argparse.SUPPRESS)          # tests register a throwaway entry
+    ap.add_argument("--display-name", default="Aero", help=argparse.SUPPRESS)
     a = ap.parse_args()
     dest = Path(a.dest).resolve()
     (dest / "data").mkdir(parents=True, exist_ok=True)
@@ -829,6 +927,8 @@ def main():
             make_mac_app(dest)
         else:
             make_linux_shortcuts(dest, ico)
+    if IS_WIN and not a.no_register:
+        register_windows_app(dest, ico, a.app_id, a.display_name)
     return 0
 
 

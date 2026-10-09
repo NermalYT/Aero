@@ -16,7 +16,7 @@ Get the file for your system from the [latest release](https://github.com/Nermal
 
 | System | Download | Then |
 | --- | --- | --- |
-| **Windows** 10 / 11 (64-bit) | `Aero-windows.zip` | Extract it, double-click **`Update-Aero.bat`**, accept the admin prompt. Installs into `C:\Aero`. |
+| **Windows** 10 / 11 (64-bit) | `Aero-windows.zip` | Extract it, double-click **`Update-Aero.bat`**, accept the admin prompt. Installs into `C:\Aero` with Start menu and desktop shortcuts, and lists Aero under **Settings → Apps → Installed apps**. |
 | **macOS** (Apple Silicon or Intel) | `Aero-macos.zip` | Unzip it, right-click **`Install-Aero.command`** → Open. Adds `~/Applications/Aero.app`. |
 | **Linux**, any distro | one line in a terminal (below) | Installs for your user into `~/.local/share/aero`, with an app-menu entry and the `aero` command. |
 | Debian, Ubuntu, Mint, Pop!_OS | `aero_<version>_all.deb` | `sudo apt install ./aero_*_all.deb`, then start Aero from the app menu or run `aero`. |
@@ -33,6 +33,15 @@ The installer finds your package manager (apt, dnf, zypper, pacman, apk, xbps, e
 shows the command before it installs anything missing (Python 3.10+, the Vulkan loader, the OpenMP runtime) and
 asks first. It never needs to run as root. Then the model chooser recommends a model for your computer, and Aero
 opens. `sh install.sh --help` lists its options.
+
+**Uninstall:** on Windows, **Settings → Apps → Installed apps → Aero → ⋯ → Uninstall** (or Control Panel →
+Programs and Features), like any other program. It shows what it will remove, with two boxes, both ticked: delete
+downloaded models, and delete chats, memory and settings. Untick one to keep that folder. It stops Aero, then removes
+`C:\Aero`, the Start menu and desktop shortcuts, Aero's temporary files and its Installed apps entry. Python (if the
+installer added it) is a separate program in the same list. On Linux and macOS, run `sh ~/.local/share/aero/uninstall.sh`
+(macOS: `sh ~/Library/Application\ Support/Aero/uninstall.sh`; add `--all` to delete models and chats too). The
+`.deb`, `.rpm` and Arch package remove their `aero` command with the package manager; run `uninstall.sh` first to
+remove your own Aero folder.
 
 **Updates:** Aero checks GitHub for a newer release once when it starts. **Update now** downloads it, verifies its
 checksum and installs it; models, chats, memory, settings, mods and tunings are kept.
@@ -106,9 +115,17 @@ everything in it.
 
 ## Status
 
-1.0.0 is the first public release. Its automated tests, a live run of the UI, a real self-update in a container,
-and installs from the release files on Ubuntu 24.04 and 22.04, Fedora 42 and Arch Linux passed (containers, no GPU). Windows, macOS, GPU speeds and real ChatGPT and Claude calls have not been tested yet;
-see the [validation report](source/docs/VALIDATION_REPORT.md). To check a Windows install without changing it:
+1.0.0 is the first public release. What has passed:
+
+- All 118 automated tests, on Linux (Python 3.11 and 3.12) and on Windows 11 (Python 3.12).
+- On Windows 11: Aero's Installed apps entry and its uninstaller, end to end (listed by Windows and winget,
+  uninstalled with the same command Settings runs, keeping or deleting models and chats, stopping a running copy,
+  deleting the shortcuts and the entry).
+- A live run of the UI, a real self-update, and installs from the release files on Ubuntu 24.04 and 22.04, Fedora
+  42 and Arch Linux (containers, no GPU).
+
+Not tested yet: a full Windows install with a GPU, macOS, GPU speeds and real ChatGPT and Claude calls. See the
+[validation report](source/docs/VALIDATION_REPORT.md). To check a Windows install without changing it:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\Aero\app\validation\Validate-Aero.ps1 -OpenUI

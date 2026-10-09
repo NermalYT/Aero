@@ -319,6 +319,22 @@ foreach ($folder in @($desktop, $startMenu)) {
 }
 [void]$R.person.Add("Look at the Desktop and taskbar icon at your display scaling: it should be the iridescent bubble, crisp, never a frog.")
 
+# Installed apps entry (Settings > Apps > Installed apps): read only
+$arp = $null
+foreach ($hive in "HKLM", "HKCU") {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($(if ($hive -eq "HKLM") { "LocalMachine" } else { "CurrentUser" }), "Registry64")
+    $k = $base.OpenSubKey("Software\Microsoft\Windows\CurrentVersion\Uninstall\Aero")
+    if ($k) { $arp = @{ Hive = $hive; Name = $k.GetValue("DisplayName"); Version = $k.GetValue("DisplayVersion"); Location = $k.GetValue("InstallLocation"); Uninstall = $k.GetValue("UninstallString") }; $k.Close(); $base.Close(); break }
+    $base.Close()
+}
+if (-not $arp) { Add-Check "Listed under Installed apps" "warn" "no entry yet: run Update-Aero.bat once (1.0.0 builds before the Installed apps change didn't register)" }
+else {
+    $ps1 = Join-Path $AeroDir "Uninstall-Aero.ps1"
+    $ok = ($arp.Location -ieq $AeroDir.TrimEnd("\")) -and (Test-Path -LiteralPath $ps1) -and ($arp.Uninstall -like "*Uninstall-Aero.ps1*")
+    $detail = "$($arp.Hive): $($arp.Name) $($arp.Version), $($arp.Location)"
+    if ($ok) { Add-Check "Listed under Installed apps" "pass" $detail } else { Add-Check "Listed under Installed apps" "warn" "$detail; uninstaller: $($arp.Uninstall)" }
+}
+
 # ------------------------------------------------------------------------------------------------ throwaway copy
 
 Section "Starting a throwaway copy of Aero"
