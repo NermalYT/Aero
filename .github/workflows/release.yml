@@ -2,11 +2,17 @@
 # source/aero/config.py. Aero's updater reads the newest release, so this is how users get a new version.
 #
 # Start it from Actions -> Release -> Run workflow, or by pushing the tag (git tag v1.0.0 && git push origin v1.0.0).
-# The notes come from .github/release-notes/v<version>.md when that file exists.
+# The notes come from .github/release-notes/v<version>.md when that file exists. Ticking "Replace" rebuilds a release
+# that already exists for this version: its tag moves to this commit and its files and notes are replaced.
 name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      replace:
+        description: Replace the files of the release that already exists for this version (moves its tag here)
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
 
@@ -27,6 +33,8 @@ jobs:
 
       - name: Version
         id: v
+        env:
+          REPLACE: ${{ inputs.replace }}
         run: |
           v=$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' source/aero/config.py)
           [ -n "$v" ] || { echo "::error::No VERSION in source/aero/config.py"; exit 1; }
@@ -34,7 +42,10 @@ jobs:
             echo "::error::The tag $GITHUB_REF_NAME doesn't match VERSION $v in source/aero/config.py"; exit 1
           fi
           if gh release view "v$v" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::Release v$v already exists. Raise VERSION in source/aero/config.py first."; exit 1
+            if [ "$REPLACE" != true ]; then
+              echo "::error::Release v$v already exists. Raise VERSION in source/aero/config.py, or run with Replace."; exit 1
+            fi
+            echo "exists=1" >> "$GITHUB_OUTPUT"
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
@@ -59,5 +70,12 @@ jobs:
         run: |
           v=${{ steps.v.outputs.version }}
           notes=.github/release-notes/v$v.md
-          if [ -f "$notes" ]; then set -- --notes-file "$notes"; else set -- --generate-notes; fi
-          gh release create "v$v" dist/* -R "$GITHUB_REPOSITORY" --title "Aero $v" --target "$GITHUB_SHA" --latest "$@"
+          if [ "${{ steps.v.outputs.exists }}" = 1 ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/v$v" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release upload "v$v" dist/* -R "$GITHUB_REPOSITORY" --clobber
+            if [ -f "$notes" ]; then set -- --notes-file "$notes"; else set --; fi
+            gh release edit "v$v" -R "$GITHUB_REPOSITORY" --title "Aero $v" "$@"
+          else
+            if [ -f "$notes" ]; then set -- --notes-file "$notes"; else set -- --generate-notes; fi
+            gh release create "v$v" dist/* -R "$GITHUB_REPOSITORY" --title "Aero $v" --target "$GITHUB_SHA" --latest "$@"
+          fi

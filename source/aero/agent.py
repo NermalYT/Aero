@@ -87,7 +87,19 @@ def _env_block(settings, vision, ctx_size):
             f"- Vision: {'yes, you can see images and screenshots' if vision else 'no (text only)'}\n"
             f"- Context window: {ctx_size:,} tokens\n"
             "- Each user message ends with a <turn_context> block (time sent, the router's plan, relevant "
-            "memories). It is written by Aero, not typed by the user.")
+            "memories). It is written by Aero, not typed by the user." + _local_only_line(settings))
+
+
+def _local_only_line(settings):
+    if settings.get("strict_offline"):
+        return ("\n- Strict offline is on: you have no internet access (no web search, web pages, browser or MCP "
+                "servers). Work from what you know and the user's local files and apps.")
+    if settings.get("local_only"):
+        return ("\n- Local Only is on: you have no internet access (no web search, web pages, browser or MCP "
+                "servers). Answer from what you know and the user's local files and apps. When a request needs "
+                "current information from the internet, say so, and that the user can turn Local Only off in the "
+                "composer to let you search.")
+    return ""
 
 
 def _when(ts):

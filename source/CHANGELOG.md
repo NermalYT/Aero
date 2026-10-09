@@ -132,6 +132,10 @@ Frutiger Aero styled, lightweight bootstrapper for local LLMs on Windows, Linux 
 
 ### Local-only inference
 
+- **Local Only** button next to ChatGPT, Claude and Loop. **On**: the model answers by itself with no web search,
+  web pages, automated browser or MCP servers, and the ChatGPT and Claude reviews don't run (their buttons grey
+  out). The model is told it has no internet and says so when a question needs it. **Off** (the default): the model
+  searches and reads the web when a task needs it. Also in Settings → Privacy & offline; strict offline turns it on.
 - Every token a local model generates comes from a `llama-server` Aero started itself, bound to 127.0.0.1, with
   `--offline` on builds that support it. No hosted engine is in the code path.
 - **Strict offline** (Settings → Privacy & offline): blocks every non-loopback request inside Aero's process at the

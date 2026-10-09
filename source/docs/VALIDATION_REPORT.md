@@ -14,7 +14,7 @@ real model on a real PC, and quality scores (recall, JSON and tool-call accuracy
 
 ## 1. Automated tests
 
-`python -m unittest discover -s tests -v` from `source/`: **107 tests, all passed** (also inside each Linux install
+`python -m unittest discover -s tests -v` from `source/`: **113 tests, all passed** (also inside each Linux install
 in section 3c, and in a clean Ubuntu 24.04 container with Python 3.12 and an HTTP proxy set). None reaches the network: the
 OpenAI API and the local model are answered by in-process mock transports, the Codex CLI is a small fake script,
 nvidia-smi and the Windows registry are faked, desktop actions are faked, and every test uses a throwaway data
@@ -28,6 +28,7 @@ folder.
 | `tests/test_hapo_bench_offline.py` | 14 | HAPO profile rules, Pareto set, goals with no measurement, apply and restore after a failed load, old tuning caches; benchmark JSON and tool-call scoring, router suite scoring, reports mark missing results; strict offline (remote blocked, loopback allowed, async client blocked, network tools hidden); loopback detection |
 | `tests/test_hardware.py` | 6 | Hardware scan on PCs other than the reference one: NVIDIA live through nvidia-smi and not listed twice; AMD from the registry's 64-bit VRAM size; Intel Arc found, integrated GPUs and the basic display adapter left out; iGPU-only means CPU-only; two GPUs pooled; a recommendation that fits each sample PC (table below) |
 | `tests/test_installer.py` | 10 | llama.cpp build choice: newest CUDA build the driver supports, never newer; RTX 50-series needs 12.8+, else Vulkan; AMD and Intel get Vulkan; no GPU gets the CPU build; registry scan for AMD and Intel cards with iGPUs left out |
+| `tests/test_local_only.py` | 6 | Local Only: web, browser and MCP tools hidden from every model and refused if called anyway (with the reason), other tools kept; strict offline implies it; the model's instructions say it has no internet; a whole turn with both reviews switched on runs neither and sends no web tools, and the same turn with Local Only off reaches both reviews and offers web search |
 | `tests/test_mods_updates.py` | 27 | Mod Aero against a stand-in app: edit, check, apply, undo; checks catch broken Python; a Python change needs a restart and a mod that breaks startup is undone; a mod that started fine is kept; `--safe` turns every mod off; mods come back after an update, and a mod whose line the update rewrote is marked *needs redo*; a draft made before an update doesn't undo it; an applied mod gets a follow-up mod; the three-way patch; a mod turn writes only inside its copy; a whole mod chat with the scripted model. Updates against a fake GitHub: version compare, a newer release found, the switch and strict offline skip the check, download verified and unpacked, a bad checksum, a mismatched version and paths outside the folder refused, a source checkout can't replace itself, the hand-off runs the release's installer. Forever-loop journal: newest side wins, written after a round and read by the next, switched off. OS layer: shell, OS name and kind, Windows-only tools hidden elsewhere |
 | `tests/test_migrate.py` | 6 | Move from `C:\Halcyon`: saved paths rewritten (case-insensitive), model ids follow their new paths, MCP config updated, safe to run twice; old built-in "About you" text carried over only when the user never saved one; an unreadable legacy file is kept; settings upgraded once |
 
@@ -128,7 +129,9 @@ Updates and the Installing overlay; Mod Aero from a prompt to a green send butto
 reloaded the page with the change and reopened the mod chat, Mods list shows it On); a forever-loop with a journal
 card per round and the Journal modal; shared learning (the scripted model's Notepad call fails on Linux, the model
 writes notes, the *Learned for next time* card appears, and Settings → Memory lists the notes and per-model
-numbers). No page errors.
+numbers); Local Only (Off to On with both reviews on: the ChatGPT and Claude buttons grey out and say why when
+pressed without changing their setting, a whole chat ran with no review and no notice about one, Settings → Privacy
+& offline shows the switch on, back Off restores both buttons; day, night and 820 px). No page errors.
 
 ## 4. Screens
 

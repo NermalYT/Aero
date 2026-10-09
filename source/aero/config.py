@@ -230,6 +230,7 @@ DEFAULTS = {
     "pond": True,                  # the frog pond along the bottom of the window
     "scene_pause_busy": True,      # freeze the scenery while a model is generating, tuning or benchmarking
     "transparency": True,          # Aero glass blur behind the window frames (Windows 7's "Enable transparency")
+    "local_only": False,           # composer's Local Only: no web, browser or MCP tools and no cloud reviews
     "strict_offline": False,       # block every outbound connection from Aero's own code (Settings > Privacy)
     "update_check": True,          # look for a newer Aero release on GitHub once, when Aero starts (see updater.py)
     "update_skip": "",             # a version the user chose "Skip this version" for

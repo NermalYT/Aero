@@ -543,6 +543,9 @@ body.scene-still .empty img, body.scene-paused .empty img, body.scene-off .empty
 .pill:hover { color: var(--text); }
 .pill.on:hover { color: #fff; filter: brightness(1.06); }
 #reviewPill { --pc: var(--fable); } #loopPill { --pc: var(--opus); } #thinkToggle { --pc: var(--router); }
+#localPill { --pc: var(--local); }
+.pill.blocked { opacity: .45; }
+.pill.locked { cursor: default; }
 .hint { font-size: 11.5px; color: var(--faint); margin-right: 6px; }
 .c-end { display: flex; align-items: center; gap: 8px; margin-left: auto; }   /* when the row wraps, the hint and Send stay together on the right */
 .send { width: 38px; height: 38px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--accent) 60%, #001a40); color: #fff; display: grid; place-items: center;

@@ -72,6 +72,15 @@ The audit log is `data/audit/network.jsonl`, one JSON line per non-loopback requ
 `{"t", "method", "host", "allowed", "why"}`. Paths and query strings are never written. It rotates at 1 MB
 (`network.1.jsonl`). Settings > Privacy & offline shows the last entries and the allowed/blocked counts.
 
+## Local Only
+
+The composer's **Local Only** button (also in Settings > Privacy & offline, setting `local_only`) is the everyday
+switch; strict offline is the hard lock. With Local Only on, `localonly.tool_allowed` hides the `web`, `browser` and
+`mcp` tool categories from every model (the router's catalog, the schemas sent to the model, and `tools.run` refuses
+them if called anyway), `pipeline.route` turns both review passes off before anything is sent, and the model's
+environment block says it has no internet. Aero's own update check and model downloads are not affected. Strict
+offline implies Local Only.
+
 ## Cloud sign-ins and keys
 
 - **Claude plan**: Aero runs the official, unmodified Claude Code program. Sign-in is `claude auth login` on
@@ -110,6 +119,7 @@ These are shown in the app as well, under "Not covered".
 | Every listening socket is loopback | `GET /api/local_status` with a model loaded | Passed (container): backend and `llama-server` both on 127.0.0.1 |
 | `--offline` reaches `llama-server` | `ARGS:` line in `logs/llama-server.log` | Passed (container, llama.cpp 0.5.0-dev) |
 | Local chat works with the machine offline | Needs Windows and the firewall rules | Not run. `Validate-Aero.ps1 -FirewallTest` does it |
+| Local Only: network tools hidden and refused, no review pass, the model told | `tests/test_local_only.py` (6 tests, one a whole turn with both reviews on) | Passed (container) |
 | Both review passes skipped in strict mode | `tests/test_chatgpt.py` `PassOrderTests.test_strict_offline_skips_both_passes` | Passed (container): no review call, one notice per pass |
 | Codex CLI never run in strict mode | `CodexPlanTests.test_status_does_not_run_codex_in_strict_offline` | Passed (container, fake Codex CLI) |
 | An OpenAI API key in the environment never reaches Codex | `CodexPlanTests.test_plan_review_is_read_only_and_parses_verdict` | Passed (container): the child process had no `OPENAI_API_KEY` |

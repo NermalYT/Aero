@@ -110,8 +110,7 @@ def run(name, args, ctx):
         from .. import osinfo
         return {"text": f"{name} doesn't work on this computer ({osinfo.name()}).", "error": True}
     if not localonly.tool_allowed(t.category, ctx.settings):
-        return {"text": f"{name} reaches the network, and strict offline mode is on. Work with local files and "
-                        "tools instead, or ask the user to turn strict offline off.", "error": True}
+        return {"text": localonly.refusal(name, ctx.settings), "error": True}
     args = dict(args or {})
     try:
         sig = inspect.signature(t.fn).parameters

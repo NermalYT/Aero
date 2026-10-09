@@ -58,6 +58,8 @@ everything in it.
   Fable 5.1 reviews, Claude Opus 5.5 repairs. With both on, ChatGPT goes first and Claude reviews the final state with
   ChatGPT's findings. Every problem found becomes a lesson for your local model. Connect with an API key or your
   ChatGPT / Claude plan through the official Codex CLI / Claude Code sign-in.
+- **Local Only: On / Off.** One button next to ChatGPT, Claude and Loop. On, the model answers by itself with no
+  web, browser, MCP servers or cloud reviews. Off, it searches and reads the web when a task needs it.
 - **Strict offline.** Blocks every non-loopback request inside Aero, skips cloud reviews, hides network tools and
   keeps an audit log. Local chat keeps working with no network at all.
 - **Performance Lab.** Benchmarks (time to first token, prefill, decode, long-context recall, JSON and tool-call
@@ -127,7 +129,8 @@ python -m unittest discover -s tests -v
 
 To publish a release, raise `VERSION` in `source/aero/config.py`, add `.github/release-notes/v<version>.md`, then
 run **Actions → Release → Run workflow** (or push the tag `v<version>`). The workflow runs the tests, builds every
-file above and publishes them as the newest release, which is what Aero's updater installs.
+file above and publishes them as the newest release, which is what Aero's updater installs. Tick **Replace**
+to rebuild a release that already exists for that version.
 
 ## Licence
 

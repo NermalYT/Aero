@@ -4,6 +4,9 @@ The contract (always on): every token Aero generates comes from a llama-server p
 local GGUF file, bound to 127.0.0.1. There is no hosted inference engine anywhere in the code path; the only cloud
 model use is the optional ChatGPT and Claude reviews, which the user turns on per chat or in Settings.
 
+Local Only (the composer's button, off by default) keeps a chat on this computer: the models get no web, browser or
+MCP tools and the ChatGPT and Claude reviews don't run. Aero itself can still check for updates and download models.
+
 Strict offline (Settings > Privacy & offline, off by default) goes further and stops Aero's own code from reaching
 the network at all:
   - every outbound HTTP request made inside this process is checked at the httpx transport, which is the one choke
@@ -118,9 +121,23 @@ def install():
     httpx.AsyncHTTPTransport.handle_async_request = handle_async_request
 
 
-def tool_allowed(category, settings=None):
+def local_only(settings=None):
+    """True when the models must stay on this computer: Local Only, or strict offline (which implies it)."""
     s = settings if settings is not None else load_settings()
-    return not (s.get("strict_offline") and category in NETWORK_TOOL_CATEGORIES)
+    return bool(s.get("local_only") or s.get("strict_offline"))
+
+
+def tool_allowed(category, settings=None):
+    return not (category in NETWORK_TOOL_CATEGORIES and local_only(settings))
+
+
+def refusal(name, settings):
+    """Why a network tool was refused, for the model."""
+    if settings.get("strict_offline"):
+        return (f"{name} reaches the network, and strict offline mode is on. Work with local files and tools "
+                "instead, or ask the user to turn strict offline off.")
+    return (f"{name} reaches the internet, and Local Only is on. Answer from what you know and the user's local "
+            "files, or tell the user to turn Local Only off in the composer so you can use the web.")
 
 
 # ---- status ---------------------------------------------------------------------------------------------
@@ -155,6 +172,7 @@ def status(engine_procs):
     blocked = recent(400)
     return {
         "strict_offline": on,
+        "local_only": local_only(s),
         "engine": "llama.cpp llama-server started by Aero from local GGUF files, bound to 127.0.0.1",
         "hosted_engines": [],
         "listeners": listeners,

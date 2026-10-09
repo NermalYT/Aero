@@ -50,6 +50,7 @@ const I = {
   moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
   auto: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" style="fill:currentColor;stroke:none"/></svg>',
   dash: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  local: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><path d="m9.5 10 1.8 1.8 3.4-3.6"/></svg>',
   loop: '<svg viewBox="0 0 24 24"><path d="M18.2 8.5a4.5 4.5 0 1 1 0 7c-2-1.6-4.4-5.4-6.2-7s-3.8-2.3-6.2-.4a4.5 4.5 0 1 0 0 7c2-1.6 4.4-5.4 6.2-7"/></svg>',
   orbit: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><ellipse cx="12" cy="12" rx="10" ry="4.2"/><ellipse cx="12" cy="12" rx="10" ry="4.2" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4.2" transform="rotate(120 12 12)"/></svg>',
   review: '<svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/><path d="m8.5 12 2.5 2.5 5-5"/></svg>',
@@ -1111,7 +1112,14 @@ function bindChatUI() {
     const next = { auto: true, on: false, off: 'auto' }[thinkMode()];
     saveSetting({ thinking: next }).then(() => toast({ auto: 'Thinking: Auto (the router decides per request)', on: 'Thinking: always on', off: 'Thinking: off' }[thinkMode()]));
   };
+  $('#localPill').onclick = () => {
+    if (S.settings.strict_offline) return toast('Strict offline is on (Settings → Privacy & offline), so Aero stays on this PC.', false, 5000);
+    saveSetting({ local_only: !S.settings.local_only }).then(() => toast(S.settings.local_only
+      ? 'Local Only on: your model answers by itself, with no web, browser, MCP servers or cloud reviews.'
+      : 'Local Only off: your model can search and read the web when a task needs it.'));
+  };
   $('#reviewPill').onclick = () => {
+    if (localOnly()) return localOnlyToast('Claude');
     const next = { off: 'on', on: 'auto', auto: 'off' }[S.settings.review_mode || 'off'];
     saveSetting({ review_mode: next }).then(() => {
       if (next !== 'off' && !S.cloud?.backend) toast('Claude review is on, but Claude is not connected yet: Settings → Claude.', true, 6000);
@@ -1119,6 +1127,7 @@ function bindChatUI() {
     });
   };
   $('#gptPill').onclick = () => {
+    if (localOnly()) return localOnlyToast('ChatGPT');
     const next = { off: 'on', on: 'auto', auto: 'off' }[S.settings.chatgpt_review_mode || 'off'];
     saveSetting({ chatgpt_review_mode: next }).then(() => {
       if (next !== 'off' && !S.gpt?.backend) toast('ChatGPT review is on, but ChatGPT is not connected yet: Settings → ChatGPT.', true, 6000);
@@ -1153,6 +1162,10 @@ async function saveSetting(patch) {
   renderToggles();
   return S.settings;
 }
+const localOnly = () => !!(S.settings?.local_only || S.settings?.strict_offline);
+const localOnlyToast = name => toast(S.settings.strict_offline
+  ? `Strict offline is on, so the ${name} review can't run. Turn it off in Settings → Privacy & offline.`
+  : `Local Only is on, so the ${name} review can't run. Turn Local Only off first.`, false, 5000);
 const thinkMode = () => { const v = S.settings?.thinking; return v === true ? 'on' : v === false ? 'off' : 'auto'; };
 
 function renderToggles() {
@@ -1167,8 +1180,12 @@ function renderToggles() {
   set($('#thinkToggle'), 'brain', 'Think', tm, { auto: 'Auto', on: 'On', off: 'Off' }[tm]);
   const rm = s.review_mode || 'off';
   const gm = s.chatgpt_review_mode || 'off';
-  set($('#gptPill'), 'orbit', 'ChatGPT', gm, { auto: 'Auto', on: 'Astra', off: '' }[gm]);
-  set($('#reviewPill'), 'review', 'Claude', rm, { auto: 'Auto', on: 'Fable', off: '' }[rm]);
+  const lo = localOnly();
+  set($('#localPill'), 'local', 'Local Only', lo ? 'on' : 'off', lo ? 'On' : 'Off');
+  $('#localPill').classList.toggle('locked', !!s.strict_offline);
+  set($('#gptPill'), 'orbit', 'ChatGPT', lo ? 'off' : gm, lo ? '' : { auto: 'Auto', on: 'Astra', off: '' }[gm]);
+  set($('#reviewPill'), 'review', 'Claude', lo ? 'off' : rm, lo ? '' : { auto: 'Auto', on: 'Fable', off: '' }[rm]);
+  for (const id of ['#gptPill', '#reviewPill']) $(id).classList.toggle('blocked', lo);
   set($('#loopPill'), 'loop', 'Loop', S.loop.active || S.loop.armed ? 'on' : 'off', S.loop.active ? `#${S.loop.iteration}` : S.loop.armed ? 'armed' : '');
   $('#appBtn').innerHTML = I.app + '<span>App</span>';
   $('#appBtn').classList.toggle('hidden', !isWin());
@@ -2261,6 +2278,8 @@ function privacySection(s) {
           h('small', {}, 'None yet. Only the host name is logged, never the address path or query.')));
   }).catch(e => { box.innerHTML = ''; box.append(h('div', { class: 'err-msg' }, e.message)); });
   return [
+    toggle('local_only', s.local_only, 'Local Only: the models work without the internet (also the Local Only button under the message box)'),
+    h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 14px' }, 'No web search, web pages, automated browser, MCP servers or ChatGPT and Claude reviews. Aero can still check for updates and download models.'),
     toggle('strict_offline', s.strict_offline, 'Strict offline: Aero itself never connects to anything outside this PC'),
     h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 14px' }, 'Turns off the ChatGPT and Claude reviews, web search, the automated browser, GitHub and other MCP servers, and Hugging Face downloads. Your local models, files, screen and app tools keep working. Every outbound attempt is logged in ' + dataPath('audit', 'network.jsonl') + '.'),
     box];

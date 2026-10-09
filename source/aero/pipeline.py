@@ -117,6 +117,9 @@ async def route(turn, opts):
     turn.gpt_review = gpt_pref == "on"
     if loop.get("iteration", 0) > 1 and not s.get("review_in_loop"):
         turn.review = turn.gpt_review = False
+    if s.get("local_only"):
+        turn.review = turn.gpt_review = False
+        review_pref = gpt_pref = "off"
 
     use_router = s.get("router_enabled", True)
     catalog = tool_catalog(s) if s.get("tools_enabled", True) else []
@@ -445,8 +448,8 @@ def mod_prefs(turn, opts):
     think = opts.get("think") or s.get("thinking", True)
     think = {"on": True, "off": False, "auto": True}.get(think, think)
     turn.think = bool(think)
-    turn.review = (opts.get("review") or s.get("review_mode") or "off") == "on"
-    turn.gpt_review = (opts.get("chatgpt_review") or s.get("chatgpt_review_mode") or "off") == "on"
+    turn.review = (opts.get("review") or s.get("review_mode") or "off") == "on" and not s.get("local_only")
+    turn.gpt_review = (opts.get("chatgpt_review") or s.get("chatgpt_review_mode") or "off") == "on" and not s.get("local_only")
 
 
 async def mod_finish(mod_id):

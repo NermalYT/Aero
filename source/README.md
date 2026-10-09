@@ -213,6 +213,10 @@ Settings → Claude → Connection:
 ## Offline and privacy
 
 - Local models always run in `llama-server` processes Aero starts itself, bound to 127.0.0.1, with `--offline`.
+- **Local Only** (the button under the message box, or Settings → Privacy & offline): **On** keeps the chat on your
+  PC. The model gets no web search, web pages, browser or MCP servers, the ChatGPT and Claude reviews don't run, and
+  the model knows it has no internet. **Off** lets the model search and read the web when a task needs it. Aero
+  itself can still check for updates and download models; strict offline (below) stops that too.
 - **Strict offline** (Settings → Privacy & offline) blocks every outbound request inside Aero, hides the web, browser
   and network MCP tools, and skips both cloud review passes before anything is sent. Turn it on and pull the network
   cable: chat, tools on your PC, memory, tuning and benchmarks all keep working.
