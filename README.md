@@ -125,6 +125,10 @@ python -m unittest discover -s tests -v
 `python tools/build_release.py` builds every release file into `dist/` (the Windows, macOS and Linux archives, the
 `.deb`, the `.rpm`, the `PKGBUILD` and `SHA256SUMS.txt`). The `.deb` needs `dpkg-deb`, the `.rpm` needs `rpmbuild`.
 
+To publish a release, raise `VERSION` in `source/aero/config.py`, add `.github/release-notes/v<version>.md`, then
+run **Actions → Release → Run workflow** (or push the tag `v<version>`). The workflow runs the tests, builds every
+file above and publishes them as the newest release, which is what Aero's updater installs.
+
 ## Licence
 
 MIT, see [LICENSE](LICENSE). Bundled highlight.js, marked and DOMPurify keep their own licences. Models you download

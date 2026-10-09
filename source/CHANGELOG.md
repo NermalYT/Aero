@@ -167,6 +167,7 @@ Frutiger Aero styled, lightweight bootstrapper for local LLMs on Windows, Linux 
 ### Other
 
 - Every model's system prompt now explains both review passes.
+- Calls to the local model and the UI on 127.0.0.1 never go through a system-wide HTTP proxy.
 - `validation\Validate-Aero.ps1`: checks a real install without changing it (see `docs/VALIDATION_REPORT.md`).
 - Documentation: `docs/INFERENCE_RESEARCH.md`, `docs/LOCAL_EXECUTION_AUDIT.md`, `docs/HAPO_ARCHITECTURE.md`,
   `docs/PERFORMANCE_REPORT.md`, `docs/AERO_DESIGN_SYSTEM.md`, `docs/VALIDATION_REPORT.md`.

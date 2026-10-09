@@ -15,7 +15,7 @@ real model on a real PC, and quality scores (recall, JSON and tool-call accuracy
 ## 1. Automated tests
 
 `python -m unittest discover -s tests -v` from `source/`: **107 tests, all passed** (also inside each Linux install
-in section 3c). None reaches the network: the
+in section 3c, and in a clean Ubuntu 24.04 container with Python 3.12 and an HTTP proxy set). None reaches the network: the
 OpenAI API and the local model are answered by in-process mock transports, the Codex CLI is a small fake script,
 nvidia-smi and the Windows registry are faked, desktop actions are faked, and every test uses a throwaway data
 folder.
@@ -160,6 +160,7 @@ window edge: none.
 | The `.rpm` required `python3 >= 3.10`, which RHEL 9 and openSUSE Leap don't have under that name | Accepts `python3.12`, `python3.11`, `python312` or `python311` too |
 | The package launcher split an install folder with spaces into several arguments | Quoted; the app-menu entry opens a terminal running `aero --setup-only` |
 | The update bar stayed on top of the "Installing" overlay | Hidden while the overlay shows |
+| With a system-wide `HTTP_PROXY` and no `NO_PROXY`, calls to 127.0.0.1 (the local model, the UI) went to the proxy and failed; 7 unit tests failed in a clean container set up that way | Aero adds 127.0.0.1, localhost and ::1 to `NO_PROXY` when it starts |
 
 ## 6. Not tested
 

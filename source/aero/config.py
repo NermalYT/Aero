@@ -30,6 +30,12 @@ LOGS = DATA / "logs"
 for _d in (DATA, CHATS, UPLOADS, LOGS):
     _d.mkdir(parents=True, exist_ok=True)
 
+# A system-wide HTTP_PROXY would otherwise route Aero's calls to its own llama-server and UI through the proxy, which
+# can't reach this computer's 127.0.0.1. Child processes inherit this too.
+for _k in ("NO_PROXY", "no_proxy"):
+    _have = [h.strip() for h in os.environ.get(_k, "").split(",") if h.strip()]
+    os.environ[_k] = ",".join(_have + [h for h in ("127.0.0.1", "localhost", "::1") if h not in _have])
+
 UI_PORT = int(os.environ.get("AERO_PORT", "8180"))
 LLAMA_PORT = int(os.environ.get("AERO_LLAMA_PORT", "8181"))
 TRIAL_PORT = LLAMA_PORT + 1

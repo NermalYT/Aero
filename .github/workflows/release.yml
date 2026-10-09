@@ -1,0 +1,63 @@
+# Builds every release file with tools/build_release.py and publishes them as the GitHub release for the VERSION in
+# source/aero/config.py. Aero's updater reads the newest release, so this is how users get a new version.
+#
+# Start it from Actions -> Release -> Run workflow, or by pushing the tag (git tag v1.0.0 && git push origin v1.0.0).
+# The notes come from .github/release-notes/v<version>.md when that file exists.
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Version
+        id: v
+        run: |
+          v=$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' source/aero/config.py)
+          [ -n "$v" ] || { echo "::error::No VERSION in source/aero/config.py"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match VERSION $v in source/aero/config.py"; exit 1
+          fi
+          if gh release view "v$v" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release v$v already exists. Raise VERSION in source/aero/config.py first."; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Tests
+        working-directory: source
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest discover -s tests
+
+      - name: Build
+        run: |
+          sudo apt-get update && sudo apt-get install -y rpm
+          python tools/build_release.py
+          v=${{ steps.v.outputs.version }}
+          for f in Aero-windows.zip Aero-macos.zip Aero-linux.tar.gz install.sh "aero_${v}_all.deb" \
+                   "aero-${v}-1.noarch.rpm" PKGBUILD SHA256SUMS.txt; do
+            [ -s "dist/$f" ] || { echo "::error::dist/$f was not built"; exit 1; }
+          done
+          cat dist/SHA256SUMS.txt
+
+      - name: Publish
+        run: |
+          v=${{ steps.v.outputs.version }}
+          notes=.github/release-notes/v$v.md
+          if [ -f "$notes" ]; then set -- --notes-file "$notes"; else set -- --generate-notes; fi
+          gh release create "v$v" dist/* -R "$GITHUB_REPOSITORY" --title "Aero $v" --target "$GITHUB_SHA" --latest "$@"
