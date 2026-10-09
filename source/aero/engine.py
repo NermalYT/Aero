@@ -1,7 +1,8 @@
 """llama-server process control.
 
-Each llama-server child is placed in a Windows Job Object with KILL_ON_JOB_CLOSE, so if
-Aero crashes or is killed the model is unloaded and VRAM is freed automatically.
+Each llama-server child dies with Aero, so a crash or kill never leaves a model holding VRAM: on Windows it is
+placed in a Job Object with KILL_ON_JOB_CLOSE, on Linux it gets PR_SET_PDEATHSIG. (macOS has neither; Aero's normal
+exit and the updater stop the servers there.)
 """
 import os
 import re
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from .config import IS_WIN, LLAMA_DIR, LOGS
+from .config import IS_LINUX, IS_WIN, LLAMA_DIR, LOGS
 
 _NO_WINDOW = 0x08000000 if IS_WIN else 0
 _flags_cache = {}
@@ -76,6 +77,34 @@ def _attach(proc):
         pass
 
 
+def _die_with_parent():
+    """preexec_fn on Linux: the kernel sends SIGKILL to the child when Aero's process exits."""
+    try:
+        import ctypes
+        import signal
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGKILL)   # PR_SET_PDEATHSIG
+    except Exception:
+        pass
+
+
+def tool_env(exe, base=None):
+    """Environment for running a llama.cpp binary: its own folder on the library path, so the GPU backends
+    (libggml-*.so / .dylib) next to it load even when the build has no rpath."""
+    env = dict(base if base is not None else os.environ)
+    if not IS_WIN:
+        key = "LD_LIBRARY_PATH" if IS_LINUX else "DYLD_LIBRARY_PATH"
+        here = str(Path(exe).parent)
+        env[key] = here + (os.pathsep + env[key] if env.get(key) else "")
+    return env
+
+
+def run_tool(exe, args, timeout=30, **kw):
+    """subprocess.run for a llama.cpp binary (llama-server --help, llama-bench, ...)."""
+    return subprocess.run([str(exe)] + list(args), capture_output=True, text=True, timeout=timeout,
+                          creationflags=_NO_WINDOW, cwd=str(Path(exe).parent), env=tool_env(exe, kw.pop("env", None)),
+                          **kw)
+
+
 # ---- binary discovery --------------------------------------------------------
 
 def server_binary():
@@ -97,8 +126,7 @@ def server_help():
     key = str(exe)
     if key not in _flags_cache:
         try:
-            out = subprocess.run([str(exe), "--help"], capture_output=True, text=True, timeout=30,
-                                 creationflags=_NO_WINDOW, cwd=str(exe.parent))
+            out = run_tool(exe, ["--help"])
             _flags_cache[key] = out.stdout + out.stderr
         except Exception:
             _flags_cache[key] = ""
@@ -114,8 +142,7 @@ def server_version():
     if not exe:
         return "missing"
     try:
-        out = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=30,
-                             creationflags=_NO_WINDOW, cwd=str(exe.parent))
+        out = run_tool(exe, ["--version"])
         m = re.search(r"version:\s*(\S+)", out.stdout + out.stderr)
         return m.group(1) if m else "unknown"
     except Exception:
@@ -251,11 +278,11 @@ class LlamaServer:
         logf = open(self.log_path, "w", encoding="utf-8", errors="replace")
         logf.write("ARGS: " + " ".join(args) + "\n")
         logf.flush()
-        env = dict(os.environ)
+        env = tool_env(exe)
         env.update(env_extra or {})
         self.proc = subprocess.Popen([str(exe)] + args, stdout=logf, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, cwd=str(exe.parent), env=env,
-                                     creationflags=_NO_WINDOW)
+                                     creationflags=_NO_WINDOW, preexec_fn=_die_with_parent if IS_LINUX else None)
         self._logf = logf
         _attach(self.proc)
 

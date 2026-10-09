@@ -59,9 +59,17 @@ const I = {
   route: '<svg viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M12 19h4.5a3.5 3.5 0 0 0 0-7h-8a3.5 3.5 0 0 1 0-7H12"/></svg>',
   spark: '<svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M6.3 17.7l2.5-2.5M15.2 8.8l2.5-2.5"/></svg>',
   ext: '<svg viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>',
+  mod: '<svg viewBox="0 0 24 24"><path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3h7z"/></svg>',
+  update: '<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>',
   lab: '<svg viewBox="0 0 24 24"><path d="M4 18a8 8 0 1 1 16 0"/><path d="m12 18 4-6"/><circle cx="12" cy="18" r="1.4"/><path d="M6.5 13.5l1 .6M12 9v1.2M17.5 13.5l-1 .6"/></svg>',
 };
 const ico = (name) => { const s = h('span', { class: 'ico', html: I[name] }); return s; };
+const osKind = () => S.st?.os?.kind || 'windows';
+const isWin = () => osKind() === 'windows';
+const osWord = () => ({ windows: 'Windows', macos: 'macOS' }[osKind()] || 'your desktop');
+const dataPath = (...p) => [S.st?.paths?.data || 'data', ...p].join(isWin() ? '\\' : '/');
+const updaterName = () => isWin() ? 'Update-Aero.bat' : 'install.sh';
+const keysWhere = () => `Stored ${S.st?.secrets_where || 'on this computer'}.`;
 
 async function api(path, opts = {}) {
   const o = { ...opts };
@@ -144,7 +152,7 @@ async function boot() {
   $('#sbCollapse').innerHTML = I.panel; $('#sbExpand').innerHTML = I.panel;
   $('#attachBtn').innerHTML = I.clip; $('#modalClose').innerHTML = I.x;
   $('.search-ico').innerHTML = I.search; $('.ico-plus').innerHTML = I.plus; $('.ico-mem').innerHTML = I.mem; $('.ico-lab').innerHTML = I.lab;
-  $('#dashBtn').innerHTML = I.dash;
+  $('#dashBtn').innerHTML = I.dash; $('.ico-mod').innerHTML = I.mod;
   Scene.init(); bindTips();
   bindChatUI(); bindLauncher();
   await refreshState();
@@ -152,6 +160,8 @@ async function boot() {
   loadToolDescriptions(); loadCloud();
   pollDash();
   await loadChats();
+  const reopen = takeReopen();
+  if (reopen && S.chats.some(c => c.id === reopen)) { try { S.chat = await api('/api/chats/' + reopen); } catch { } }
   if (S.st.engine.status === 'ready') showChat();
   else {
     await showLauncher();
@@ -169,7 +179,7 @@ async function refreshState() {
     const first = !S.settings;
     S.settings = S.st.settings; S.hw = S.st.hw;
     if (first) applyTheme();
-    renderEngine(); syncBusy();
+    renderEngine(); syncBusy(); renderUpdateBar(); renderModCount();
   } catch (e) { /* backend restarting */ }
 }
 
@@ -187,7 +197,7 @@ function renderEngine() {
   if (e.status === 'error' && e.error) { banner.className = 'banner err'; banner.textContent = 'Model server error:\n' + e.error; }
   else if (e.warning) { banner.className = 'banner'; banner.textContent = e.warning; }
   else banner.className = 'banner hidden';
-  if (!S.st.llama.found) { banner.className = 'banner err'; banner.textContent = 'llama-server was not found in the install folder. Re-run Update-Aero.bat.'; }
+  if (!S.st.llama.found) { banner.className = 'banner err'; banner.textContent = `llama-server was not found in the install folder. Run ${updaterName()} again.`; }
   $('#emptySub').textContent = e.status === 'ready' ? `${e.model?.name} · ${fmtCtx(e.ctx)} context · ${e.desc}` : 'Load a model to start chatting.';
   renderToggles();
 }
@@ -784,6 +794,9 @@ function renderItem(ctx, m) {
     case 'review': closeLane(ctx); ctx.el.append(reviewCard(m)); ctx.afterFix = false; break;
     case 'user': closeLane(ctx); ctx.el.append(fixCard(m)); ctx.afterFix = true; break;      // from a reviewer
     case 'lesson': closeLane(ctx); ctx.el.append(lessonCard(m)); break;
+    case 'mod': closeLane(ctx); ctx.el.append(modCard(m)); break;
+    case 'loopnote': closeLane(ctx); ctx.el.append(loopNoteCard(m)); break;
+    case 'learned': closeLane(ctx); ctx.el.append(learnedCard(m)); break;
     case 'notice': appendNotice(ctx, m); break;
     case 'subagent': placeSub(ctx, subBlock(m, false)); break;
   }
@@ -1001,7 +1014,7 @@ function fixCard(m) {
 function lessonCard(m) {
   return h('div', { class: 'lesson-card' }, h('div', { class: 'lh' }, h('span', { class: 'ico', html: I.bulb }), 'Your local model learned'),
     h('ul', {}, ...(m.lessons || []).map(l => h('li', {}, l.text || l))),
-    h('small', { class: 'muted' }, (m.from?.length ? `From ${m.from.join(' and ')}'s review. ` : '') + 'Saved to memory as lessons, so every later chat and model sees them' + (S.settings?.share_lessons_as_training ? ', and to data\\training\\corrections.jsonl' : '') + '.'));
+    h('small', { class: 'muted' }, (m.from?.length ? `From ${m.from.join(' and ')}'s review. ` : '') + 'Saved to memory as lessons, so every later chat and model sees them' + (S.settings?.share_lessons_as_training ? ', and to ' + dataPath('training', 'corrections.jsonl') : '') + '.'));
 }
 
 // ---------------------------------------------------------------- context meter, compaction, memory count
@@ -1083,6 +1096,7 @@ function bindChatUI() {
   $('#compactBtn').onclick = () => compactChat(false);
   $('#memoryBtn').onclick = () => openSettings('Memory');
   $('#labBtn').onclick = () => openLab();
+  $('#modsBtn').onclick = () => openMods();
   $('#settingsBtn').onclick = () => openSettings();
   $('#modelBtn').onclick = () => showLauncher();
   $('#sbCollapse').onclick = () => setSidebar(false);
@@ -1157,6 +1171,7 @@ function renderToggles() {
   set($('#reviewPill'), 'review', 'Claude', rm, { auto: 'Auto', on: 'Fable', off: '' }[rm]);
   set($('#loopPill'), 'loop', 'Loop', S.loop.active || S.loop.armed ? 'on' : 'off', S.loop.active ? `#${S.loop.iteration}` : S.loop.armed ? 'armed' : '');
   $('#appBtn').innerHTML = I.app + '<span>App</span>';
+  $('#appBtn').classList.toggle('hidden', !isWin());
   $('#hint').textContent = S.loop.armed && !S.loop.active ? 'Next message repeats until you stop it' : s.tools_enabled ? 'Agent mode' : '';
 }
 
@@ -1199,7 +1214,7 @@ function addFiles(files) {
 async function pickApp() {
   let ws = [];
   try { ws = await api('/api/windows'); } catch (e) { return toast(e.message, true); }
-  if (!ws.length) return toast('No app windows found (app control works on Windows).', true);
+  if (!ws.length) return toast('No app windows found.', true);
   popMenu($('#appBtn'), ws.slice(0, 30).map(w => [`${w.title.slice(0, 60)}  ·  ${w.app}${w.minimized ? ' (minimized)' : ''}`,
     () => { S.pending.app = { id: w.id, title: w.title, app: w.app }; renderChips(); if (!S.settings.tools_enabled) toast('Turn on Tools so it can use the app.', true); $('#input').focus(); }]));
 }
@@ -1305,7 +1320,8 @@ async function runAgent(loop) {
   };
   const push = m => chat.messages.push(m);
   const subs = {};       // subagent id -> its live block
-  const opts = { think: thinkMode(), review: S.settings.review_mode || 'off', chatgpt_review: S.settings.chatgpt_review_mode || 'off', loop: loop || null };
+  const opts = { think: thinkMode(), review: S.settings.review_mode || 'off', chatgpt_review: S.settings.chatgpt_review_mode || 'off', loop: loop || null, mod: chat.mod || null };
+  let modNote = null, journalNote = null, learnNote = null;
 
   try {
     await sseFetch('/api/chat', { chat_id: chat.id, messages: chat.messages, carry: chat.carry || null, title: chat.title || '', opts, agent: chat.agent || null }, ev => {
@@ -1330,6 +1346,16 @@ async function runAgent(loop) {
           break;
         }
         case 'lane': {
+          if (ev.phase === 'learn') {
+            closeLane(ctx);
+            learnNote = h('div', { class: 'notice' }, h('span', { class: 'spinner sm' }), ' Noting what worked and what didn\'t, for every model…');
+            ctx.el.append(learnNote); scrollBottom(); break;
+          }
+          if (ev.phase === 'journal') {
+            closeLane(ctx);
+            journalNote = h('div', { class: 'notice' }, h('span', { class: 'spinner sm' }), ' Writing down what this round taught the model…');
+            ctx.el.append(journalNote); scrollBottom(); break;
+          }
           if (ev.phase === 'lesson') {
             closeLane(ctx);
             lessonNote = h('div', { class: 'notice' }, h('span', { class: 'spinner sm' }), ' Your local model is turning the review into lessons…');
@@ -1417,6 +1443,25 @@ async function runAgent(loop) {
           push(ev.message); lessonNote?.remove(); lessonNote = null;
           ctx.el.append(lessonCard(ev.message)); refreshMemCount(); scrollBottom(); break;
         }
+        case 'mod_new': chat.mod = ev.mod.id; break;
+        case 'mod_checking': {
+          closeLane(ctx);
+          modNote = h('div', { class: 'notice' }, h('span', { class: 'spinner sm' }), ' Checking the modded copy: Python compiles, the server imports, the tests pass, a test copy starts…');
+          ctx.el.append(modNote); scrollBottom(); break;
+        }
+        case 'mod_ready': {
+          modNote?.remove(); modNote = null; closeLane(ctx);
+          const m = { role: 'mod', id: uid(), mod: ev.mod, ts: Date.now() / 1000 };
+          push(m); ctx.el.append(modCard(m)); scrollBottom(); break;
+        }
+        case 'learned': {
+          learnNote?.remove(); learnNote = null; closeLane(ctx);
+          push(ev.message); ctx.el.append(learnedCard(ev.message)); scrollBottom(); break;
+        }
+        case 'loopnote': {
+          journalNote?.remove(); journalNote = null; closeLane(ctx);
+          push(ev.message); ctx.el.append(loopNoteCard(ev.message)); scrollBottom(); break;
+        }
         case 'cloud_usage': {
           if (ev.via === 'plan' && ev.usage?.est_usd) {
             const L = ctx.lane && isCloudLane(ctx.lane.name) ? ctx.lane : null;
@@ -1445,7 +1490,7 @@ async function runAgent(loop) {
       push(m); cur.L.msgs.push(m);
     } else cur.md.remove();
   }
-  pendingLabel.remove(); lessonNote?.remove(); routerEl?.remove();
+  pendingLabel.remove(); lessonNote?.remove(); routerEl?.remove(); modNote?.remove(); journalNote?.remove(); learnNote?.remove();
   setControl(null);
   for (const sb of Object.values(subs)) if (sb.live) subFinish(sb, { ...sb.rec, status: 'stopped' });
   const stopped = S.userStopped;
@@ -1699,6 +1744,7 @@ function renderLoop() {
   bar.append(...[h('span', { class: 'inf' }, '∞'),
     h('span', {}, h('b', {}, 'Forever-loop'), ` · round ${L.iteration}${max ? ' of ' + max : ''} · ${status}${mins >= 1 ? ` · ${mins} min` : ''}`),
     h('span', { class: 'grow' }),
+    S.settings?.loop_journal !== false && L.base?.content ? h('button', { class: 'btn ghost sm', title: 'What the model learned in earlier rounds: what worked, what didn\'t, its next step', onclick: () => openJournal(L.base.content) }, 'Journal') : null,
     L.waitUntil ? h('button', { class: 'btn ghost sm', onclick: () => { S.loop.waitUntil = Date.now(); } }, 'Run now') : null,
     !L.finishing && !L.waitUntil ? h('button', { class: 'btn ghost sm', onclick: () => { S.loop.finishing = true; renderLoop(); } }, 'Finish this round') : null,
     h('button', { class: 'btn danger sm', onclick: () => { if (S.streaming) stopGen(); stopLoop('Forever-loop stopped.'); } }, 'Stop')].filter(Boolean));
@@ -1712,7 +1758,7 @@ function applyTheme() {
   document.documentElement.dataset.theme = dark ? 'night' : 'day';
   const b = $('#themeBtn');
   b.innerHTML = I[{ auto: 'auto', day: 'sun', night: 'moon' }[mode]];
-  b.title = { auto: 'Theme: follows Windows (click for day)', day: 'Theme: day (click for night)', night: 'Theme: night (click for auto)' }[mode];
+  b.title = { auto: `Theme: follows ${osWord()} (click for day)`, day: 'Theme: day (click for night)', night: 'Theme: night (click for auto)' }[mode];
   Scene.setMode(sceneMode());
   document.body.classList.toggle('no-pond', S.settings?.pond === false);
   document.body.classList.toggle('no-transparency', S.settings?.transparency === false);
@@ -2050,7 +2096,7 @@ async function loadCloud() {
 }
 
 // ---------------------------------------------------------------- settings
-const SECTIONS = ['General', 'Router', 'Claude', 'ChatGPT', 'GitHub', 'Plugins & MCP', 'Skills', 'Model & tuning', 'Tools', 'Privacy & offline', 'Memory', 'Appearance', 'Hugging Face', 'About'];
+const SECTIONS = ['General', 'Router', 'Claude', 'ChatGPT', 'GitHub', 'Plugins & MCP', 'Skills', 'Model & tuning', 'Tools', 'Privacy & offline', 'Memory', 'Appearance', 'Hugging Face', 'Updates', 'About'];
 async function openSettings(start = 'General') {
   if (typeof start !== 'string') start = 'General';
   const s = await api('/api/state').then(r => r.settings);
@@ -2073,6 +2119,7 @@ async function openSettings(start = 'General') {
         field('Forever-loop pause (s)', num('loop_delay_s', s.loop_delay_s, 1), 'Wait between rounds.'),
         field('Forever-loop max rounds', num('loop_max', s.loop_max, 1), '0 = until you press Stop.')),
       toggle('review_in_loop', s.review_in_loop, 'Let ChatGPT and Claude review every forever-loop round (costs more; normally only round 1 is reviewed)'),
+      toggle('loop_journal', s.loop_journal !== false, 'Forever-loop journal: after each round the model writes down what worked and what didn\'t, and the next round starts from it'),
       toggle('auto_load_last', s.auto_load_last, 'On startup, load the last used model automatically'),
     ],
     'Router': () => routerSection(s),
@@ -2138,7 +2185,7 @@ async function openSettings(start = 'General') {
       const seg = h('div', { class: 'seg' });
       let theme = s.theme || 'auto';
       const inp = h('input', { type: 'hidden', 'data-k': 'theme', value: theme });
-      for (const [v, lab] of [['auto', 'Auto (follow Windows)'], ['day', 'Day: bright sky'], ['night', 'Night: deep ocean']])
+      for (const [v, lab] of [['auto', `Auto (follow ${osWord()})`], ['day', 'Day: bright sky'], ['night', 'Night: deep ocean']])
         seg.append(h('button', { class: v === theme ? 'on' : '', onclick: e => { theme = v; inp.value = v; $$('button', seg).forEach(b => b.classList.toggle('on', b === e.currentTarget)); document.documentElement.dataset.theme = v === 'auto' ? (darkQuery.matches ? 'night' : 'day') : v; } }, lab));
       const sceneSeg = h('div', { class: 'seg' });
       let scene = sceneMode();
@@ -2154,8 +2201,10 @@ async function openSettings(start = 'General') {
         toggle('dashboard', s.dashboard !== false, 'Show the live dashboard on the right (models, GPU, CPU, tokens, Claude usage)')];
     },
     'Hugging Face': () => [field('Access token', h('input', { type: 'password', 'data-k': 'hf_token', value: s.hf_token, placeholder: 'hf_…' }), 'Only needed for gated or private models (Llama, some Gemma repos). Create one at huggingface.co/settings/tokens.')],
+    'Updates': () => updatesSection(s),
     'About': () => [h('div', { class: 'kv' },
       h('span', {}, 'App'), h('span', {}, `${S.st.app} ${S.st.version}`),
+      h('span', {}, 'System'), h('span', {}, S.st.os?.name || ''),
       h('span', {}, 'llama-server'), h('span', {}, S.st.llama.path || 'not found'),
       h('span', {}, 'GPU'), h('span', {}, (S.hw.gpus || []).map(g => `${g.name} (${fmtNum(g.total_mb)} MB, driver ${g.driver})`).join(', ') || 'none'),
       h('span', {}, 'CUDA (driver)'), h('span', {}, S.hw.cuda || '-'),
@@ -2163,7 +2212,7 @@ async function openSettings(start = 'General') {
       h('span', {}, 'RAM'), h('span', {}, `${fmtNum(S.hw.ram_total_mb)} MB`)),
       h('div', { style: 'display:flex;gap:8px;margin-top:16px;flex-wrap:wrap' },
         ...[['data', 'Open data folder'], ['models', 'Open models folder'], ['logs', 'Open logs'], ['training', 'Open training data']].map(([w, lab]) =>
-          h('button', { class: 'btn ghost sm', onclick: () => api('/api/open_path', { method: 'POST', json: { what: w } }) }, lab)),
+          h('button', { class: 'btn ghost sm', onclick: async () => { const r = await api('/api/open_path', { method: 'POST', json: { what: w } }); if (!r.opened) toast(r.path, false, 6000); } }, lab)),
         h('button', { class: 'btn ghost sm', onclick: async () => { await api('/api/unload', { method: 'POST' }); refreshState(); toast('Model unloaded'); } }, 'Unload model'),
         h('button', { class: 'btn danger sm', onclick: () => { api('/api/shutdown', { method: 'POST' }); setTimeout(() => window.close(), 300); } }, 'Quit Aero'))],
   };
@@ -2213,7 +2262,7 @@ function privacySection(s) {
   }).catch(e => { box.innerHTML = ''; box.append(h('div', { class: 'err-msg' }, e.message)); });
   return [
     toggle('strict_offline', s.strict_offline, 'Strict offline: Aero itself never connects to anything outside this PC'),
-    h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 14px' }, 'Turns off the ChatGPT and Claude reviews, web search, the automated browser, GitHub and other MCP servers, and Hugging Face downloads. Your local models, files, screen and app tools keep working. Every outbound attempt is logged in data\\audit\\network.jsonl.'),
+    h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 14px' }, 'Turns off the ChatGPT and Claude reviews, web search, the automated browser, GitHub and other MCP servers, and Hugging Face downloads. Your local models, files, screen and app tools keep working. Every outbound attempt is logged in ' + dataPath('audit', 'network.jsonl') + '.'),
     box];
 }
 
@@ -2331,7 +2380,7 @@ function claudeSection(s) {
       h('div', { class: 't' }, h('b', {}, st.loggedIn ? `Signed in${st.email ? ' as ' + st.email : ''}` : 'Not signed in'),
         h('small', {}, st.loggedIn ? [st.subscriptionType || st.plan ? `Plan: ${st.subscriptionType || st.plan}` : null, st.organizationName, st.authMethod ? `via ${st.authMethod}` : null].filter(Boolean).join(' · ')
           : 'Uses your Claude Pro or Max subscription. Opens claude.ai in your browser.'),
-        st.version ? h('small', {}, `Claude Code ${st.version}${st.version_ok === false ? ' · update needed (re-run Update-Aero.bat)' : ''}`) : null),
+        st.version ? h('small', {}, `Claude Code ${st.version}${st.version_ok === false ? ' · update needed (run ${updaterName()} again)' : ''}`) : null),
       signIn, refresh, st.loggedIn ? out : null));
     if (fresh) { loadCloud(); toast(st.loggedIn ? 'Claude plan connected' : 'Not signed in yet'); }
   };
@@ -2341,7 +2390,7 @@ function claudeSection(s) {
     const inp = h('input', { type: 'password', class: 'inp', placeholder: c.key?.set ? `Saved: ${c.key.masked}` : 'sk-ant-…', style: 'flex:1' });
     const res = h('small', { class: 'muted' });
     keyBox.append(h('div', { style: 'display:flex;gap:8px;align-items:center' }, inp,
-      h('button', { class: 'btn sm', onclick: async () => { if (!inp.value.trim()) return; await api('/api/cloud/key', { method: 'PUT', json: { key: inp.value.trim() } }); inp.value = ''; toast('API key saved (encrypted with Windows DPAPI)'); drawKey(); loadCloud(); } }, 'Save'),
+      h('button', { class: 'btn sm', onclick: async () => { if (!inp.value.trim()) return; await api('/api/cloud/key', { method: 'PUT', json: { key: inp.value.trim() } }); inp.value = ''; toast('API key saved. ' + keysWhere()); drawKey(); loadCloud(); } }, 'Save'),
       h('button', { class: 'btn ghost sm', onclick: async () => {
         res.textContent = 'Testing…';
         try { const r = await api('/api/cloud/test', { method: 'POST' }); res.textContent = r.missing.length ? `Works, but this key cannot use: ${r.missing.join(', ')}` : 'Works: Fable 5.1 and Opus 5.5 are available.'; }
@@ -2373,7 +2422,7 @@ function claudeSection(s) {
       field('Take-over effort', select('fix_effort', s.fix_effort, ['low', 'medium', 'high', 'xhigh', 'max'].map(x => [x, x])))),
     toggle('cloud_fable_tools', s.cloud_fable_tools, 'Let Fable read files, search the web and look at the screen while reviewing'),
     toggle('lessons_enabled', s.lessons_enabled, 'After a review finds problems, have the local model write lessons into memory'),
-    toggle('share_lessons_as_training', s.share_lessons_as_training, 'Also save each correction to data\\training\\corrections.jsonl (for fine-tuning later)'),
+    toggle('share_lessons_as_training', s.share_lessons_as_training, `Also save each correction to ${dataPath('training', 'corrections.jsonl')} (for fine-tuning later)`),
   ];
 }
 
@@ -2419,7 +2468,7 @@ function chatgptSection(s) {
     const inp = h('input', { type: 'password', class: 'inp', placeholder: c.key?.set ? `Saved: ${c.key.masked}` : 'sk-…', style: 'flex:1' });
     const res = h('small', { class: 'muted' });
     keyBox.append(h('div', { style: 'display:flex;gap:8px;align-items:center' }, inp,
-      h('button', { class: 'btn sm', onclick: async () => { if (!inp.value.trim()) return; await api('/api/chatgpt/key', { method: 'PUT', json: { key: inp.value.trim() } }); inp.value = ''; toast('API key saved (encrypted with Windows DPAPI)'); drawKey(); loadCloud(); } }, 'Save'),
+      h('button', { class: 'btn sm', onclick: async () => { if (!inp.value.trim()) return; await api('/api/chatgpt/key', { method: 'PUT', json: { key: inp.value.trim() } }); inp.value = ''; toast('API key saved. ' + keysWhere()); drawKey(); loadCloud(); } }, 'Save'),
       h('button', { class: 'btn ghost sm', onclick: async () => {
         res.textContent = 'Testing…';
         try { const r = await api('/api/chatgpt/test', { method: 'POST' }); res.textContent = r.missing.length ? `Works, but this key cannot use: ${r.missing.join(', ')}` : 'Works: GPT-6 Astra and GPT-6.1 Sol are available.'; }
@@ -2472,7 +2521,7 @@ function githubSection(s) {
       box.append(h('p', { class: 'sec-intro' }, 'Connect GitHub and both your local model and Claude can read repos, issues, pull requests and Actions through GitHub\'s official MCP server.'),
         g.cli ? h('button', { class: 'btn', onclick: () => go({ cli: true }) }, 'Use my GitHub CLI login (gh)') : h('p', { class: 'muted' }, 'Tip: install the GitHub CLI (cli.github.com) and run "gh auth login" to connect with one click.'),
         h('div', { style: 'display:flex;gap:8px;margin-top:10px' }, tok, h('button', { class: 'btn ghost', onclick: () => go({ token: tok.value }) }, 'Connect with token')),
-        h('small', { class: 'muted' }, 'Fine-grained tokens: github.com → Settings → Developer settings → Personal access tokens. Stored encrypted with Windows DPAPI.'));
+        h('small', { class: 'muted' }, 'Fine-grained tokens: github.com → Settings → Developer settings → Personal access tokens. ' + keysWhere()));
     }
   };
   draw();
@@ -2602,6 +2651,32 @@ function memorySection(s) {
     toast(r.how === 'added' ? 'Remembered' : 'Updated an existing memory'); add.value = ''; load(); refreshMemCount();
   };
   load();
+  const learnBox = h('div', { class: 'learn-box' }, h('p', { class: 'muted' }, 'Loading…'));
+  const drawLearn = async () => {
+    let x;
+    try { x = await api('/api/experience'); } catch (e) { learnBox.textContent = e.message; return; }
+    learnBox.innerHTML = '';
+    if (!x.runs && !x.notes.length) { learnBox.append(h('p', { class: 'muted' }, 'Nothing yet. Runs with tool calls are recorded as you chat.')); return; }
+    if (x.models.length) learnBox.append(h('table', { class: 'learn-tbl' },
+      h('tr', {}, ...['Model', 'Tasks', 'Tool calls', 'Failed', 'You refused', 'Speed'].map(t => h('th', {}, t))),
+      ...x.models.map(m => h('tr', {}, h('td', {}, m.model), h('td', {}, fmtNum(m.runs)), h('td', {}, fmtNum(m.calls)),
+        h('td', {}, m.calls ? `${m.failed} (${Math.round(m.failed / m.calls * 100)}%)` : '0'), h('td', {}, fmtNum(m.refused)),
+        h('td', {}, m.tok_s ? m.tok_s + ' tok/s' : '–')))));
+    const notes = h('div', { class: 'mem-list' });
+    if (!x.notes.length) notes.append(h('p', { class: 'muted' }, 'No notes yet. They are written when a tool fails, you refuse one, or you give feedback, and after every forever-loop round.'));
+    for (const n of x.notes.slice(0, 300)) {
+      notes.append(h('div', { class: 'mem-row learn-row ' + n.side },
+        h('span', { class: 'learn-side', title: n.side === 'worked' ? 'Worked' : 'Didn\'t work' }, n.side === 'worked' ? '✓' : '✗'),
+        h('span', { class: 'mem-text' }, n.text),
+        h('small', { title: n.task || '' }, `${n.model || 'a model'}${n.agent ? ' · ' + n.agent : ''}${n.hits > 1 ? ' · seen ' + n.hits + '×' : ''} · ${fmtDay(n.ts)}`),
+        h('button', { class: 'icon-btn sm', html: I.trash, title: 'Forget this note', onclick: async () => { await api('/api/experience/notes/' + n.id, { method: 'DELETE' }); drawLearn(); } })));
+    }
+    learnBox.append(notes, h('button', { class: 'btn ghost sm danger', style: 'margin-top:8px', onclick: async () => {
+      if (!confirm('Forget every shared note and run record? Memories and your profile stay.')) return;
+      await api('/api/experience', { method: 'DELETE' }); drawLearn();
+    } }, 'Forget all shared learning'));
+  };
+  drawLearn();
   const pctSel = select('auto_compact_at', String(s.auto_compact_at ?? 0.75), [['0', 'Off'], ['0.6', 'At 60% full'], ['0.75', 'At 75% full'], ['0.85', 'At 85% full']]);
   pctSel.dataset.num = '1';
   return [
@@ -2620,10 +2695,14 @@ function memorySection(s) {
     h('div', { class: 'row2' },
       field('Auto-compact', pctSel, 'When the context fills up this much, the chat is saved to memory and continues in a fresh one. Also happens mid-task during long agent runs.'),
       field('Memory budget per chat (tokens)', num('memory_budget_tokens', s.memory_budget_tokens, 100), 'Pinned and most relevant memories first. Also capped at 10% of the context.')),
+    h('label', { class: 'mem-h' }, 'Shared learning: what every model has learned'),
+    h('p', { class: 'muted', style: 'font-size:12.5px;margin:0 0 6px' }, 'After each task Aero records which tools worked, failed or were refused, and which model did it. When something went wrong or you gave feedback, that model writes short notes. Before a similar task, whichever model is loaded gets those notes and the tools that kept failing, so models learn from each other\'s mistakes. Preferences you state go into your profile above.'),
+    toggle('shared_learning', s.shared_learning !== false, 'Share what each model learns with every model'),
+    learnBox,
     h('label', { class: 'mem-h' }, 'Remembered facts and lessons'),
     h('div', { class: 'mem-tools' }, addKind, add, q), list,
     h('label', { class: 'mem-h' }, 'Past chat summaries'), sums,
-    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Stored in C:\\Aero\\data\\memory.json. Passwords, keys and tokens are never saved. Deleting a chat removes its summary but keeps the facts.'),
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Stored in ' + dataPath('memory.json') + '. Passwords, keys and tokens are never saved. Deleting a chat removes its summary but keeps the facts.'),
   ];
 }
 
@@ -2633,5 +2712,280 @@ function select(k, v, opts) { return h('select', { 'data-k': k }, opts.map(([val
 /** A select whose values are JSON (true / false / "auto"). */
 function jselect(k, v, opts) { return h('select', { 'data-k': k, 'data-json': '1' }, opts.map(([val, lab]) => h('option', { value: JSON.stringify(val), selected: JSON.stringify(val) === JSON.stringify(v) }, lab))); }
 function toggle(k, v, label) { return h('label', { class: 'toggle field' }, h('input', { type: 'checkbox', 'data-k': k, checked: !!v }), label); }
+
+// ---------------------------------------------------------------- Mod Aero: a prompt changes Aero itself
+const MOD_STATUS = {
+  draft: ['Not applied', ''], applied: ['On', 'gpu'], off: ['Off', ''],
+  broken: ['Turned off: Aero didn\'t start with it', 'no'], needs_redo: ['Needs redo for this version', 'split'],
+};
+S.mods = [];
+async function loadMods() { try { S.mods = (await api('/api/mods')).mods; } catch { S.mods = []; } renderModCount(); return S.mods; }
+function renderModCount() {
+  const n = (S.mods || []).filter(m => m.status === 'applied').length;
+  const el = $('#modCount'); if (el) el.textContent = n ? n + ' on' : '';
+}
+function modBadge(st) { const [t, c] = MOD_STATUS[st] || [st, '']; return h('span', { class: 'badge ' + c }, t); }
+
+async function openMods() {
+  await loadMods();
+  const ta = h('textarea', { class: 'mod-prompt', rows: 3, placeholder: 'e.g. "Add a word count under each reply", "Make the send button green", "Add a /time command that prints the time"' });
+  const ready = S.st?.engine.status === 'ready';
+  const start = h('button', { class: 'btn', disabled: !ready, onclick: () => startMod(ta.value) }, 'Start mod');
+  const list = h('div', { class: 'mod-list' });
+  const draw = () => {
+    list.innerHTML = '';
+    if (!S.mods.length) { list.append(h('p', { class: 'muted' }, 'No mods yet.')); return; }
+    for (const m of S.mods) {
+      const acts = [];
+      if (m.chat_id) acts.push(h('button', { class: 'btn ghost sm', onclick: () => { closeModal(); openChat(m.chat_id); } }, 'Open chat'));
+      acts.push(h('button', { class: 'btn ghost sm', onclick: () => showModDiff(m) }, 'Changes'));
+      if (m.status === 'applied') acts.push(h('button', { class: 'btn ghost sm', onclick: () => modAction(m, 'off') }, 'Turn off'));
+      if (m.status === 'off' || m.status === 'broken') acts.push(h('button', { class: 'btn ghost sm', onclick: () => modAction(m, 'on') }, 'Turn on'));
+      acts.push(h('button', { class: 'btn ghost sm danger', title: m.status === 'applied' ? 'Undo the change and delete the mod' : 'Delete the mod', onclick: () => modAction(m, 'delete') }, 'Delete'));
+      list.append(h('div', { class: 'mod-row' },
+        h('div', { class: 'mod-main' }, h('b', {}, m.name), modBadge(m.status),
+          h('small', {}, `${(m.files || []).length} file${(m.files || []).length === 1 ? '' : 's'} · made for Aero ${m.version || '?'} · ${new Date((m.updated || 0) * 1000).toLocaleDateString()}`),
+          m.error ? h('small', { class: 'mod-err' }, m.error) : null),
+        h('div', { class: 'mod-acts' }, ...acts)));
+    }
+  };
+  draw();
+  modal('Mod Aero', h('div', {},
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'Describe a change to Aero. Your model edits a private copy of Aero\'s code in a chat. Aero then checks the copy (Python compiles, the server starts, the tests pass) and shows you every changed line. Nothing changes until you press Apply, and every mod can be turned off again.'),
+    ta, h('div', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 18px' }, start,
+      ready ? h('small', { class: 'muted' }, 'With the Claude or ChatGPT button on, the cloud model reviews the mod and can finish it.') : h('small', { class: 'muted' }, 'Load a model first: it makes the change.')),
+    h('h4', { class: 'mod-h' }, 'Your mods'), list,
+    h('p', { class: 'muted', style: 'font-size:12px;margin-bottom:0' }, `Mods stay on through updates (Aero applies them to the new version, or tells you which one needs redoing). If a mod stops Aero from starting, Aero turns it off by itself on the next start; starting Aero with --safe turns every mod off. Files: ${dataPath('mods')}`)), true);
+  ta.focus();
+}
+
+async function startMod(prompt) {
+  prompt = (prompt || '').trim();
+  if (!prompt) return toast('Describe the change first.', true);
+  closeModal(); newChat();
+  let mod;
+  try { mod = await api('/api/mods', { method: 'POST', json: { prompt, chat_id: S.chat.id } }); } catch (e) { return toast(e.message, true); }
+  Object.assign(S.chat, { mod: mod.id, title: 'Mod: ' + mod.name, agent: { name: 'Aero Modder' } });
+  setTitleBar();
+  $('#input').value = prompt; autosize();
+  send();
+}
+
+async function modAction(m, what) {
+  if (what === 'delete' && !confirm(m.status === 'applied' ? `Undo "${m.name}" and delete it?` : `Delete the mod "${m.name}"?`)) return;
+  let r;
+  try {
+    r = what === 'delete' ? await api('/api/mods/' + m.id, { method: 'DELETE' }) : await api(`/api/mods/${m.id}/${what}`, { method: 'POST' });
+  } catch (e) { return toast(e.message, true, 8000); }
+  if (r.conflicts?.length) toast('Left as they are (changed after this mod): ' + r.conflicts.join(', '), true, 8000);
+  await afterModChange(r, { on: `Turning on "${m.name}"`, off: `Turning off "${m.name}"`, delete: `Removing "${m.name}"`, apply: `Applying "${m.name}"` }[what]);
+}
+
+/** After apply / on / off / delete: restart Aero for Python changes, reload the page for static ones. */
+async function afterModChange(r, what) {
+  if (S.chat?.messages?.length) await saveChat().catch(() => { });
+  setReopen();
+  if (r.restart) return restartWait(`${what}…`, 'Aero restarts to load the change. This window reconnects by itself.', 180);
+  closeModal(); toast(`${what}: done. Reloading.`); setTimeout(() => location.reload(), 600);
+}
+
+function modCard(m) {
+  const card = h('div', { class: 'mod-card' });
+  const draw = mod => {
+    card.innerHTML = '';
+    const files = mod.files || [];
+    const checks = mod.checks?.steps || [];
+    const head = h('div', { class: 'lh' }, h('span', { class: 'ico', html: I.mod }), h('span', {}, 'Mod: ' + mod.name), modBadge(mod.status));
+    const fl = files.length ? h('ul', { class: 'mod-files' }, ...files.map(f => h('li', {},
+      h('code', {}, f.path), ' ', h('small', { class: 'muted' }, f.status === 'added' ? 'new file' : f.status === 'deleted' ? 'deleted' : ''),
+      f.binary ? null : h('span', { class: 'plus' }, ' +' + f.plus), f.binary ? null : h('span', { class: 'minus' }, ' −' + f.minus))))
+      : h('p', { class: 'muted', style: 'margin:6px 0' }, 'The copy has no changes yet. Say what to change in this chat.');
+    const ck = checks.length ? h('div', { class: 'mod-checks' }, ...checks.map(c => c.ok || !c.detail
+      ? h('div', { class: c.ok ? 'ok' : 'bad' }, (c.ok ? '✓ ' : '✗ ') + c.name)
+      : h('details', { class: 'bad' }, h('summary', {}, '✗ ' + c.name), h('pre', {}, c.detail)))) : null;
+    const acts = h('div', { class: 'mod-acts' });
+    const ok = mod.checks?.ok && files.length;
+    if (mod.status === 'draft') {
+      acts.append(h('button', { class: 'btn sm', disabled: !ok, title: ok ? '' : 'The checks have to pass first', onclick: async e => {
+        e.target.disabled = true;
+        try { const r = await api(`/api/mods/${mod.id}/apply`, { method: 'POST' }); await afterModChange(r, `Applying "${mod.name}"`); }
+        catch (err) { e.target.disabled = false; toast(err.message, true, 9000); }
+      } }, mod.restart === false || files.every(f => f.path.startsWith('aero/static/')) ? 'Apply and reload' : 'Apply and restart'));
+      if (files.length) acts.append(h('button', { class: 'btn ghost sm', onclick: async e => {
+        e.target.disabled = true; e.target.textContent = 'Checking…';
+        try { draw(await api(`/api/mods/${mod.id}/check`, { method: 'POST' })); } catch (err) { toast(err.message, true); e.target.disabled = false; }
+      } }, 'Check again'));
+    } else if (mod.status === 'applied') {
+      acts.append(h('button', { class: 'btn ghost sm', onclick: () => modAction(mod, 'off') }, 'Turn off'));
+    } else if (mod.status === 'off' || mod.status === 'broken') {
+      acts.append(h('button', { class: 'btn ghost sm', onclick: () => modAction(mod, 'on') }, 'Turn on'));
+    }
+    if (files.length) acts.append(h('button', { class: 'btn ghost sm', onclick: () => showModDiff(mod) }, 'Show changes'));
+    if (mod.status !== 'applied') acts.append(h('button', { class: 'btn ghost sm danger', onclick: () => modAction(mod, 'delete') }, 'Discard'));
+    card.append(...[head, mod.error ? h('div', { class: 'mod-err' }, mod.error) : null, fl, ck,
+      mod.status === 'draft' && ok ? h('small', { class: 'muted' }, 'Checked. Nothing in Aero has changed yet.') : null,
+      mod.status === 'needs_redo' ? h('small', { class: 'muted' }, 'Send a message in this chat (for example "do it again") to make the mod on this version.') : null, acts].filter(Boolean));
+  };
+  draw(m.mod || {});
+  if (m.mod?.id) api('/api/mods/' + m.mod.id).then(live => { m.mod = live; draw(live); }).catch(() => {
+    card.innerHTML = ''; card.append(h('div', { class: 'lh' }, h('span', { class: 'ico', html: I.mod }), 'Mod: ' + (m.mod.name || '')), h('small', { class: 'muted' }, 'This mod was deleted.'));
+  });
+  return card;
+}
+
+async function showModDiff(m) {
+  let d;
+  try { d = (await api(`/api/mods/${m.id}/diff`)).diff; } catch (e) { return toast(e.message, true); }
+  const pre = h('pre', { class: 'diff' });
+  for (const line of (d || 'No changes.').split('\n')) {
+    const c = line.startsWith('+++') || line.startsWith('---') ? 'fh' : line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : line.startsWith('@@') ? 'hunk' : '';
+    pre.append(h('span', { class: c }, line + '\n'));
+  }
+  modal(`Changes: ${m.name}`, pre, true);
+}
+
+// ---------------------------------------------------------------- restart / update overlay
+function setReopen() { try { if (S.chat?.messages?.length) sessionStorage.setItem('aero.reopen', S.chat.id); } catch { } }
+function takeReopen() { try { const v = sessionStorage.getItem('aero.reopen'); sessionStorage.removeItem('aero.reopen'); return v; } catch { return null; } }
+
+/** Show the overlay and wait for a new Aero (a different boot id) to answer, then reload the page. */
+async function restartWait(title, sub, timeoutS = 180) {
+  closeModal();
+  const ov = $('#restartOverlay'), spin = $('#restartSpin');
+  $('#restartTitle').textContent = title; $('#restartSub').textContent = sub;
+  spin.className = 'spinner'; $('#restartFoot').classList.add('hidden');
+  ov.classList.remove('hidden'); renderUpdateBar();
+  const before = S.st?.boot, t0 = Date.now();
+  $('#restartClose').onclick = () => ov.classList.add('hidden');
+  while (Date.now() - t0 < timeoutS * 1000) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const st = await fetch('/api/state?ui=1', { cache: 'no-store' }).then(r => r.ok ? r.json() : null);
+      if (st && st.boot && st.boot !== before) { $('#restartSub').textContent = `Aero ${st.version} is running. Reloading…`; setTimeout(() => location.reload(), 300); return; }
+    } catch { /* Aero is away */ }
+    const secs = Math.round((Date.now() - t0) / 1000);
+    if (secs > 15) $('#restartSub').textContent = `${sub} (${secs} s)`;
+  }
+  spin.className = 'spinner fail';
+  $('#restartSub').textContent = 'Aero hasn\'t come back. Start it again from its shortcut or app menu entry' + (isWin() ? '' : ' (or type aero)') + '. If a mod stopped it, Aero turns that mod off on the next start.';
+  $('#restartFoot').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------- updates (checked once when Aero starts)
+S.updateHidden = false;
+function renderUpdateBar() {
+  const bar = $('#updateBar'), u = S.st?.update;
+  if (!bar) return;
+  const restarting = !$('#restartOverlay')?.classList.contains('hidden');
+  if (!u || !u.available || u.skipped || S.updateHidden || S.st.stopping || restarting) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  if (bar.dataset.v === u.latest) return;
+  bar.dataset.v = u.latest; bar.innerHTML = '';
+  bar.append(h('span', { class: 'ico', html: I.update }), h('span', {}, h('b', {}, `Aero ${u.latest}`), ` is available (you have ${u.current}).`),
+    h('button', { class: 'btn ghost sm', onclick: showReleaseNotes }, 'What\'s new'),
+    u.installable ? h('button', { class: 'btn sm', onclick: installUpdate }, 'Update now') : h('small', { class: 'muted' }, 'This copy runs from a source folder: update it with git pull or the installer.'),
+    h('button', { class: 'btn ghost sm', onclick: async () => { await api('/api/update/skip', { method: 'POST', json: { version: u.latest } }); S.st.update.skipped = true; renderUpdateBar(); } }, 'Skip this version'),
+    h('button', { class: 'icon-btn', title: 'Hide until Aero starts again', html: I.x, onclick: () => { S.updateHidden = true; renderUpdateBar(); } }));
+}
+
+async function showReleaseNotes() {
+  let u;
+  try { u = await api('/api/update'); } catch (e) { return toast(e.message, true); }
+  const md = h('div', { class: 'md' }); renderMd(md, u.notes || 'No release notes.');
+  modal(`What's new in Aero ${u.latest}`, h('div', {}, md,
+    h('div', { style: 'display:flex;gap:8px;margin-top:14px' },
+      u.available && u.installable ? h('button', { class: 'btn', onclick: installUpdate }, 'Update now') : null,
+      u.url ? h('a', { class: 'btn ghost', href: u.url, target: '_blank', rel: 'noopener' }, 'Release page') : null)), true);
+}
+
+async function installUpdate() {
+  if (S.streaming) return toast('Stop the current reply first.', true);
+  const u = S.st.update;
+  const bar = h('div', { class: 'progress' }, h('i'));
+  const line = h('p', { class: 'muted' }, 'Downloading…');
+  modal(`Updating to Aero ${u.latest}`, h('div', {}, line, bar,
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, `Aero downloads the release from GitHub, checks its SHA-256 against the release's checksum list, then hands over to the release's installer (${updaterName()}) and closes. Models, chats, settings, memory and mods stay as they are. ${isWin() ? 'Windows asks for administrator rights if Aero isn\'t running as administrator.' : ''}`)));
+  let done = null, err = null;
+  try {
+    await sseFetch('/api/update/install', {}, ev => {
+      if (ev.type === 'progress') {
+        if (ev.total) $('i', bar).style.width = Math.min(100, ev.done / ev.total * 100).toFixed(1) + '%';
+        line.textContent = ev.phase === 'download' ? `Downloading… ${fmtBytes(ev.done || 0)}${ev.total ? ' of ' + fmtBytes(ev.total) : ''}` : (ev.message || line.textContent);
+      } else if (ev.type === 'result') done = ev.result;
+      else if (ev.type === 'error') err = ev.error;
+    });
+  } catch (e) { err = e.message; }
+  if (err || !done) { line.textContent = 'The update did not start: ' + (err || 'no answer'); line.className = 'err-msg'; return; }
+  if (S.chat?.messages?.length) await saveChat().catch(() => { });
+  setReopen();
+  restartWait(`Installing Aero ${done.version}`, isWin() ? 'The installer runs in its own window. Aero starts again when it finishes.' : 'The installer runs in the background (log: ' + dataPath('logs', 'update.log') + '). This window reconnects when the new Aero starts.', 1800);
+}
+
+function updatesSection(s) {
+  const u = S.st.update || {};
+  const status = h('p', { class: 'muted' });
+  const draw = x => {
+    status.textContent = x.checking ? 'Checking…' : x.error ? x.error
+      : x.latest ? (x.available ? `Aero ${x.latest} is available.` : `Aero ${x.current} is the newest version.`) + (x.checked ? ` Last checked ${new Date(x.checked * 1000).toLocaleString()}.` : '')
+      : 'Not checked since Aero started.';
+  };
+  draw(u);
+  return [
+    h('div', { class: 'kv', style: 'margin-bottom:12px' }, h('span', {}, 'Installed'), h('span', {}, `Aero ${S.st.version}`),
+      h('span', {}, 'Releases'), h('span', {}, h('a', { href: 'https://github.com/NermalYT/Aero/releases', target: '_blank', rel: 'noopener' }, 'github.com/NermalYT/Aero/releases'))),
+    toggle('update_check', s.update_check !== false, 'Look for a newer Aero on GitHub once each time Aero starts (never while it runs)'),
+    status,
+    h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
+      h('button', { class: 'btn ghost sm', onclick: async e => {
+        e.target.disabled = true; status.textContent = 'Checking…';
+        try { const x = await api('/api/update/check', { method: 'POST' }); S.st.update = { ...S.st.update, ...x }; S.updateHidden = false; delete $('#updateBar').dataset.v; draw(x); renderUpdateBar(); }
+        catch (err) { status.textContent = err.message; }
+        e.target.disabled = false;
+      } }, 'Check now'),
+      u.available && u.installable ? h('button', { class: 'btn sm', onclick: installUpdate }, `Install Aero ${u.latest}`) : null),
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'An update downloads the whole new version, verifies it, and keeps your models, chats, settings, memory and mods. Any older Aero can update straight to the newest one. Strict offline mode skips the check.'),
+  ];
+}
+
+// ---------------------------------------------------------------- forever-loop journal
+function loopNoteCard(m) {
+  const list = (title, items, cls) => items?.length ? h('div', { class: 'jn ' + cls }, h('b', {}, title), h('ul', {}, ...items.map(x => h('li', {}, x)))) : null;
+  return h('div', { class: 'journal-card' },
+    h('div', { class: 'lh' }, h('span', { class: 'inf' }, '∞'), `Loop journal · round ${m.iteration}`, m.status ? h('small', { class: 'muted' }, ' · ' + m.status) : null),
+    list('Worked', m.worked, 'ok'), list('Didn\'t work', m.failed, 'bad'),
+    m.next ? h('div', { class: 'jn' }, h('b', {}, 'Next round: '), m.next) : null,
+    h('small', { class: 'muted' }, 'The next round of this loop starts with the journal. ', h('a', { href: '#', onclick: e => { e.preventDefault(); openJournal(null, m.key); } }, 'Open journal')));
+}
+
+/** Shared learning: notes this run left for every model (experience.py). */
+function learnedCard(m) {
+  const list = (title, items, cls) => items?.length ? h('div', { class: 'jn ' + cls }, h('b', {}, title), h('ul', {}, ...items.map(x => h('li', {}, x)))) : null;
+  return h('div', { class: 'journal-card learned-card' },
+    h('div', { class: 'lh' }, h('span', { class: 'inf' }, '✦'), 'Learned for next time', m.model ? h('small', { class: 'muted' }, ' · by ' + m.model) : null),
+    list('Worked', m.worked, 'ok'), list('Didn\'t work', m.failed, 'bad'), list('Your preference', m.preferences, ''),
+    h('small', { class: 'muted' }, 'Every model you load gets these notes before a similar task. ',
+      h('a', { href: '#', onclick: e => { e.preventDefault(); openSettings('Memory'); } }, 'See everything learned')));
+}
+
+async function openJournal(task, key) {
+  let j;
+  try { j = await api('/api/loop/journal?' + new URLSearchParams(task ? { task } : { key })); } catch (e) { return toast(e.message, true); }
+  const sum = j.summary || {}, entries = (j.entries || []).slice().reverse();
+  const ul = items => items?.length ? h('ul', {}, ...items.map(x => h('li', {}, x))) : h('p', { class: 'muted' }, 'Nothing yet.');
+  const body = h('div', { class: 'journal' },
+    j.task ? h('p', {}, h('b', {}, 'Task: '), j.task) : null,
+    h('div', { class: 'row2' }, h('div', {}, h('h4', {}, 'Worked well'), ul(sum.worked)), h('div', {}, h('h4', {}, 'Didn\'t work'), ul(sum.failed))),
+    sum.next ? h('p', {}, h('b', {}, 'Planned next step: '), sum.next) : null,
+    h('h4', {}, `Rounds (${entries.length})`),
+    entries.length ? h('div', { class: 'jrounds' }, ...entries.map(e => h('details', {}, h('summary', {}, `Round ${e.iteration} · ${new Date(e.ts * 1000).toLocaleString()}${e.status ? ' · ' + e.status : ''}`),
+      e.worked?.length ? h('div', {}, h('b', {}, 'Worked: '), e.worked.join(' · ')) : null,
+      e.failed?.length ? h('div', {}, h('b', {}, 'Didn\'t work: '), e.failed.join(' · ')) : null,
+      e.next ? h('div', {}, h('b', {}, 'Next: '), e.next) : null))) : h('p', { class: 'muted' }, 'The first entry is written when round 1 finishes.'),
+    entries.length ? h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn ghost sm danger', onclick: async () => {
+      if (!confirm('Delete this journal? The next round starts without it.')) return;
+      await api('/api/loop/journal?' + new URLSearchParams(task ? { task } : { key }), { method: 'DELETE' }); closeModal(); toast('Journal deleted');
+    } }, 'Delete journal')) : null);
+  modal('Forever-loop journal', body, true);
+}
 
 boot();

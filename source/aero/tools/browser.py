@@ -84,18 +84,20 @@ class _Browser:
             from playwright.sync_api import sync_playwright
             self.pw = sync_playwright().start()
             prof = str(DATA / "browser-profile")
-            exe = os.environ.get("AERO_BROWSER")
+            from .. import osinfo
+            exe = os.environ.get("AERO_BROWSER") or osinfo.browser_executable()
             last = None
             for kw in ([{"executable_path": exe}] if exe else []) + [{"channel": "msedge"}, {"channel": "chrome"}, {}]:
                 try:
                     self.ctx = self.pw.chromium.launch_persistent_context(
-                        prof, headless=os.environ.get("AERO_HEADLESS") == "1", viewport=None,
+                        prof, headless=os.environ.get("AERO_HEADLESS") == "1" or not osinfo.has_display(), viewport=None,
                         args=["--start-maximized"], **kw)
                     break
                 except Exception as e:  # noqa: BLE001
                     last = e
             if self.ctx is None:
-                raise RuntimeError(f"Could not start a browser (Edge/Chrome): {last}")
+                raise RuntimeError("Could not start a browser. Install Chrome, Edge, Chromium or Brave, or run "
+                                   f"`python -m playwright install chromium` in Aero's environment. ({last})")
             self.ctx.on("close", lambda *_: self._reset())
         pages = [p for p in self.ctx.pages if not p.is_closed()]
         self.page = pages[-1] if pages else self.ctx.new_page()
@@ -123,7 +125,7 @@ class _Browser:
 B = _Browser()
 
 
-@tool("browser_open", "Open a URL in the automated browser (a visible Edge window). Returns the page's "
+@tool("browser_open", "Open a URL in the automated browser (a visible browser window). Returns the page's "
       "interactive elements as [number] entries plus page text.", "browser",
       {"url": {"type": "string"}, "new_tab": {"type": "boolean"}}, ["url"], summary=lambda a: a.get("url", ""))
 def browser_open(ctx, url, new_tab=False):

@@ -1,10 +1,10 @@
 # Aero
 
-*A lightweight bootstrapper for local AI on Windows. Your hardware does the work, a tiny CPU model makes the
-decisions, and ChatGPT or Claude check it only when you ask.*
+*A lightweight bootstrapper for local AI on Windows, Linux and macOS. Your hardware does the work, a tiny CPU model
+makes the decisions, and ChatGPT or Claude check it only when you ask.*
 
-Aero scans your PC, recommends a model and quant that fit it, installs the right llama.cpp build for your GPU
-(NVIDIA, AMD, Intel or none), tunes the model to the exact VRAM you allow, and gives you an agent that can use your
+Aero scans your computer, recommends a model and quant that fit it, installs the right llama.cpp build for your GPU
+(NVIDIA, AMD, Intel, Apple Silicon or none), tunes the model to the exact VRAM you allow, and gives you an agent that can use your
 files, shell, screen, apps and browser. A small decision router on the CPU reads every request first and hands the
 main model only the tools it needs. Everything local runs on 127.0.0.1; with **strict offline** on, nothing leaves
 the machine at all.
@@ -19,22 +19,31 @@ Engine: **llama.cpp** (`llama-server`). Models: **GGUF**. Look: **Frutiger Aero*
 
 ## Requirements
 
-- Windows 10 or 11, 64-bit. Administrator rights for the install (Aero also runs as administrator so its desktop and
-  app-control tools can reach every window).
+- **Windows** 10 or 11, 64-bit. Administrator rights for the install (Aero also runs as administrator so its desktop
+  and app-control tools can reach every window).
+- **Linux**, any distro with Python 3.10 or newer available (Debian 12+, Ubuntu 22.04+, Fedora, RHEL / Rocky / Alma
+  9+, openSUSE Leap 15.6 and Tumbleweed, Arch, Alpine, Void and others). Installs for your user; sudo only for
+  missing system packages.
+- **macOS** on Apple Silicon (Metal) or Intel (CPU). Homebrew is used for Python if no Python 3.10+ is installed.
 - 16 GB RAM or more is comfortable; 8 GB works with small models.
-- Any of: an NVIDIA GPU (CUDA build), an AMD or Intel GPU with its own memory (Vulkan build), or no GPU at all (CPU
-  build; small and MoE models are the quick ones there).
+- Any of: an NVIDIA GPU (CUDA build), an AMD or Intel GPU (Vulkan build), Apple Silicon (Metal), or no GPU at all
+  (CPU build; small and MoE models are the quick ones there).
 - Disk: a few GB for the app and llama.cpp, plus your models (2 to 30 GB each).
 - Internet for the install and model downloads. After that Aero runs fully offline if you want.
 - Optional: an OpenAI API key or a ChatGPT plan (Plus, Pro, Business) for ChatGPT reviews; an Anthropic API key or a
   Claude plan (Pro, Max, Team) for Claude reviews.
 
-## Install or update: one file
+## Install or update
 
-The download holds **`Update-Aero.bat`** and the **`source`** folder (the app, this README, the installer and the
-uninstaller in `source\installer`).
+Every release on [GitHub](https://github.com/NermalYT/Aero/releases/latest) has a file for each system. Models,
+chats, memory, settings, mods and tunings are never deleted by an install or update.
 
-1. Extract the whole zip anywhere (from GitHub: **Code → Download ZIP**, or a release's `Aero.zip`).
+### Windows
+
+`Aero-windows.zip` holds **`Update-Aero.bat`** and the **`source`** folder (the app, this README, the installer and
+the uninstaller in `source\installer`).
+
+1. Extract the whole zip anywhere.
 2. Double-click **`Update-Aero.bat`** and accept the admin prompt.
 3. It works out what to do:
 
@@ -46,11 +55,60 @@ uninstaller in `source\installer`).
 
 4. Then the **model chooser** runs in the same window (below), and Aero opens.
 
-Later updates: run `C:\Aero\Update-Aero.bat` (packages, llama.cpp, chooser), or run the `Update-Aero.bat` inside a
-newer download (also updates the app), or drop a newer zip onto `C:\Aero\Update-Aero.bat`. Models, chats, memory,
-settings and tunings are never deleted by an update.
+Run `C:\Aero\Update-Aero.bat` later for packages, llama.cpp and the chooser. Uninstall: `C:\Aero\Uninstall-Aero.bat`
+(asks whether to keep models and chats).
 
-Uninstall: `C:\Aero\Uninstall-Aero.bat` (asks whether to keep models and chats).
+### macOS
+
+Unzip `Aero-macos.zip`, then right-click **`Install-Aero.command`** → **Open** (the first time, macOS asks because
+the file comes from the internet). A Terminal window runs the installer: Python 3.12 from Homebrew if you have no
+Python 3.10+, Aero into `~/Library/Application Support/Aero`, llama.cpp's Metal build on Apple Silicon (CPU build on
+Intel), **Aero.app** in `~/Applications` and the `aero` command in `~/.local/bin`. Then the model chooser runs and
+Aero opens. Desktop control asks for the Screen Recording and Accessibility permissions the first time it is used.
+
+### Linux
+
+One line in a terminal downloads the newest release and installs it:
+
+```sh
+curl -fsSL https://github.com/NermalYT/Aero/releases/latest/download/install.sh | sh
+```
+
+Or download `Aero-linux.tar.gz`, unpack it and run `sh Aero/install.sh`. Either way, the installer:
+
+1. finds your package manager (apt, dnf / yum, zypper, pacman, apk, xbps, eopkg, emerge or swupd), shows the
+   command for anything missing (Python 3.10+ with venv, curl, the Vulkan loader for AMD / Intel GPUs, the OpenMP
+   runtime) and asks before running it with sudo;
+2. installs Aero for your user into `~/.local/share/aero` (`--dir` picks another folder) with a private Python
+   environment;
+3. downloads llama.cpp's CUDA, Vulkan or CPU build for your GPU, or compiles llama.cpp where no prebuilt build runs
+   (Alpine and other musl systems, ARM boards);
+4. adds an app-menu entry and the `aero` command (`~/.local/bin/aero`), runs the model chooser and starts Aero.
+
+`sh install.sh --help` lists the options (`--yes` for no questions, `--skip-models`, `--build-llama`, `--no-launch`
+and more).
+
+**Packages.** The release also has a `.deb` (Debian 12+, Ubuntu 22.04+, Mint, Pop!_OS: `sudo apt install
+./aero_*_all.deb`), an `.rpm` (Fedora, RHEL / Rocky / Alma 9+, openSUSE: `sudo dnf install ./aero-*.rpm` or `sudo
+zypper install ./aero-*.rpm`) and a `PKGBUILD` (Arch and its family: `makepkg -si`). They install the `aero` command
+and an app-menu entry for everyone; the first time each user starts Aero, it sets itself up in that user's
+`~/.local/share/aero` (in a terminal window, where the installer can ask questions).
+
+Run `sh ~/.local/share/aero/install.sh` later for packages, llama.cpp and the chooser. Uninstall: `sh
+~/.local/share/aero/uninstall.sh` (asks whether to keep models and chats).
+
+### Updates from GitHub
+
+When Aero starts, it asks GitHub once whether a newer release exists; it never checks while it runs, and strict
+offline skips the check. When there is one, a bar at the bottom offers **What's new**, **Update now** and **Skip this
+version**; Settings → Updates has the same plus **Check now** and the switch for the startup check.
+
+**Update now** downloads the release file for your system, checks its SHA-256 against the release's
+`SHA256SUMS.txt`, hands over to the installer inside it (`Update-Aero.bat` on Windows, `install.sh` on Linux and
+macOS) and closes Aero. The installer replaces the app, keeps everything else, applies your mods again and starts
+Aero; the window reconnects by itself. An Aero several versions behind updates straight to the newest release.
+
+A copy run from a git checkout updates with `git pull`.
 
 ### The model chooser
 
@@ -72,7 +130,8 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
-Run the chooser again any time with `C:\Aero\Update-Aero.bat`, or switch routers in Settings → Router.
+Run the chooser again any time with `C:\Aero\Update-Aero.bat` (Linux and macOS: `sh <install folder>/install.sh`),
+or switch routers in Settings → Router.
 
 ## How a request flows
 
@@ -111,6 +170,17 @@ bar above the message box shows the round, a countdown and **Run now / Finish th
 message yourself also stops it. Delay and maximum rounds are in Settings → General. Reviews run only on the first
 round unless you turn on *Let ChatGPT and Claude review every forever-loop round* (it costs cloud usage on every
 round).
+
+**The loop journal.** After every round, the local model looks back at what it just did (its tool calls, which ones
+failed, its answer, any review) and writes a journal entry: what worked well and is worth reusing (a tool, a
+command, a path, a setting), what didn't work and why, the next step, and where the task stands. The next round
+starts with the journal in its context, so the model keeps what works, stops repeating what failed and starts from
+its own plan. An item that failed once and worked later is listed only where it ended up.
+
+A card in the chat shows each round's entry, and the loop bar's **Journal** button opens the whole journal, round by
+round, with **Delete** to start fresh. There is one journal per task (the loop's prompt), saved in `data/loops`, so
+running the same loop again later, even in a new chat, picks up what it learned. Settings → General → *Forever-loop
+journal* turns it off.
 
 ## Connecting ChatGPT
 
@@ -234,6 +304,26 @@ off. Export any report as Markdown or JSON. Only measured numbers are shown; any
   related past chats. The model can `remember` and `recall`. **Memory** in the sidebar lists everything; passwords,
   keys and tokens are filtered out.
 
+### Shared learning: models learn from each other
+
+Every model you load works from the same experience, whichever model gathered it.
+
+- **Run records.** After each task with tool calls, Aero writes down every tool call (worked, failed with its error,
+  or refused by you), the model that made it, the agent's name (its kind of work) and the model's speed. No model
+  call is spent on this.
+- **Notes.** When a tool failed, you refused one, or your message reads like feedback ("don't…", "always…", "I
+  prefer…"), the loaded model looks back at the run and writes up to three notes on what worked and three on what
+  failed and why. Forever-loop rounds share their journal entries the same way. A note that comes up again is
+  counted, not repeated; one that failed before and works now moves to the worked side.
+- **Before a similar task**, whichever model is loaded gets the matching notes, each labelled with the model that
+  learned it, plus the tools that kept failing on that kind of task and why (for example "open_app failed 3 of 4
+  times (last error: No program called 'notepad')").
+- **Your preferences.** A lasting preference you state goes into long-term memory as part of your profile, which every
+  model's system prompt carries.
+- Settings → Memory → *Shared learning* lists every note with its model and agent, a per-model table (tasks, tool
+  calls, failures, refusals, speed), and buttons to forget one note or all of it. The switch there turns it off.
+  Stored in `data/experience.json`.
+
 ### Look
 
 Frutiger Aero, day and night: a blue sky with the sun (or moon and stars), drifting clouds, light ribbons, iridescent
@@ -244,6 +334,28 @@ rest, and every so often one of them meeps. Everything sits behind frosted glass
 freeze the scenery while a model is generating, tuning or benchmarking (on by default, so the scene never slows
 generation); *Enable transparency* (turn it off on slower GPUs: same look, no glass blur). Motion follows Windows' reduced-motion setting, and the scene stops while the
 window is hidden. Theme follows Windows unless you pick Day or Night.
+
+### Mod Aero
+
+**Mod Aero** in the sidebar changes Aero itself. Describe the change in plain words ("make the send button green",
+"add a word counter under the message box", "a button that copies the whole chat") and the **Aero Modder** agent, your
+local model, makes it in a copy of Aero's code, in its own chat.
+
+- **It can only touch the copy.** File tools are limited to the mod's folder; nothing in the running Aero changes
+  until you press **Apply**.
+- **Checked before you apply.** When the model finishes, Aero checks the copy: the Python files compile, the UI
+  scripts parse (when Node.js is installed), Aero's server imports, the unit tests pass, and a test copy of Aero starts on a spare port and serves
+  its page. The mod card lists each check. **Show changes** shows the diff.
+- **Apply** merges the change into Aero (three-way, so it fits on top of updates), then reloads the page (UI-only
+  changes) or restarts Aero (Python changes). **Turn off** / **Turn on** undo and redo it; **Delete** removes it.
+  Chatting more in a mod's chat changes the mod (an applied mod gets a follow-up).
+- **A broken mod can't lock you out.** If Aero fails to start after a mod, the mod is undone and Aero starts again
+  without it. `aero --safe` (Windows: `C:\Aero\venv\Scripts\python.exe -m aero --safe` from `C:\Aero\app`) starts with
+  every mod off.
+- **Mods survive updates.** After an update Aero applies your mods again. A mod that no longer fits the new code is
+  marked *needs redo*; open its chat and the model makes it again on the new version from the old diff.
+- Mods live in `data/mods`. In a mod chat the cloud reviews run only when their composer button is on; the mod checks
+  are the default safety net.
 
 ## The dashboard
 
@@ -293,6 +405,10 @@ C:\Aero\
   aero-bubble.ico   Update-Aero.bat   Uninstall-Aero.bat   README.md
 ```
 
+Linux (`~/.local/share/aero`) and macOS (`~/Library/Application Support/Aero`) have the same `app`, `venv`, `llama`,
+`models` and `data` folders, plus `bin/aero` (the launcher), `install.sh` and `uninstall.sh`. In `data`, `mods\` holds
+your mods, `loops\` the forever-loop journals and `updates\` downloaded releases (removed after an hour).
+
 ## Checking an install
 
 `C:\Aero\app\validation\Validate-Aero.ps1` checks a real install without changing it: hardware scan, icon and
@@ -305,7 +421,18 @@ powershell -ExecutionPolicy Bypass -File C:\Aero\app\validation\Validate-Aero.ps
 
 ## Troubleshooting
 
-- **Icon does nothing:** run `C:\Aero\app\Aero-debug.bat` to see the error. Logs: `C:\Aero\data\logs\`.
+- **Icon does nothing:** run `C:\Aero\app\Aero-debug.bat` (Linux and macOS: `aero` in a terminal) to see the
+  error. Logs: `C:\Aero\data\logs\` (Linux and macOS: `data/logs` in the install folder).
+- **Aero won't start after applying a mod:** it undoes the mod by itself and starts again; if it still doesn't, start
+  it with `--safe` (see Mod Aero) and turn the mod off.
+- **Update now says the update didn't start:** the message says why (no file for your system in the release, a
+  checksum mismatch, no network). Download the release yourself and run its installer; nothing was changed.
+- **Linux: `aero: command not found`:** `~/.local/bin` isn't on your PATH yet; log out and in, or run
+  `~/.local/share/aero/bin/aero`.
+- **Linux: the desktop tools are missing:** clicking, typing and screenshots need an X11 session (or XWayland with
+  `DISPLAY` set). On a pure Wayland session Aero hides them; files, shell, apps and the browser still work.
+- **macOS: "cannot be opened because it is from an unidentified developer":** right-click `Install-Aero.command` →
+  **Open**, or allow it in System Settings → Privacy & Security.
 - **The move from Halcyon or VRAMpire says Windows wouldn't move the folder:** close any Explorer window, terminal or
   editor open inside the old folder and run the updater again. Nothing is changed when the move fails.
 - **Router shows "off" or "error":** Settings → Router → pick a model (it downloads and benchmarks), or Re-benchmark /

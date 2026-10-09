@@ -1,32 +1,34 @@
-"""Shell tool: PowerShell on Windows, bash elsewhere."""
+"""Shell tool: PowerShell on Windows, bash (or sh where bash is missing) on macOS and Linux."""
 import subprocess
 
 from . import tool
+from .. import osinfo
 from ..config import IS_WIN
 
-_NO_WINDOW = 0x08000000 if IS_WIN else 0
+_NO_WINDOW = osinfo.NO_WINDOW
 MAX_OUT = 30000
 
+if IS_WIN:
+    _DESC = ("Run a shell command and return its output. This is PowerShell (use shell='cmd' for cmd.exe). Runs with "
+             "the app's admin rights. ")
+    _SHELLS = ["powershell", "cmd"]
+else:
+    _DESC = (f"Run a shell command in {osinfo.shell_name()} on {osinfo.name()} and return its output. Runs as the "
+             "current user (use sudo only if the user asked and it works without a password prompt). ")
+    _SHELLS = ["bash", "sh"]
 
-@tool("run_command", "Run a shell command and return its output. On Windows this is PowerShell "
-      "(use shell='cmd' for cmd.exe). Runs with the app's admin rights. Use for anything the file tools can't do: "
-      "git, python, package managers, system info, process control.", "shell",
+
+@tool("run_command", _DESC + "Use for anything the file tools can't do: git, python, package managers, system info, "
+      "process control.", "shell",
       {"command": {"type": "string"},
        "cwd": {"type": "string", "description": "Working folder (default: working directory)."},
        "timeout": {"type": "integer", "description": "Seconds (default 120, max 1800)."},
-       "shell": {"type": "string", "enum": ["powershell", "cmd", "bash"]}},
+       "shell": {"type": "string", "enum": _SHELLS}},
       ["command"], summary=lambda a: a.get("command", "")[:120])
 def run_command(ctx, command, cwd=None, timeout=120, shell=None):
     cwd = str(ctx.path(cwd or "."))
     timeout = max(1, min(int(timeout or 120), 1800))
-    if IS_WIN:
-        if shell == "cmd":
-            args = ["cmd.exe", "/d", "/s", "/c", command]
-        else:
-            args = ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                    "-Command", "[Console]::OutputEncoding=[Text.Encoding]::UTF8; " + command]
-    else:
-        args = ["bash", "-lc", command]
+    args = osinfo.shell_argv(command, shell)
     try:
         p = subprocess.run(args, cwd=cwd, capture_output=True, timeout=timeout, creationflags=_NO_WINDOW,
                            stdin=subprocess.DEVNULL)

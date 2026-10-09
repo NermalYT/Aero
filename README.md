@@ -1,28 +1,45 @@
 # Aero
 
-**The Frutiger Aero, lightweight and efficient local LLM bootstrapper for Windows.**
+**The Frutiger Aero, lightweight and efficient local LLM bootstrapper for Windows, Linux and macOS.**
 
-Aero scans your PC, picks a model and quant that fit it, installs the right llama.cpp build for your GPU (NVIDIA,
-AMD, Intel or none), tunes the model to the VRAM you allow, and gives you a local agent that can use your files,
-shell, screen, apps and browser. Everything local runs on 127.0.0.1, and with **strict offline** on, nothing leaves
-the PC at all. When you want a second opinion, ChatGPT and/or Claude review the finished work, and your local model
-learns from what they found.
+Aero scans your computer, picks a model and quant that fit it, installs the right llama.cpp build for your GPU
+(NVIDIA, AMD, Intel, Apple Silicon or none), tunes the model to the VRAM you allow, and gives you a local agent that
+can use your files, shell, screen, apps and browser. Everything local runs on 127.0.0.1, and with **strict offline**
+on, nothing leaves the computer at all. When you want a second opinion, ChatGPT and/or Claude review the finished
+work, and your local model learns from what they found.
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
 
 ## Download and install
 
-1. Download the latest **`Aero.zip`** from [Releases](https://github.com/NermalYT/Aero/releases), or **Code → Download
-   ZIP** on this page.
-2. Extract the whole zip anywhere.
-3. Double-click **`Update-Aero.bat`** and accept the admin prompt.
+Get the file for your system from the [latest release](https://github.com/NermalYT/Aero/releases/latest).
 
-It installs into `C:\Aero`, then opens the model chooser with a recommendation for your PC. To update later,
-download the new zip and run its `Update-Aero.bat`; your models, chats, memory, settings and tunings are kept. An install under Aero's earlier names
-(`C:\Halcyon` or `C:\VRAMpire`) is moved to `C:\Aero` with everything in it.
+| System | Download | Then |
+| --- | --- | --- |
+| **Windows** 10 / 11 (64-bit) | `Aero-windows.zip` | Extract it, double-click **`Update-Aero.bat`**, accept the admin prompt. Installs into `C:\Aero`. |
+| **macOS** (Apple Silicon or Intel) | `Aero-macos.zip` | Unzip it, right-click **`Install-Aero.command`** → Open. Adds `~/Applications/Aero.app`. |
+| **Linux**, any distro | one line in a terminal (below) | Installs for your user into `~/.local/share/aero`, with an app-menu entry and the `aero` command. |
+| Debian, Ubuntu, Mint, Pop!_OS | `aero_<version>_all.deb` | `sudo apt install ./aero_*_all.deb`, then start Aero from the app menu or run `aero`. |
+| Fedora, RHEL, Rocky, Alma, openSUSE | `aero-<version>-1.noarch.rpm` | `sudo dnf install ./aero-*.rpm` (openSUSE: `sudo zypper install ./aero-*.rpm`), then run `aero`. |
+| Arch, Manjaro, EndeavourOS | `PKGBUILD` | `makepkg -si` in a folder holding the `PKGBUILD`, then run `aero`. |
 
-**Needs:** Windows 10 or 11 (64-bit), 8 GB RAM or more (16 GB is comfortable), and an internet connection for the
-install and model downloads. A GPU is optional.
+Linux and macOS, one line (downloads the newest release and installs it):
+
+```sh
+curl -fsSL https://github.com/NermalYT/Aero/releases/latest/download/install.sh | sh
+```
+
+The installer finds your package manager (apt, dnf, zypper, pacman, apk, xbps, eopkg, emerge, swupd or Homebrew),
+shows the command before it installs anything missing (Python 3.10+, the Vulkan loader, the OpenMP runtime) and
+asks first. It never needs to run as root. Then the model chooser recommends a model for your computer, and Aero
+opens. `sh install.sh --help` lists its options.
+
+**Updates:** Aero checks GitHub for a newer release once when it starts. **Update now** downloads it, verifies its
+checksum and installs it; models, chats, memory, settings, mods and tunings are kept.
+
+**Needs:** 8 GB RAM or more (16 GB is comfortable) and an internet connection for the install and model downloads.
+A GPU is optional. An install under Aero's earlier names (`C:\Halcyon` or `C:\VRAMpire`) is moved to `C:\Aero` with
+everything in it.
 
 ## What it does
 
@@ -45,6 +62,15 @@ install and model downloads. A GPU is optional.
   keeps an audit log. Local chat keeps working with no network at all.
 - **Performance Lab.** Benchmarks (time to first token, prefill, decode, long-context recall, JSON and tool-call
   accuracy), a router suite, and a test of what the scenery costs your generation speed. Real measurements only.
+- **Mod Aero.** Describe a change to Aero in plain words and your local model makes it in a copy of Aero's code.
+  Aero compiles it, runs its tests and starts a test copy before you can apply it, shows the diff, and can turn it
+  off or undo it any time. A mod that breaks startup is undone automatically. Mods carry over to new versions.
+- **Forever-loop with a journal.** The ∞ Loop repeats a task until you stop it. After every round the model writes
+  down what worked, what didn't and what to do next, and the next round starts from that, so it improves its own
+  workflow as it goes.
+- **Models learn from each other.** Aero records which tools worked or failed on each task and which model did it,
+  and the model writes notes when something goes wrong or you give feedback. Whichever model you load later gets
+  the notes from similar tasks, and every model knows your stated preferences.
 - **Frutiger Aero.** Glass over a day or night landscape with a frog pond. Scenery Full, Still or Off; it pauses
   while a model is working.
 
@@ -78,9 +104,9 @@ install and model downloads. A GPU is optional.
 
 ## Status
 
-1.0.0 is the first public release. Its automated tests and a live run of the backend passed on Linux (no GPU); the
-Windows install, GPU speeds and real ChatGPT and Claude calls have not been tested yet. To check an install on your
-PC without changing it:
+1.0.0 is the first public release. Its automated tests, a live run of the UI, a real self-update in a container,
+and installs from the release files on Ubuntu 24.04 and 22.04, Fedora 42 and Arch Linux passed (containers, no GPU). Windows, macOS, GPU speeds and real ChatGPT and Claude calls have not been tested yet;
+see the [validation report](source/docs/VALIDATION_REPORT.md). To check a Windows install without changing it:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\Aero\app\validation\Validate-Aero.ps1 -OpenUI
@@ -95,6 +121,9 @@ cd source
 pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
+
+`python tools/build_release.py` builds every release file into `dist/` (the Windows, macOS and Linux archives, the
+`.deb`, the `.rpm`, the `PKGBUILD` and `SHA256SUMS.txt`). The `.deb` needs `dpkg-deb`, the `.rpm` needs `rpmbuild`.
 
 ## Licence
 

@@ -15,7 +15,7 @@ import json
 import time
 import uuid
 
-from . import agent, memory, tools, vault
+from . import agent, memory, osinfo, tools, vault
 from .config import read_store, write_store
 
 KEY_NAME = "anthropic_api_key"
@@ -244,7 +244,7 @@ SUBMIT_REVIEW = {
     },
 }
 
-REVIEW_SYSTEM = """You are Claude Fable 5.1, the reviewer in Aero, a local AI agent app on the user's Windows PC. A local model running on the user's GPU has just worked on the user's request with real tools (files, PowerShell, apps, browser, web). You check its work before the user relies on it.
+REVIEW_SYSTEM = """You are Claude Fable 5.1, the reviewer in Aero, a local AI agent app on the user's computer ({os}). A local model running on the user's GPU has just worked on the user's request with real tools (files, {shell}, apps, browser, web). You check its work before the user relies on it.
 
 How to review
 - Judge the result against what the user actually asked, not against what the local model claimed. Local models often claim success without verifying, invent file contents or command output, stop early, or answer a different question.
@@ -258,14 +258,16 @@ Verdicts
 - major: the approach is wrong, the result is wrong or fabricated, changes are broken or risky, or large parts are missing. Your plan must then be a complete re-plan of the whole task that a stronger model (Claude Opus 5.5) will execute with the same tools: approach, methods, tools, steps, verification and the expected final answer.
 
 Finish by calling submit_review exactly once. Do not write the verdict as plain text."""
+REVIEW_SYSTEM = REVIEW_SYSTEM.replace("{os}", osinfo.name()).replace("{shell}", osinfo.shell_name())
 
-EXECUTE_SYSTEM = """You are Claude Opus 5.5, working inside Aero, a local AI agent app on the user's Windows PC. The user's local model attempted a task and a reviewer (Claude Fable 5.1) found major problems and wrote a new plan. You now carry out the task yourself.
+EXECUTE_SYSTEM = """You are Claude Opus 5.5, working inside Aero, a local AI agent app on the user's computer ({os}). The user's local model attempted a task and a reviewer (Claude Fable 5.1) found major problems and wrote a new plan. You now carry out the task yourself.
 
-- Your tools run on the user's own PC (files, PowerShell, app windows, browser, web, MCP servers). Some need the user's approval; if one is denied, do not retry it, find another way or explain.
+- Your tools run on the user's own computer (files, {shell}, app windows, browser, web, MCP servers). Some need the user's approval; if one is denied, do not retry it, find another way or explain.
 - Follow the reviewer's plan unless you find a better way; verify every step with your tools and never claim something worked unless a tool showed it.
 - The local model's attempt may have left things half-done or broken: inspect the current state first and repair it.
 - Never run destructive commands, type passwords or payment details, or send messages to other people unless the user asked for exactly that.
 - Final answer, addressed to the user: lead with the result, then what you changed (paths, commands, values), then one short section "What the local model got wrong" with the key mistakes. Be direct and concise; use Markdown."""
+EXECUTE_SYSTEM = EXECUTE_SYSTEM.replace("{os}", osinfo.name()).replace("{shell}", osinfo.shell_name())
 
 
 def with_profile(turn, system, role):
@@ -310,7 +312,7 @@ def _render_work(msgs, per_tool=1500, skip_lanes=("fable", "astra")):
     out = []
     for m in msgs:
         r, lane = m.get("role"), m.get("lane") or "local"
-        if r in ("router", "review", "lesson", "notice") or lane in skip_lanes:
+        if r in ("router", "review", "lesson", "notice", "loopnote", "mod", "learned") or lane in skip_lanes:
             continue
         who = WHO.get(lane, "LOCAL MODEL")
         if r == "user":

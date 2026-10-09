@@ -13,7 +13,6 @@ import asyncio
 import difflib
 import getpass
 import json
-import platform
 import re
 import time
 import uuid
@@ -21,8 +20,7 @@ from pathlib import Path
 
 import httpx
 
-from . import agents, attachments, control, memory, stats, tools
-from .config import IS_WIN
+from . import agents, attachments, control, memory, osinfo, stats, tools
 
 _approvals = {}        # call_id -> Future
 _chat_allow = {}       # chat_id -> set(categories) allowed for the rest of the chat
@@ -83,8 +81,8 @@ def _screen_size():
 
 def _env_block(settings, vision, ctx_size):
     """Static facts only: anything that changes per turn would invalidate the prompt cache."""
-    return (f"\n\n# Environment\n- OS: {platform.system()} {platform.release()}"
-            f"{' (PowerShell is the shell)' if IS_WIN else ''}\n- User: {getpass.getuser()}\n"
+    return (f"\n\n# Environment\n- OS: {osinfo.name()} ({osinfo.shell_name()} is the shell)\n"
+            f"- User: {getpass.getuser()}\n"
             f"- Working directory: {settings.get('work_dir')}\n- Primary screen: {_screen_size()}\n"
             f"- Vision: {'yes, you can see images and screenshots' if vision else 'no (text only)'}\n"
             f"- Context window: {ctx_size:,} tokens\n"
@@ -175,7 +173,7 @@ def local_view(history):
     out = []
     for i, m in enumerate(history):
         r, lane = m.get("role"), m.get("lane") or "local"
-        if r in ("router", "review", "lesson", "notice", "subagent"):
+        if r in ("router", "review", "lesson", "notice", "subagent", "loopnote", "mod", "learned"):
             continue
         if lane in REVIEWER_NAMES:
             continue
@@ -356,6 +354,7 @@ class Turn:
         self.persona = ""            # system-prompt block when the user talks to a subagent directly
         self.controlling = None      # {"by", "target"} once a model has driven an app in this turn
         self.blocked = set()         # tools this turn may not use
+        self.sandbox = None          # Mod Aero chat: the only folder writes may touch (mods.prepare_turn)
 
     def rebind(self, new_id):
         self.chat_id = new_id
@@ -466,12 +465,31 @@ def change_diffs(turn, limit_chars=60000):
     return "\n\n".join(chunks)
 
 
+def sandbox_ok(turn, name, args):
+    """A Mod Aero chat (turn.sandbox set) may only write inside its copy of Aero."""
+    sb = getattr(turn, "sandbox", None)
+    if not sb or name not in WRITE_TOOLS:
+        return True
+    keys = ("source", "src", "destination", "dst", "dest") if name == "move_path" else ("path",)
+    for k in keys:
+        p = (args or {}).get(k)
+        if not p:
+            continue
+        try:
+            turn.tctx.path(p).relative_to(sb)
+        except (ValueError, OSError):
+            return False
+    return True
+
+
 async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=None, out=None):
     """Run one tool call with the user's approval policy. Yields UI events; the result lands in out['res']."""
     t = tools.REGISTRY.get(name)
     category = t.category if t else None
     pol = tools.policy(name, turn.settings)
     if allowed_categories is not None and category not in allowed_categories:
+        pol = "off"
+    if name in (getattr(turn, "blocked", None) or ()):
         pol = "off"
     needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set())
     label = tools.label(name, args or {})
@@ -481,6 +499,9 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
         res = {"text": "Could not parse the arguments as JSON. Send valid JSON matching the tool's schema.", "error": True}
     elif pol == "off" or not t:
         res = {"text": f"Tool '{name}' is not available here.", "error": True}
+    elif not sandbox_ok(turn, name, args):
+        res = {"text": f"In a Mod Aero chat only files inside your copy of Aero ({turn.sandbox}) can be changed.",
+               "error": True}
     else:
         decision = "allow"
         if needs:

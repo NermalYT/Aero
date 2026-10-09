@@ -28,7 +28,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import agent, cloud, vault
+from . import agent, cloud, osinfo, vault
 from .config import IS_WIN
 
 KEY_NAME = "openai_api_key"
@@ -809,7 +809,7 @@ async def _plan_execute(turn, rv):
             yield {"t": "notice", "lane": "sol", "text": "GPT-6.1 Sol works read-only and describes the fix instead."}
     blocks = _execute_packet(turn, rv)
     system = cloud.with_profile(turn, EXECUTE_SYSTEM, "execute").replace(
-        "Your tools run on the user's own PC (files, PowerShell, app windows, browser, web, MCP servers). Some need "
+        f"Your tools run on the user's own computer (files, {osinfo.shell_name()}, app windows, browser, web, MCP servers). Some need "
         "the user's approval; if one is denied, do not retry it, find another way or explain.",
         "You work through Codex in the user's work folder" + (" and may edit files and run commands there."
                                                               if sandbox != "read-only" else

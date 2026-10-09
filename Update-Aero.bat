@@ -7,6 +7,7 @@ title Aero Updater
 ::   Run it from the extracted zip      -> installs or updates Aero, then the model chooser
 ::   Run it from C:\Aero             -> newest llama.cpp + packages, then the model chooser
 ::   Drop a newer Aero zip onto it   -> same as running it from the extracted zip
+::   --auto                          -> what Aero's own updater passes: no questions, the open window reconnects
 :: An older install under its earlier names (C:\Halcyon, or C:\VRAMpire before that) is moved to
 :: C:\Aero the first time, with its models, chats, memory, settings and tunings.
 :: Models, chats, settings and saved tunings are never deleted.
@@ -14,17 +15,29 @@ title Aero Updater
 
 set "ARGFILE=%TEMP%\aero-update-arg.txt"
 set "ARG1="
-if not "%~1"=="" if /I not "%~1"=="--elevated" set "ARG1=%~f1"
+set "AUTO="
+set "ELEVATED="
+for %%A in (%*) do (
+    if /I "%%~A"=="--auto" (
+        set "AUTO=1"
+    ) else if /I "%%~A"=="--elevated" (
+        set "ELEVATED=1"
+    ) else if not defined ARG1 (
+        set "ARG1=%%~fA"
+    )
+)
 net session >nul 2>&1
 if errorlevel 1 (
     if exist "%ARGFILE%" del /f /q "%ARGFILE%"
     if defined ARG1 (>"%ARGFILE%" echo !ARG1!)
+    set "PASS=--elevated"
+    if defined AUTO set "PASS=--elevated --auto"
     echo Requesting administrator rights...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '--elevated' -Verb RunAs"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '!PASS!' -Verb RunAs"
     exit /b
 )
 set "ZIP=!ARG1!"
-if /I "%~1"=="--elevated" if exist "%ARGFILE%" (
+if defined ELEVATED if exist "%ARGFILE%" (
     set /p ZIP=<"%ARGFILE%"
     del /f /q "%ARGFILE%" >nul 2>&1
 )
@@ -162,6 +175,10 @@ if errorlevel 1 (
     echo [ERROR] Package update failed. See the messages above.
     goto :fail
 )
+if exist "%DEST%\app\requirements-extra.txt" (
+    "%VPY%" -m pip install --upgrade -r "%DEST%\app\requirements-extra.txt" --disable-pip-version-check -q
+    if errorlevel 1 echo       Warning: an optional package ^(browser tools or Claude plan reviews^) didn't install; Aero works without it.
+)
 
 :: ---- 4. llama.cpp, icon, shortcuts ----------------------------------------------------
 echo [4/6] Checking for a newer llama.cpp build for your GPU...
@@ -174,14 +191,22 @@ pushd "%DEST%\app"
 "%VPY%" -m aero.migrate --settings-only
 
 :: ---- 5. router + model chooser ----------------------------------------------------------
-echo [5/6] Models
-"%VPY%" -m aero.setup_models
+if defined AUTO (
+    echo [5/6] Models: kept as they are.
+) else (
+    echo [5/6] Models
+    "%VPY%" -m aero.setup_models
+)
 popd
 
 :: ---- 6. done --------------------------------------------------------------------------
 echo.
 echo [6/6] Updated. Launching Aero...
-start "" /D "%DEST%\app" "%DEST%\venv\Scripts\pythonw.exe" -m aero
+if defined AUTO (
+    start "" /D "%DEST%\app" "%DEST%\venv\Scripts\pythonw.exe" -m aero --reopen
+) else (
+    start "" /D "%DEST%\app" "%DEST%\venv\Scripts\pythonw.exe" -m aero
+)
 timeout /t 5 /nobreak >nul
 if not defined SELFUPDATE goto :end
 :: replace this running script last: (goto) ends the script first, so cmd never reads the new file mid-run

@@ -242,7 +242,7 @@ MAIN_MODELS = [
 # quality ladder tried from the top; the first that fits wins (UD- variants are matched too when the repo uses them)
 LADDER = ["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_XL", "Q4_K_M", "IQ4_XS", "Q3_K_XL", "IQ3_S", "IQ3_XXS", "IQ2_M"]
 GB = 1e9 / 2**20                 # catalog sizes are decimal GB; memory is counted in MiB
-OTHERS_EST_MB = 1000             # what Windows and open apps usually keep on the GPU
+OTHERS_EST_MB = 1000             # what the desktop and open apps usually keep on the GPU
 CPU_BW_GBS = 60                  # a typical dual-channel desktop; only used to rule out painfully slow CPU picks
 
 
@@ -304,7 +304,7 @@ def plan(entry, hw):
                         "why": "part GPU, part CPU: works, but slowly"}
         return out
     # CPU only
-    budget = max(0.0, (ram - min(6144, ram * 0.4)) * 0.75)      # Windows and apps keep up to 6 GB
+    budget = max(0.0, (ram - min(6144, ram * 0.4)) * 0.75)      # the OS and apps keep up to 6 GB
     for q in [q for q in quants if _bpw(q) <= 6.6]:
         mb = size_at(entry, q) * GB
         if mb > budget:

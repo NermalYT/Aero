@@ -16,7 +16,7 @@ import io
 import threading
 import time
 
-from . import tool
+from . import REGISTRY, tool
 from .. import attachments
 from ..config import IS_WIN
 
@@ -873,3 +873,8 @@ def app_read(ctx, element=None, max_chars=20000):
                 continue
     text = "\n".join(parts)
     return text[:n] + ("\n... (truncated)" if len(text) > n else "") if text else "(no readable text; try app_view)"
+
+
+# App control reads windows through Windows' UI Automation, so these tools exist only there.
+for _n in ("app_list", "app_view", "app_click", "app_type", "app_keys", "app_scroll", "app_read"):
+    REGISTRY[_n].available = lambda: IS_WIN

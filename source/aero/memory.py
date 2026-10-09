@@ -374,7 +374,7 @@ def _render(history, per_tool=700, per_file=1500):
     for m in history:
         r = m.get("role")
         lane = m.get("lane") or "local"
-        if r in ("router", "lesson", "notice"):
+        if r in ("router", "lesson", "notice", "loopnote", "mod", "learned"):
             continue
         if r == "review":
             out.append(f"CLOUD REVIEW by {m.get('model') or 'the reviewer'} ({m.get('verdict')}): {m.get('summary', '')}")

@@ -1,9 +1,11 @@
-"""Hardware detection for any PC: GPUs (NVIDIA through nvidia-smi; AMD and Intel through the Windows display
-driver registry or Linux sysfs), RAM and CPU through psutil.
+"""Hardware detection for any computer: GPUs (NVIDIA through nvidia-smi; AMD and Intel through the Windows display
+driver registry, Linux sysfs or llama.cpp's own device list; Apple Silicon through sysctl), RAM and CPU through psutil.
 
 NVIDIA cards report live VRAM use. For other cards Windows gives no cheap system-wide reading, so "used" is an
 estimate (what the desktop typically holds) and Aero measures its own models from llama.cpp's buffer report
 instead (see engine.LlamaServer.device_mb). Several GPUs are pooled: llama.cpp splits layers across them.
+Apple Silicon has one pool of memory: the GPU may use what Metal allows (about 2/3 of RAM, 3/4 on Macs with
+more than 36 GB, or iogpu.wired_limit_mb when that is set), and whatever the GPU takes is gone from RAM.
 """
 import os
 import platform
@@ -14,15 +16,15 @@ import time
 
 import psutil
 
-from .config import IS_WIN
+from .config import IS_LINUX, IS_MAC, IS_WIN
 
 _NO_WINDOW = 0x08000000 if IS_WIN else 0
-DESKTOP_EST_MB = 1024        # what Windows and open apps usually keep on a GPU we can't read live
+DESKTOP_EST_MB = 1024        # what the desktop and open apps usually keep on a GPU we can't read live
 MIN_DEDICATED_MB = 2048      # less dedicated memory than this is an integrated GPU: plan for system RAM
 # integrated GPUs that can report a large BIOS carve-out as "dedicated" memory
 _IGPU = re.compile(r"^(AMD )?Radeon(\(TM\))? (\d+M )?Graphics$|Vega \d+ Graphics|Radeon \d{3}M|UHD Graphics|Iris|"
                    r"^Intel\(R\) (HD )?Graphics|^Intel\(R\) Arc\(TM\) Graphics$", re.I)
-_cache = {"t": 0.0, "other": None}
+_cache = {"t": 0.0, "other": None, "apple": None, "llama": None, "llama_t": 0.0}
 
 
 def _nvidia_smi():
@@ -141,6 +143,81 @@ def _linux_amd():
     return out
 
 
+def _sysctl(name):
+    return _run(["sysctl", "-n", name], timeout=5).strip()
+
+
+def _apple():
+    """Apple Silicon's GPU, sized by what Metal lets it wire from the shared memory."""
+    if not IS_MAC or platform.machine() != "arm64":
+        return []
+    vm = psutil.virtual_memory()
+    total, avail = vm.total // 2**20, vm.available // 2**20
+    if _cache["apple"] is None:
+        chip = _sysctl("machdep.cpu.brand_string") or "Apple Silicon"
+        cores = ""
+        try:
+            import json
+            d = json.loads(_run(["system_profiler", "SPDisplaysDataType", "-json"], timeout=20) or "{}")
+            cores = str((d.get("SPDisplaysDataType") or [{}])[0].get("sppci_cores") or "")
+        except Exception:
+            pass
+        _cache["apple"] = {"name": f"{chip} GPU" + (f" ({cores} cores)" if cores.isdigit() else ""), "chip": chip}
+    try:
+        wired = int(_sysctl("iogpu.wired_limit_mb") or 0)
+    except ValueError:
+        wired = 0
+    limit = wired if wired > 0 else int(total * (0.75 if total > 36 * 1024 else 2 / 3))
+    metal = _llama_devices().get("MTL0")
+    if metal and not wired:
+        limit = metal["total_mb"]                   # Metal's own recommendedMaxWorkingSetSize, when llama.cpp is here
+    free = max(0, min(limit, avail - 1024))         # leave macOS a little room even when the GPU could take more
+    return [{"name": _cache["apple"]["name"], "total_mb": limit, "used_mb": limit - free, "free_mb": free,
+             "driver": "Metal", "vendor": "apple", "measured": True, "unified": True}]
+
+
+_DEV_LINE = re.compile(r"^\s*(\w+?\d+):\s*(.+?)\s*\((\d+) MiB, (\d+) MiB free\)\s*$")
+
+
+def _llama_devices():
+    """{name: {...}} from `llama-server --list-devices` (Vulkan0, MTL0, CUDA0, ...), cached for 5 minutes.
+    Empty before llama.cpp is installed."""
+    if _cache["llama"] is not None and time.time() - _cache["llama_t"] < 300:
+        return _cache["llama"]
+    found = {}
+    try:
+        from .engine import run_tool, server_binary
+        exe = server_binary()
+        if exe:
+            out = run_tool(exe, ["--list-devices"], timeout=30)
+            for line in (out.stdout + out.stderr).splitlines():
+                m = _DEV_LINE.match(line)
+                if m:
+                    found[m.group(1)] = {"name": m.group(2), "total_mb": int(m.group(3)), "free_mb": int(m.group(4))}
+    except Exception:
+        pass
+    _cache.update(llama=found, llama_t=time.time())
+    return found
+
+
+def _linux_vulkan(skip_vendors):
+    """GPUs llama.cpp's Vulkan build sees that sysfs didn't size (Intel Arc and others). Software renderers and
+    integrated GPUs are left out."""
+    out = []
+    for dev, d in _llama_devices().items():
+        if not dev.lower().startswith("vulkan"):
+            continue
+        name = d["name"]
+        if re.search(r"llvmpipe|lavapipe|swiftshader|software", name, re.I) or _IGPU.search(name):
+            continue
+        vendor = _vendor(name)
+        if vendor in skip_vendors or d["total_mb"] < MIN_DEDICATED_MB:
+            continue
+        out.append({"name": name, "total_mb": d["total_mb"], "used_mb": d["total_mb"] - d["free_mb"],
+                    "free_mb": d["free_mb"], "driver": "Vulkan", "vendor": vendor, "measured": False})
+    return out
+
+
 def _other_gpus(nvidia):
     """Non-NVIDIA GPUs big enough to run models on (integrated GPUs share system RAM and are left out)."""
     if _cache["other"] is not None and time.time() - _cache["t"] < 300:
@@ -154,13 +231,16 @@ def _other_gpus(nvidia):
                 continue
             used = min(DESKTOP_EST_MB, a["total_mb"] // 4)
             found.append({**a, "used_mb": used, "free_mb": a["total_mb"] - used, "measured": False})
-    else:
+    elif IS_LINUX:
         found = [g for g in _linux_amd() if g["total_mb"] >= MIN_DEDICATED_MB]
+        found += _linux_vulkan(({"nvidia"} if nvidia else set()) | ({"amd"} if found else set()))
     _cache.update(t=time.time(), other=found)
     return found
 
 
 def gpus():
+    if IS_MAC:
+        return [{**g, "index": i} for i, g in enumerate(_apple())]
     res = _nvidia()
     for g in _other_gpus(bool(res)):
         res.append({**g, "index": len(res)})
@@ -201,6 +281,10 @@ def gpu_used_mb(index=None):
 
 
 def cpu_name():
+    if IS_MAC:
+        name = _sysctl("machdep.cpu.brand_string")
+        if name:
+            return name
     if IS_WIN:
         try:
             import winreg
@@ -219,16 +303,22 @@ def cpu_name():
 
 
 def snapshot():
+    from . import osinfo
     vm = psutil.virtual_memory()
     g = gpus()
     names = sorted({x["name"] for x in g})
+    ram_avail = vm.available // 2**20
+    if any(x.get("unified") for x in g):          # the GPU's share of unified memory isn't free RAM for offloading
+        ram_avail = max(0, ram_avail - sum(x["free_mb"] for x in g if x.get("unified")))
     return {
-        "os": f"{platform.system()} {platform.release()}",
+        "os": osinfo.name(),
+        "os_kind": osinfo.kind(),
         "cpu": cpu_name(),
         "cores": psutil.cpu_count(logical=False) or 4,
         "threads": psutil.cpu_count(logical=True) or 8,
         "ram_total_mb": vm.total // 2**20,
-        "ram_avail_mb": vm.available // 2**20,
+        "ram_avail_mb": ram_avail,
+        "unified_memory": any(x.get("unified") for x in g),
         "gpus": g,
         "vram_total_mb": sum(x["total_mb"] for x in g),
         "vram_free_mb": sum(x["free_mb"] for x in g),

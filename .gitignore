@@ -16,3 +16,6 @@ source/llama/
 # Release builds and logs
 *.zip
 *.log
+
+# tools/build_release.py output
+/dist/

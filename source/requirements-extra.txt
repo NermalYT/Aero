@@ -1,0 +1,4 @@
+# Optional packages, installed one at a time: Aero works without any of them.
+# playwright: the agent's browser tools. claude-agent-sdk: Claude reviews through your Claude plan.
+playwright>=1.44,<2
+claude-agent-sdk>=0.2.164,<0.3

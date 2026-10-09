@@ -109,6 +109,10 @@ if errorlevel 1 (
     echo [ERROR] Package installation failed. See the messages above.
     goto :fail
 )
+if exist "%DEST%\app\requirements-extra.txt" (
+    "%VPY%" -m pip install --upgrade -r "%DEST%\app\requirements-extra.txt" --disable-pip-version-check -q
+    if errorlevel 1 echo       Warning: an optional package ^(browser tools or Claude plan reviews^) didn't install; Aero works without it.
+)
 
 :: ---- 5. llama.cpp + icon + shortcuts ---------------------------------------------
 echo [5/7] Installing llama.cpp for your GPU and creating shortcuts...

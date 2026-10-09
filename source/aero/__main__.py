@@ -1,6 +1,13 @@
-"""Entry point: start the backend and open the UI in a chromeless Edge app window."""
+"""Entry point: start the backend and open the UI in a chromeless browser app window (Edge, Chrome, Chromium or
+Brave; the default browser when none of them is installed).
+
+    python -m aero                  start Aero and open its window
+    python -m aero --no-window      backend only (open http://127.0.0.1:8180 yourself)
+    python -m aero --reopen         after an update or a mod restart: reuse the window that is still open
+    python -m aero --safe           start with every mod switched off (see mods.py)
+    python -m aero --version
+"""
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -9,7 +16,8 @@ import webbrowser
 
 import httpx
 
-from .config import APP_NAME, DATA, IS_WIN, UI_PORT
+from . import osinfo
+from .config import APP_NAME, DATA, IS_WIN, UI_PORT, VERSION
 
 URL = f"http://127.0.0.1:{UI_PORT}"
 
@@ -37,43 +45,56 @@ def _already_running():
         return False
 
 
-def _edge():
-    cands = [shutil.which("msedge")]
-    if IS_WIN:
-        for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
-            if base:
-                cands.append(os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
-        for base in (os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
-            if base:
-                cands.append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
-    else:
-        cands += [shutil.which("chromium"), shutil.which("google-chrome")]
-    return next((c for c in cands if c and os.path.exists(c)), None)
-
-
 def open_window():
-    exe = _edge()
-    if not exe:
+    argv, sandboxed = osinfo.find_browser()
+    if not argv:
         webbrowser.open(URL)
         return None
-    prof = DATA / "ui-profile"
-    return subprocess.Popen([exe, f"--app={URL}", f"--user-data-dir={prof}", "--window-size=1280,860",
-                             "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"])
+    args = argv + [f"--app={URL}", "--window-size=1280,860", "--no-first-run", "--no-default-browser-check",
+                   "--disable-features=Translate"]
+    if not sandboxed:                                 # snap/flatpak browsers can't use a profile under ~/.local
+        args.append(f"--user-data-dir={DATA / 'ui-profile'}")
+    kw = {} if IS_WIN else {"start_new_session": True, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    try:
+        return subprocess.Popen(args, **kw)
+    except OSError as e:
+        log(f"Could not start {argv[0]} ({e}); opening the default browser instead.")
+        webbrowser.open(URL)
+        return None
 
 
-def main():
-    if sys.stdout is None or sys.stderr is None:      # pythonw (desktop shortcut): log to a file
+def _quiet_stdio():
+    """pythonw on Windows has no console; a launcher icon on macOS/Linux may have none either: log to a file."""
+    if sys.stdout is None or sys.stderr is None or (not IS_WIN and not sys.stdout.isatty() and "--log-stdout" not in sys.argv):
         from .config import LOGS
         f = open(LOGS / "app.log", "a", encoding="utf-8", buffering=1)
         sys.stdout = sys.stderr = f
+
+
+def main():
+    if "--version" in sys.argv:
+        print(f"{APP_NAME} {VERSION}")
+        return
+    _quiet_stdio()
     _dpi_aware()
-    log(f"{APP_NAME} starting (pid {os.getpid()})")
+    log(f"{APP_NAME} {VERSION} starting on {osinfo.name()} (pid {os.getpid()})")
+    reopen = "--reopen" in sys.argv
+    if reopen:
+        _wait_port_free(60)
     if _already_running():
         log("Already running; opening another window.")
         open_window()
         return
+    from . import mods
+    mods.boot_guard(safe="--safe" in sys.argv or os.environ.get("AERO_SAFE") == "1", log=log)
     import uvicorn
-    from .server import app, shutdown
+    try:
+        from .server import app, shutdown
+    except Exception:                                 # a mod (or a broken update) that breaks the import
+        import traceback
+        log(traceback.format_exc())
+        mods.boot_failed(log=log)
+        raise
     cfg = uvicorn.Config(app, host="127.0.0.1", port=UI_PORT, log_level="warning", access_log=False)
     srv = uvicorn.Server(cfg)
     t = threading.Thread(target=srv.run, daemon=True)
@@ -84,27 +105,79 @@ def main():
         time.sleep(0.1)
     if not _already_running():
         log("Backend did not come up; see the traceback above.")
+        mods.boot_failed(log=log)
         return
+    mods.boot_ok()
+    from . import server, updater
+    server.RUN["main"] = True
+    if os.environ.get("AERO_UPDATE_CHECK") != "0":
+        updater.check_at_startup()                    # once per start; Aero never polls for updates while it runs
     if "--no-window" in sys.argv:
-        t.join()
+        _live_headless(t)
         return
-    open_window()
+    if not (reopen and _window_reconnects(12)):
+        open_window()
     _live_while_window_open()
+    then = _exit_action()
+    if then:
+        then()                                        # starts detached and waits for this process to exit
     shutdown()
     time.sleep(1)
 
 
+def _wait_port_free(timeout):
+    """--reopen: the previous Aero is still shutting down; wait until its port is free."""
+    t0 = time.time()
+    while time.time() - t0 < timeout and _already_running():
+        time.sleep(0.5)
+
+
+def _window_reconnects(timeout):
+    """True when the window from before the restart pings the new backend (it keeps polling while Aero is away)."""
+    from .server import _last_ping
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if _last_ping["ui"] > t0 - 1:
+            log("The open window reconnected.")
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def _live_headless(t):
+    from .server import _last_ping
+    while t.is_alive():
+        time.sleep(1)
+        if _last_ping.get("exit"):
+            log(f"Stopping for {_last_ping['exit']}.")
+            time.sleep(1)
+            break
+    then = _exit_action()
+    if then:
+        then()
+    from .server import shutdown
+    shutdown()
+    time.sleep(1)
+
+
+def _exit_action():
+    """What to run once Aero has stopped: the updater, or a fresh Aero after a mod (see server /api/restart)."""
+    from .server import _last_ping
+    return _last_ping.get("then")
+
+
 def _window_procs():
-    """Browser processes running our app-window profile. Aero runs as admin and Edge relaunches
+    """Browser processes running our app-window profile. Aero runs as admin on Windows and Edge relaunches
     itself un-elevated, so the msedge.exe we start exits at once; its replacement keeps our
     --user-data-dir on the command line, so that is how the window is found."""
     import psutil
     prof = str(DATA / "ui-profile").lower()
+    names = osinfo.browser_process_names()
     n = 0
     for p in psutil.process_iter(["name", "cmdline"]):
         try:
             name = (p.info["name"] or "").lower()
-            if name.startswith(("msedge", "chrome", "chromium")) and prof in " ".join(p.info["cmdline"] or []).lower():
+            if name.startswith(names) and prof in " ".join(p.info["cmdline"] or []).lower():
                 n += 1
         except Exception:
             pass
@@ -119,6 +192,8 @@ def _live_while_window_open():
     t0, fallback = time.time(), False
     while not _last_ping["ui"]:                       # wait for the window to connect
         time.sleep(0.5)
+        if _last_ping.get("exit"):
+            return
         if not fallback and time.time() - t0 > 45:
             log("The app window never connected; opening the default browser instead.")
             webbrowser.open(URL)
@@ -131,6 +206,10 @@ def _live_while_window_open():
     while True:
         time.sleep(1)
         n += 1
+        if _last_ping.get("exit"):
+            log(f"Stopping for {_last_ping['exit']}.")
+            time.sleep(1)                             # let the reply that asked for it reach the window
+            return
         now, ui, bye = time.time(), _last_ping["ui"], _last_ping["bye"]
         if bye > ui and now - bye > 5:
             log("App window closed; unloading the model and exiting.")

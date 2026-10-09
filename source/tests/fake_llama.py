@@ -50,6 +50,20 @@ def script(body, folder=None):
         photos = [w.strip(" -*|,") for w in listing.split() if w.lower().strip(" -*|,").endswith(".jpeg")]
         found = ", ".join(sorted(set(photos))) or "none"
         return "", (f"Found {len(set(photos))} .jpeg photos: {found}. I only listed them; nothing was renamed."), [], 0
+    if isinstance(system, str) and "# Your job: modding Aero" in system:
+        if not done:
+            return ("Find where the send button is styled.", "I'll find the send button's style first.",
+                    [("search_files", {"query": ".send {", "path": "aero/static", "glob": "*.css"})], 0)
+        if done[-1] == "search_files":
+            return ("", "It's .send in app.css. Adding a green version after the existing rules.",
+                    [("write_file", {"path": "aero/static/app.css", "append": True,
+                                     "content": "\n/* Mod: green send button */\n.send:not(.stop) { background: "
+                                                "linear-gradient(180deg, #9ff59a, #2fa83a 60%, #16631d); "
+                                                "border-color: #145a1a; }\n"})], 0)
+        if done[-1] == "write_file":
+            return "", "Checking the modded copy.", [("mod_check", {})], 0
+        return "", ("Done: the send button is green now (a new rule at the end of aero/static/app.css; the red Stop "
+                    "button stays red). Press Apply and the page reloads with it."), [], 0
     if isinstance(system, str) and "You are talking to the user as subagent" in system:
         return "", ("I listed them earlier: beach.jpeg, dog.jpeg and sunset.jpeg. I only listed them, so nothing "
                     "was renamed. Want me to check their sizes?"), [], 0
@@ -85,8 +99,20 @@ def chunks(body, folder=None):
     return [x.encode() for x in out], delay
 
 
-def title_reply():
-    return {"choices": [{"index": 0, "message": {"role": "assistant", "content": json.dumps(TITLE)}, "finish_reason": "stop"}]}
+JOURNAL = {"worked": ["search_files on aero/static found the rule in one call"],
+           "failed": ["edit_file with a guessed snippet: read the file first"],
+           "next": "Check the button in the dark theme", "status": "Send button restyled"}
+EXPERIENCE = {"worked": ["run_subagent with a clear brief found the photos before any renaming"],
+              "failed": ["open_app 'notepad' on Linux: there is no notepad; use gedit or write the list to a file"],
+              "preferences": ["Wants a list of files before anything is renamed"]}
+
+
+def title_reply(body=None):
+    """Replies to non-streamed requests: a chat title, or the forever-loop journal entry."""
+    name = (((body or {}).get("response_format") or {}).get("json_schema") or {}).get("name")
+    content = json.dumps(JOURNAL if name == "loop_journal" else EXPERIENCE if name == "experience"
+                         else {"lessons": []} if name == "lessons" else TITLE)
+    return {"choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}]}
 
 
 def mock_handler(folder=None):
@@ -96,7 +122,7 @@ def mock_handler(folder=None):
     async def handle(request):
         body = json.loads(request.content or b"{}")
         if not body.get("stream"):
-            return httpx.Response(200, json=title_reply())
+            return httpx.Response(200, json=title_reply(body))
         parts, _ = chunks(body, folder)
         return httpx.Response(200, content=b"".join(parts), headers={"content-type": "text/event-stream"})
     return handle
@@ -127,7 +153,7 @@ def serve(port, folder=None):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
             if not body.get("stream"):
-                return self._json(title_reply())
+                return self._json(title_reply(body))
             parts, delay = chunks(body, folder)
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")

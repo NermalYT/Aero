@@ -18,7 +18,7 @@ import uuid
 
 import httpx
 
-from . import agent, agents, chatgpt, cloud, control, memory, router, stats, tools
+from . import agent, agents, chatgpt, cloud, control, experience, looplog, memory, router, stats, tools
 from .config import DATA
 
 CORE_TOOLS = ["list_dir", "read_file", "find_files", "search_files", "run_command", "web_search", "fetch_url",
@@ -55,6 +55,9 @@ async def compact_midturn(turn):
     yield {"t": "compacted", "new_chat_id": new_id, "carry": turn.carry, "keep": turn.history, "facts_added": added}
     turn.rebind(new_id)
     turn.memory_text = agent.memory_recall(turn.settings, turn.history, turn.carry, turn.chat_id, ctx_size)
+    for extra in (getattr(turn, "journal_text", ""), getattr(turn, "experience_text", "")):
+        if extra:
+            turn.memory_text = (turn.memory_text + "\n\n" + extra).strip()
 
 
 # ------------------------------------------------------------------------------------------------ routing
@@ -398,13 +401,84 @@ async def review_passes(turn):
             yield ev
 
 
+async def loop_journal(turn, task, iteration):
+    """Forever-loop: the local model writes down what this round taught it (looplog.py)."""
+    yield {"t": "lane", "lane": "local", "phase": "journal"}
+    entry = await looplog.reflect(turn, task, iteration)
+    turn.journal_entry = entry
+    if entry:
+        rec = {"role": "loopnote", "id": uuid.uuid4().hex[:10], "ts": time.time(), "iteration": iteration,
+               "worked": entry["worked"], "failed": entry["failed"], "next": entry["next"], "status": entry["status"],
+               "key": looplog.key(task)}
+        turn.history.append(rec)
+        yield {"t": "loopnote", "message": rec}
+
+
+async def learn_from_run(turn, task, agent_name, outcome):
+    """Shared learning (experience.py): record what this run's tools did, and when something went wrong or the user
+    gave feedback, let the model write notes every model gets before similar tasks."""
+    try:
+        run = experience.record_run(turn, agent_name, outcome, task)
+    except Exception:  # noqa: BLE001
+        return
+    if outcome != "done":
+        return
+    entry = getattr(turn, "journal_entry", None)
+    if entry:                                      # a forever-loop round: share its journal entry, no second call
+        experience.add_notes(entry.get("worked"), entry.get("failed"), turn.model_name, agent_name, task, source="loop")
+        return
+    if not experience.wants_reflection(run, task):
+        return
+    yield {"t": "lane", "lane": "local", "phase": "learn"}
+    got = await experience.reflect(turn, task, agent_name)
+    if got:
+        rec = {"role": "learned", "id": uuid.uuid4().hex[:10], "ts": time.time(), "model": turn.model_name,
+               "agent": agent_name, **got}
+        turn.history.append(rec)
+        yield {"t": "learned", "message": rec}
+
+
+def mod_prefs(turn, opts):
+    """Thinking and review choices for a mod chat, where no router runs: the composer buttons decide ("auto" thinks,
+    and leaves the cloud reviews off unless their button is on)."""
+    s = turn.settings
+    think = opts.get("think") or s.get("thinking", True)
+    think = {"on": True, "off": False, "auto": True}.get(think, think)
+    turn.think = bool(think)
+    turn.review = (opts.get("review") or s.get("review_mode") or "off") == "on"
+    turn.gpt_review = (opts.get("chatgpt_review") or s.get("chatgpt_review_mode") or "off") == "on"
+
+
+async def mod_finish(mod_id):
+    """After a mod chat's turn: check the copy (unless the model's own mod_check already covered this exact state)
+    and hand the UI the mod card."""
+    from . import mods
+    rec = mods.get(mod_id)
+    if mods.changes(mod_id) and (rec.get("checks") or {}).get("fp") != mods.fingerprint(mod_id):
+        yield {"t": "mod_checking", "mod": mod_id}
+        await asyncio.to_thread(mods.check, mod_id)
+    else:
+        rec["files"] = mods.changes(mod_id)
+        mods.save(rec)
+    yield {"t": "mod_ready", "mod": mods.public(mods.get(mod_id))}
+
+
 async def run_turn(chat_id, history, settings, engine_state, carry=None, title="", opts=None, agent_meta=None):
     """Async generator of SSE strings for one user message. agent_meta: the chat's "agent" field (its name, and for
     a chat with a subagent which one)."""
     opts = opts or {}
     meta = agent_meta if isinstance(agent_meta, dict) else {}
+    mod, mod_events = None, []
+    if opts.get("mod"):
+        from . import mods
+        mod, created = mods.for_turn(opts["mod"], chat_id, agent._last_user_text(history))
+        if created:
+            mod_events.append({"t": "mod_new", "mod": mods.public(mod)})
+        settings = mods.chat_settings(settings, mod["id"])
     turn = agent.Turn(chat_id, history, settings, engine_state, carry, title)
-    if meta.get("kind") == "subagent":
+    if mod:
+        mods.prepare_turn(turn, mod["id"])
+    elif meta.get("kind") == "subagent":
         turn.persona = agents.persona(meta)
     task = agent._last_user_text(history)
     first = next((m.get("content") for m in history if m.get("role") == "user" and m.get("from") not in
@@ -426,15 +500,39 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         return _sse(ev)
 
     try:
-        async for ev in route(turn, opts):
+        for ev in mod_events:
             yield out(ev)
+        if mod:
+            mod_prefs(turn, opts)                  # a mod chat has a fixed tool set: no router
+        else:
+            async for ev in route(turn, opts):
+                yield out(ev)
         turn.memory_text = agent.memory_recall(settings, turn.history, carry, chat_id, turn.ctx_size)
+        journal = bool(loop) and settings.get("loop_journal", True)
+        if journal:
+            turn.journal_text = looplog.block(task)
+            if turn.journal_text:
+                turn.memory_text = (turn.memory_text + "\n\n" + turn.journal_text).strip()
+        learn = not mod and settings.get("shared_learning", True)
+        if learn:
+            turn.experience_text = experience.block(task, name)
+            if turn.experience_text:
+                turn.memory_text = (turn.memory_text + "\n\n" + turn.experience_text).strip()
         yield out({"t": "lane", "lane": "local", "phase": "work", "model": turn.model_name,
                    "think": turn.think, "tools": len(turn.exposed) if turn.exposed is not None else None})
         async for ev in agent.run_local(turn):
             yield out(ev)
         if (turn.review or turn.gpt_review) and not turn.cancel.is_set():
             async for ev in review_passes(turn):
+                yield out(ev)
+        if mod and not turn.cancel.is_set():
+            async for ev in mod_finish(mod["id"]):
+                yield out(ev)
+        if journal and not turn.cancel.is_set():
+            async for ev in loop_journal(turn, task, int(loop.get("iteration") or 1)):
+                yield out(ev)
+        if learn:
+            async for ev in learn_from_run(turn, task, name, "stopped" if turn.cancel.is_set() else "done"):
                 yield out(ev)
     except httpx.ConnectError:
         failed = True

@@ -57,6 +57,7 @@ CC_DESCRIPTIONS = {
 READ_ONLY_BUILTINS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
 # Aero tools Claude Code has no equivalent for (its own Read/Edit/Bash/Web tools cover the rest).
 EXEC_CATEGORIES = {"screen", "desktop", "browser", "memory", "mcp"}
+SANDBOX_WRITERS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}   # file writers checked against a mod's copy
 REVIEW_CATEGORIES = {"screen"}
 REVIEW_EXTRA = {"recall"}
 MIN_VERSION = (2, 1, 257)        # first Claude Code release with Fable 5.1
@@ -311,6 +312,15 @@ async def _session(turn, lane, model, append, blocks, effort, read_only, max_tur
 
     async def can_use(name, inp, ctx):
         if name.startswith("mcp__aero__"):
+            return PermissionResultAllow(updated_input=inp)
+        sb = getattr(turn, "sandbox", None)
+        if sb and name in SANDBOX_WRITERS:
+            target = (inp or {}).get("file_path") or (inp or {}).get("notebook_path") or ""
+            try:
+                tp = Path(target)
+                (tp if tp.is_absolute() else Path(sb) / tp).resolve().relative_to(sb)
+            except (ValueError, OSError):
+                return PermissionResultDeny(message=f"This is a Mod Aero chat: only files inside {sb} may be changed.")
             return PermissionResultAllow(updated_input=inp)
         cat = CC_CATEGORY.get(name) or ("mcp" if name.startswith("mcp__") else None)
         if read_only and name not in READ_ONLY_BUILTINS:

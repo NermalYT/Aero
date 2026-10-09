@@ -39,7 +39,7 @@ COMPANIONS = {
     "web_search": ["fetch_url"], "fetch_url": ["web_search"], "run_command": ["read_file", "list_dir"],
 }
 
-RULES = """You are the decision router of Aero, a local AI agent on the user's Windows PC. You never answer the user. You read the request and decide how the main model should handle it, by filling in the JSON form.
+RULES = """You are the decision router of Aero, a local AI agent on the user's computer. You never answer the user. You read the request and decide how the main model should handle it, by filling in the JSON form.
 
 Fields
 - intent: what the user wants, in under 15 words.
@@ -330,7 +330,8 @@ def benchmark(path, emit=print, threads=None, cancel=None):
         if IS_WIN:
             cmd += ["-dev", "none"] if "-dev" in _bench_help(exe) else []
         emit(f"Benchmarking the router on the CPU with {', '.join(map(str, cand))} threads (llama-bench)…")
-        env = dict(os.environ, CUDA_VISIBLE_DEVICES="-1")
+        from .engine import tool_env
+        env = tool_env(exe, dict(os.environ, CUDA_VISIBLE_DEVICES="-1"))
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, cwd=str(exe.parent),
                            creationflags=_NO_WINDOW, env=env)
         try:
@@ -372,8 +373,8 @@ _bh = {}
 def _bench_help(exe):
     if exe not in _bh:
         try:
-            _bh[exe] = subprocess.run([str(exe), "--help"], capture_output=True, text=True, timeout=30,
-                                      creationflags=_NO_WINDOW, cwd=str(Path(exe).parent)).stdout
+            from .engine import run_tool
+            _bh[exe] = run_tool(exe, ["--help"]).stdout
         except Exception:
             _bh[exe] = ""
     return _bh[exe]

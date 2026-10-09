@@ -12,8 +12,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import (advisor, agent, agents, attachments, bench, claude_code, cloud, fit, gguf, github, hapo, hardware, hf, localonly,
-               memory, migrate, models, pipeline, router, skills, stats, tools, tuner)
+from . import (advisor, agent, agents, attachments, bench, claude_code, cloud, experience, fit, gguf, github, hapo, hardware, hf,
+               localonly, looplog, memory, migrate, models, mods, osinfo, pipeline, router, skills, stats, tools, tuner, updater, vault)
 from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, VERSION, load_settings, save_settings)
 from .engine import LlamaServer, build_args, server_binary, server_version, spec_args
 from .tools import mcp_client, mcp_import
@@ -26,6 +26,7 @@ STATE = {"status": "idle", "model": None, "ctx": 0, "vision": False, "desc": "",
 _job = {"cancel": threading.Event(), "busy": False}
 _hw_cache = {"t": 0, "v": None}
 _last_ping = {"t": time.time(), "ui": 0.0, "bye": 0.0, "chat": 0.0}   # ui/bye: heartbeat from the app window
+BOOT_ID = uuid.uuid4().hex[:12]      # changes on every start: the UI reloads when it sees a new one after a restart
 
 
 def hw(force=False):
@@ -84,9 +85,17 @@ def get_state(ui: int = 0):
     if STATE["status"] == "ready" and not ENGINE.running():
         STATE.update(status="error", error="The model server stopped unexpectedly. See data/logs/llama-main.log.\n"
                      + ENGINE.log_tail(12))
-    return {"app": APP_NAME, "version": VERSION, "engine": {k: v for k, v in STATE.items() if k != "url"},
+    return {"app": APP_NAME, "version": VERSION, "boot": BOOT_ID, "engine": {k: v for k, v in STATE.items() if k != "url"},
             "busy": _job["busy"], "llama": {"found": bool(server_binary()), "path": str(server_binary() or "")},
-            "settings": load_settings(), "hw": hw()}
+            "settings": load_settings(), "hw": hw(), "os": {"name": osinfo.name(), "kind": osinfo.kind()},
+            "secrets_where": vault.where(), "update": _update_brief(), "stopping": _last_ping.get("exit"),
+            "paths": {"root": str(DATA.parent), "data": str(DATA)}}
+
+
+def _update_brief():
+    u = updater.STATE
+    return {k: u.get(k) for k in ("current", "latest", "available", "skipped", "checked", "checking", "error",
+                                  "installable", "phase")}
 
 
 @app.get("/api/hw")
@@ -274,7 +283,7 @@ def _plan_budget(h):
         return int(min(float(lim) * 1024, total - 64)), f"the {lim:g} GB VRAM limit you typed last time"
     used = sum(x.get("used_mb") or 0 for x in h["gpus"])
     others = max(0, used - (ENGINE_VRAM["mb"] if ENGINE.running() and h.get("vram_measured", True) else 0))
-    what = "other apps use now" if h.get("vram_measured", True) else "Windows and other apps usually use (estimated)"
+    what = "other apps use now" if h.get("vram_measured", True) else "the desktop and other apps usually use (estimated)"
     return int(total - others - 300), f"{total / 1024:.1f} GB of VRAM minus {others / 1024:.1f} GB {what}"
 
 
@@ -396,8 +405,8 @@ ENGINE_VRAM = {"mb": 0}
 def suggest_limit(h, model_mb, others_mb):
     """A starting VRAM (or RAM) limit for this PC, in GB, with the reason. The user still confirms it."""
     if not h["gpus"]:
-        gb = max(2.0, (h["ram_total_mb"] - 6144) * 0.75 / 1024)          # leave Windows and apps 6 GB and a margin
-        return {"gb": round(gb, 1), "why": f"75% of the RAM left after 6 GB for Windows and apps "
+        gb = max(2.0, (h["ram_total_mb"] - 6144) * 0.75 / 1024)          # leave the OS and apps 6 GB and a margin
+        return {"gb": round(gb, 1), "why": f"75% of the RAM left after 6 GB for the OS and apps "
                                             f"({h['ram_total_mb'] / 1024:.0f} GB installed)"}
     free = h["vram_total_mb"] - max(0, others_mb) - ADVISOR_MARGIN_MB - 256
     gb = max(1.0, free / 1024)
@@ -909,16 +918,231 @@ async def put_mcp(req: Request):
 async def open_path(req: Request):
     b = await req.json()
     target = {"data": str(DATA), "models": load_settings()["models_dir"], "logs": str(LOGS),
-              "skills": str(skills.SKILLS_DIR), "training": str(DATA / "training")}.get(b.get("what"), "")
-    if target and os.name == "nt":
-        os.startfile(target)
-    return {"path": target}
+              "skills": str(skills.SKILLS_DIR), "training": str(DATA / "training"), "mods": str(mods.MODS)}.get(b.get("what"), "")
+    opened = False
+    if target:
+        Path(target).mkdir(parents=True, exist_ok=True)
+        opened = osinfo.open_with_default(target)
+    return {"path": target, "opened": bool(opened)}
 
 
 @app.post("/api/bye")
 def bye():
     """The app window is closing (or reloading: a reload pings again within a second)."""
     _last_ping["bye"] = time.time()
+    return {"ok": True}
+
+
+# ---- restart, updates, mods ----------------------------------------------------------------
+
+def _headless():
+    import sys
+    return "--no-window" in sys.argv
+
+
+def _spawn_aero():
+    """Start a fresh Aero (detached) that waits for this one to exit and reuses the open window."""
+    import subprocess
+    import sys
+    args = [sys.executable, "-m", "aero", "--reopen"] + (["--no-window"] if _headless() else [])
+    env = {k: v for k, v in os.environ.items() if k != "AERO_MOD_RETRY"}
+    if osinfo.IS_WIN:
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0x08) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+        subprocess.Popen(args, cwd=str(PKG_DIR.parent), env=env, creationflags=flags, close_fds=True)
+    else:
+        subprocess.Popen(args, cwd=str(PKG_DIR.parent), env=env, start_new_session=True, close_fds=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+RUN = {"main": False}                 # True when __main__ watches _last_ping["exit"] (it does in normal use)
+
+
+def _exit_then(reason, then):
+    """Stop Aero, then run `then` (a fresh Aero, or the updater's installer). __main__ does it once the reply to
+    this request is out; without __main__ (Aero served some other way) it happens here."""
+    _last_ping["then"] = then
+    _last_ping["exit"] = reason
+    if not RUN["main"]:
+        def later():
+            time.sleep(1.0)
+            then()
+            shutdown()
+        threading.Thread(target=later, daemon=True).start()
+
+
+@app.post("/api/restart")
+def restart():
+    if _last_ping.get("exit"):
+        return {"ok": True, "already": _last_ping["exit"]}
+    _exit_then("a restart", _spawn_aero)
+    return {"ok": True}
+
+
+@app.get("/api/update")
+def get_update():
+    return updater.public()
+
+
+@app.post("/api/update/check")
+def check_update():
+    return updater.public() if updater.check(force=True) else {}
+
+
+@app.post("/api/update/skip")
+async def skip_update(req: Request):
+    b = await req.json()
+    v = str(b.get("version") or "")
+    save_settings({"update_skip": v})
+    updater.STATE["skipped"] = bool(v) and v == updater.STATE.get("latest")
+    return updater.public()
+
+
+@app.post("/api/update/install")
+async def install_update():
+    """Download and verify the release (streamed progress), then hand over to its installer and stop Aero."""
+    if _last_ping.get("exit"):
+        raise HTTPException(409, "Aero is already stopping.")
+
+    def job(emit, cancel):
+        updater.STATE.update(phase="download", message="")
+        try:
+            root = updater.prepare(lambda ev: (updater.STATE.update(**ev), emit({"type": "progress", **ev})))
+        except Exception as e:
+            updater.STATE.update(phase="error", message=str(e))
+            raise
+        if cancel.is_set():
+            raise tuner.Cancelled()
+        go = updater.handoff(root, headless=_headless())
+        updater.STATE.update(phase="installing", message=f"Installing Aero {updater.STATE.get('latest')}")
+        _exit_then("an update", go)
+        return {"version": updater.STATE.get("latest"), "installing": True}
+    return stream_job(job)
+
+
+def _mod_or_404(mid):
+    try:
+        return mods.get(mid)
+    except (KeyError, ValueError):
+        raise HTTPException(404, "No such mod")
+
+
+@app.get("/api/mods")
+def list_mods():
+    return {"mods": mods.listing(), "app_dir": str(mods.APP_DIR), "boot": mods._read(mods.BOOT, None)}
+
+
+@app.post("/api/mods")
+async def create_mod(req: Request):
+    b = await req.json()
+    prompt = (b.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Describe the change you want.")
+    rec = await asyncio.to_thread(mods.new, prompt, b.get("chat_id"))
+    return mods.public(rec)
+
+
+@app.get("/api/mods/{mid}")
+def get_mod(mid: str):
+    rec = _mod_or_404(mid)
+    out = mods.public(rec)
+    if rec["status"] == "draft":
+        out["files"] = mods.changes(mid)
+        out["checked"] = mods.checked(rec)
+    return out
+
+
+@app.get("/api/mods/{mid}/diff")
+def mod_diff(mid: str, path: str = ""):
+    rec = _mod_or_404(mid)
+    if rec["status"] == "draft":
+        return {"diff": mods.diff_text(mid, path or None)}
+    p = mods._dir(mid) / "patch.diff"
+    return {"diff": p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""}
+
+
+@app.post("/api/mods/{mid}/check")
+async def check_mod(mid: str):
+    _mod_or_404(mid)
+    res = await asyncio.to_thread(mods.check, mid)
+    return {**mods.public(mods.get(mid)), "checks": res}
+
+
+def _after_mod_change(res):
+    if res.get("restart"):
+        _exit_then("a mod change", _spawn_aero)
+    return res
+
+
+@app.post("/api/mods/{mid}/apply")
+async def apply_mod(mid: str):
+    _mod_or_404(mid)
+    try:
+        res = await asyncio.to_thread(mods.apply, mid)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return _after_mod_change(res)
+
+
+@app.post("/api/mods/{mid}/off")
+async def mod_off(mid: str):
+    _mod_or_404(mid)
+    return _after_mod_change(await asyncio.to_thread(mods.undo, mid))
+
+
+@app.post("/api/mods/{mid}/on")
+async def mod_on(mid: str):
+    _mod_or_404(mid)
+    try:
+        res = await asyncio.to_thread(mods.turn_on, mid)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return _after_mod_change(res)
+
+
+@app.delete("/api/mods/{mid}")
+async def delete_mod(mid: str):
+    _mod_or_404(mid)
+    return _after_mod_change(await asyncio.to_thread(mods.delete, mid))
+
+
+@app.get("/api/loop/journal")
+def loop_journal(task: str = "", key: str = ""):
+    if key and not task:
+        p = looplog.LOOPS / f"{re.sub(r'[^0-9a-f]', '', key)}.json"
+        try:
+            j = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            j = {"entries": []}
+    else:
+        j = looplog.load(task)
+    return {**j, "summary": looplog.summary(j)}
+
+
+@app.delete("/api/loop/journal")
+def clear_loop_journal(task: str = "", key: str = ""):
+    if key and not task:
+        (looplog.LOOPS / f"{re.sub(r'[^0-9a-f]', '', key)}.json").unlink(missing_ok=True)
+    else:
+        looplog.clear(task)
+    return {"ok": True}
+
+
+@app.get("/api/experience")
+def get_experience():
+    """Shared learning: notes every model wrote, per-model numbers and tool results (experience.py)."""
+    return experience.overview()
+
+
+@app.delete("/api/experience/notes/{nid}")
+def delete_experience_note(nid: str):
+    if not experience.delete_note(nid):
+        raise HTTPException(404, "No such note")
+    return {"ok": True}
+
+
+@app.delete("/api/experience")
+def clear_experience():
+    experience.clear()
     return {"ok": True}
 
 

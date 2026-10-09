@@ -21,6 +21,13 @@ class Tool:
     fn: Callable
     required: list = field(default_factory=list)
     summary: Callable = None   # args -> short human label for the UI
+    available: Callable = None  # () -> bool: False hides the tool on this computer (e.g. Windows-only app control)
+
+    def usable(self):
+        try:
+            return self.available is None or bool(self.available())
+        except Exception:
+            return False
 
 
 REGISTRY: dict = {}
@@ -40,9 +47,9 @@ CATEGORIES = {
 }
 
 
-def tool(name, description, category, params=None, required=None, summary=None):
+def tool(name, description, category, params=None, required=None, summary=None, available=None):
     def deco(fn):
-        REGISTRY[name] = Tool(name, description, params or {}, category, fn, required or [], summary)
+        REGISTRY[name] = Tool(name, description, params or {}, category, fn, required or [], summary, available)
         return fn
     return deco
 
@@ -66,7 +73,7 @@ def schemas(settings):
     pol = settings.get("tool_policy", {})
     out = []
     for t in REGISTRY.values():
-        if pol.get(t.category, "ask") == "off" or not localonly.tool_allowed(t.category, settings):
+        if pol.get(t.category, "ask") == "off" or not localonly.tool_allowed(t.category, settings) or not t.usable():
             continue
         out.append({"type": "function", "function": {
             "name": t.name, "description": t.description,
@@ -77,7 +84,7 @@ def schemas(settings):
 def policy(name, settings):
     from .. import localonly
     t = REGISTRY.get(name)
-    if not t or not localonly.tool_allowed(t.category, settings):
+    if not t or not localonly.tool_allowed(t.category, settings) or not t.usable():
         return "off"
     return settings.get("tool_policy", {}).get(t.category, "ask")
 
@@ -99,6 +106,9 @@ def run(name, args, ctx):
     t = REGISTRY.get(name)
     if not t:
         return {"text": f"Unknown tool '{name}'. Available: {', '.join(sorted(REGISTRY))}", "error": True}
+    if not t.usable():
+        from .. import osinfo
+        return {"text": f"{name} doesn't work on this computer ({osinfo.name()}).", "error": True}
     if not localonly.tool_allowed(t.category, ctx.settings):
         return {"text": f"{name} reaches the network, and strict offline mode is on. Work with local files and "
                         "tools instead, or ask the user to turn strict offline off.", "error": True}
@@ -125,6 +135,6 @@ def run(name, args, ctx):
 
 
 def load_all():
-    from . import files, shell, desktop, apps, web, browser, memory_tools, skill_tools, agent_tools  # noqa: F401  (registration side effects)
+    from . import files, shell, desktop, apps, web, browser, memory_tools, skill_tools, agent_tools, mod_tools  # noqa: F401,E501  (registration side effects)
     from . import mcp_client
     mcp_client.start_all_async()

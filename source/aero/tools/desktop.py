@@ -9,9 +9,9 @@ import subprocess
 import threading
 import time
 
-from . import tool
-from .. import attachments
-from ..config import IS_WIN
+from . import REGISTRY, tool
+from .. import attachments, osinfo
+from ..config import IS_MAC, IS_WIN
 
 _state = {"monitor": 1, "scale": 1.0, "left": 0, "top": 0, "w": 0, "h": 0}
 _lock = threading.Lock()
@@ -101,13 +101,33 @@ def scroll(ctx, amount, x=None, y=None):
     return f"Scrolled {amount}"
 
 
-def _paste_text(text):
+def _clipboard_cmd():
+    import shutil
     if IS_WIN:
-        p = subprocess.run(["powershell", "-NoProfile", "-Command", "$input | Set-Clipboard"], input=text,
-                           text=True, encoding="utf-8", creationflags=0x08000000)
-        if p.returncode == 0:
-            _pg().hotkey("ctrl", "v")
-            return True
+        return ["powershell", "-NoProfile", "-Command", "$input | Set-Clipboard"]
+    if IS_MAC:
+        return ["pbcopy"]
+    if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-copy"):
+        return ["wl-copy"]
+    if shutil.which("xclip"):
+        return ["xclip", "-selection", "clipboard"]
+    if shutil.which("xsel"):
+        return ["xsel", "--clipboard", "--input"]
+    return None
+
+
+def _paste_text(text):
+    """Type long or non-ASCII text through the clipboard (pyautogui can only type plain keys)."""
+    cmd = _clipboard_cmd()
+    if not cmd:
+        return False
+    try:
+        p = subprocess.run(cmd, input=text, text=True, encoding="utf-8", creationflags=osinfo.NO_WINDOW, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if p.returncode == 0:
+        _pg().hotkey("command" if IS_MAC else "ctrl", "v")
+        return True
     return False
 
 
@@ -174,17 +194,15 @@ def focus_window(ctx, title):
     return f"Focused '{w.title}'"
 
 
-@tool("open_app", "Open an application, file, folder or URL with Windows' default handler "
-      "(e.g. 'notepad', 'C:\\\\Users', 'https://example.com', 'ms-settings:').", "desktop",
-      {"target": {"type": "string"}}, ["target"], summary=lambda a: a.get("target", ""))
+_OPEN_EXAMPLES = ("'notepad', 'C:\\\\Users', 'https://example.com', 'ms-settings:'" if IS_WIN else
+                  "'Safari', 'TextEdit', '~/Documents', 'https://example.com'" if IS_MAC else
+                  "'gnome-calculator', 'firefox', '~/Documents', 'https://example.com'")
+
+
+@tool("open_app", f"Open an application, file, folder or URL with the system's default handler (e.g. {_OPEN_EXAMPLES}).",
+      "desktop", {"target": {"type": "string"}}, ["target"], summary=lambda a: a.get("target", ""))
 def open_app(ctx, target):
-    if IS_WIN:
-        try:
-            os.startfile(target)
-        except OSError:
-            subprocess.Popen(["cmd", "/c", "start", "", target], creationflags=0x08000000)
-    else:
-        subprocess.Popen(["xdg-open", target])
+    osinfo.launch_app(target)
     time.sleep(1.0)
     return f"Opened {target}"
 
@@ -195,3 +213,11 @@ def wait(ctx, seconds):
     s = max(0.1, min(float(seconds), 30))
     time.sleep(s)
     return f"Waited {s:.1f}s"
+
+
+# Screenshots and synthetic input need a desktop session this process can reach (X11 on Linux; on macOS the
+# Screen Recording and Accessibility permissions). Window listing and focusing use Windows' window manager.
+for _n in ("screenshot", "mouse_click", "mouse_move", "mouse_drag", "scroll", "type_text", "press_keys"):
+    REGISTRY[_n].available = osinfo.can_drive_desktop
+for _n in ("list_windows", "focus_window"):
+    REGISTRY[_n].available = lambda: IS_WIN

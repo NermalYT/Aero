@@ -1,6 +1,70 @@
 # Changelog
 
-## Aero 1.0.1 (2026-10-09)
+## Aero 1.0.0 (2026-10-09)
+
+The first public release. Aero is the app that was called Halcyon (and VRAMpire before that), rebuilt as a
+Frutiger Aero styled, lightweight bootstrapper for local LLMs on Windows, Linux and macOS.
+
+### Linux and macOS
+
+- Aero now installs and runs on **Linux** and **macOS** (Apple Silicon and Intel) as well as Windows. One
+  `install.sh` handles every Unix system: it finds the package manager (apt, dnf/yum, zypper, pacman, apk, xbps,
+  eopkg, emerge, swupd, or Homebrew on macOS), shows the command before it installs anything missing (Python, the
+  Vulkan loader, the OpenMP runtime), and installs Aero for your user account into `~/.local/share/aero` (Linux) or
+  `~/Library/Application Support/Aero` (macOS). Immutable systems (Silverblue, SteamOS) work when Python 3.10+ is
+  already there.
+- llama.cpp per system: CUDA on NVIDIA, Vulkan on AMD and Intel GPUs, Metal on Apple Silicon, CPU otherwise. Where
+  llama.cpp ships no prebuilt build (musl distros such as Alpine, ARM Linux boards), the installer compiles it.
+- Release files for every system: `Aero-windows.zip`, `Aero-macos.zip` (double-click `Install-Aero.command`),
+  `Aero-linux.tar.gz`, `install.sh` (one-line install), `.deb` (Debian, Ubuntu, Mint, Pop!_OS), `.rpm` (Fedora, RHEL,
+  Rocky, Alma, openSUSE) and a `PKGBUILD` (Arch). The packages put an `aero` command and an app-menu entry on the
+  system; the first start sets Aero up for that user.
+- Shell, file opening, the app window, the browser tool and desktop control use each system's own tools. Desktop
+  control needs an X11 session on Linux, and the Screen Recording and Accessibility permissions on macOS.
+
+### Mod Aero
+
+- **Mod Aero** (the puzzle-piece button in the sidebar): describe a change to Aero in plain words ("make the send button
+  green", "add a word counter under the message box") and your local model makes it in a copy of Aero's code, with
+  its own chat. Nothing in the running Aero changes until you press **Apply**.
+- Before you can apply it, Aero checks the copy: Python compiles, the server imports, the unit tests pass, and a test
+  copy of Aero starts and serves its page. **Show changes** shows the diff.
+- Apply merges the change into Aero (a three-way merge, so it fits on top of later updates), then reloads the page
+  or restarts Aero. Mods can be turned off, on, changed by chatting more, or deleted.
+- Safe by design: the model can only write inside its copy. If a modded Aero fails to start, the mod is undone and
+  Aero starts again without it; `aero --safe` starts with every mod off.
+- Mods survive updates: after an update Aero applies them again. One that no longer fits the new code is marked
+  *needs redo*, and opening its chat lets the model make it again on the new version.
+
+### Updates from GitHub
+
+- When Aero starts, it asks GitHub once whether a newer release exists (never while it runs). A bar offers
+  **Update now**, **What's new** and **Skip this version**. Settings → Updates has *Check now* and the switch.
+- Update now downloads the release for your system, checks its SHA-256 against the release's checksum list, hands
+  over to the release's own installer and restarts Aero. Models, chats, settings, memory, mods and tunings stay. An
+  Aero several versions behind updates straight to the newest release.
+- Strict offline skips the check.
+
+### Forever-loop journal
+
+- During a forever-loop, after every round your local model writes a journal entry: what worked well (tools,
+  commands, settings worth reusing), what didn't work and why, the next step, and where the task stands.
+- The next round starts with the journal, so the model keeps what works, stops repeating what failed and picks up
+  its own plan. A card in the chat shows each round's entry; the loop bar's **Journal** button shows the whole
+  journal and can delete it.
+- One journal per task, kept in `data/loops`, so running the same loop again later picks up what it learned.
+  Settings → General → *Keep a forever-loop journal* switches it off.
+
+### Shared learning across models
+
+- After every task with tool calls, Aero records which tools worked, failed or were refused, and which model did
+  it. When something went wrong or the user gave feedback, that model writes short notes: what worked, what failed
+  and why. Forever-loop rounds share their journal entries the same way.
+- Before a similar task, whichever model is loaded gets those notes (labelled with the model that learned each one)
+  and the tools that kept failing on that kind of task, so models learn from each other's mistakes.
+- Preferences the user states go into long-term memory as part of the profile every model reads.
+- Settings → Memory shows every note, per-model numbers (tasks, tool calls, failures, refusals, speed) and can
+  forget a note or everything. One switch turns it off.
 
 ### Agents and subagents
 
@@ -27,17 +91,7 @@
   the app being controlled (or the screen) on Windows: it never takes focus, is left out of screenshots, and moves
   down when the model needs the spot. Stop on either one stops every running task.
 
-### Removed
-
-- The "Calm seas. What are we building?" heading and other filler wording (the shortcut description, the manual's
-  tagline). The empty chat shows the model line and the suggestion buttons only.
-
-## Aero 1.0.0 (2026-10-08)
-
-The first public release. Aero is the app that was called Halcyon (and VRAMpire before that), rebuilt as a
-Frutiger Aero styled, lightweight bootstrapper for local LLMs on any Windows PC.
-
-### Install and upgrade
+### Install and upgrade on Windows
 
 - Installs into `C:\Aero`. Run `Update-Aero.bat` from the extracted zip (or from a GitHub download of the repo).
 - **Upgrading from Halcyon or VRAMpire**: the updater moves `C:\Halcyon` (or `C:\VRAMpire`) to `C:\Aero` with every
@@ -61,7 +115,7 @@ Frutiger Aero styled, lightweight bootstrapper for local LLMs on any Windows PC.
   takes the recommendation.
 - The first-load tuning dialog suggests a VRAM limit from what the card has and what other apps use.
 
-### ChatGPT review pass (new)
+### ChatGPT review pass
 
 - A **ChatGPT** button next to the **Claude** button under the message box. Each cycles off / on / auto.
 - GPT-6 Astra reviews the local model's finished work (read-only tools, same verdicts as Claude: ok, minor, major).

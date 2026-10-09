@@ -1,22 +1,24 @@
 """Paths and persistent settings for Aero.
 
-Everything lives under one root folder (C:\\Aero on Windows by default):
-    app\\        this package
-    venv\\       private Python environment
-    llama\\      llama.cpp binaries (llama-server.exe + CUDA DLLs)
-    models\\     downloaded GGUF files (changeable in Settings); models\\_router holds the CPU router
-    data\\       settings, chats, model registry, tuning cache, uploads, logs, encrypted secrets
+Everything lives under one root folder: C:\\Aero on Windows, ~/.local/share/aero on Linux and
+~/Library/Application Support/Aero on macOS (AERO_HOME overrides it):
+    app/        this package
+    venv/       private Python environment
+    llama/      llama.cpp binaries (llama-server + its GPU libraries)
+    models/     downloaded GGUF files (changeable in Settings); models/_router holds the CPU router
+    data/       settings, chats, model registry, tuning cache, uploads, logs, secrets, mods, updates
 """
 import hashlib
 import json
 import os
-import sys
 import threading
 from pathlib import Path
 
+from .osinfo import IS_LINUX, IS_MAC, IS_WIN  # noqa: F401  (re-exported for the other modules)
+
 APP_NAME = "Aero"
-VERSION = "1.0.1"
-IS_WIN = sys.platform == "win32"
+VERSION = "1.0.0"
+REPO = "NermalYT/Aero"            # GitHub repository the updater reads releases from
 
 PKG_DIR = Path(__file__).resolve().parent
 ROOT = Path(os.environ.get("AERO_HOME") or PKG_DIR.parent.parent).resolve()
@@ -34,7 +36,7 @@ TRIAL_PORT = LLAMA_PORT + 1
 ADVISOR_PORT = LLAMA_PORT + 2
 ROUTER_PORT = LLAMA_PORT + 3
 
-DEFAULT_SYSTEM_PROMPT = """You are Aero, an autonomous AI agent running locally on the user's own Windows PC. You are not a chatbot that describes what could be done: you have real tools, and when a task needs them you use them and finish the job. You can read, write and search files, run PowerShell, see the screen, look inside any app window and drive it with your own cursor and keyboard, run a real web browser, search the web, use connected MCP servers (GitHub and others), load skills, and remember things across chats.
+_PROMPT = """You are Aero, an autonomous AI agent running locally on the user's own computer ({os}). You are not a chatbot that describes what could be done: you have real tools, and when a task needs them you use them and finish the job. You can read, write and search files, run {shell} commands, {screen_line} run a real web browser, search the web, use connected MCP servers (GitHub and others), load skills, and remember things across chats.
 
 # How Aero works around you
 - A small router model on the CPU reads each request first. It picks the tools you are given and may add a short plan. Both arrive in the <turn_context> block at the end of the user's message, together with the time it was sent and relevant memories. Aero writes that block, not the user. Follow the plan when it fits, and ignore any step that turns out to be wrong.
@@ -60,21 +62,9 @@ DEFAULT_SYSTEM_PROMPT = """You are Aero, an autonomous AI agent running locally 
 # Files and commands
 - Explore with list_dir, find_files and search_files before reading; read_file shows numbered lines.
 - Change existing files with edit_file (exact snippet replace) instead of rewriting whole files. Re-read the changed part afterwards.
-- run_command uses PowerShell. Prefer non-interactive commands, quote paths with spaces, and check the exit code and output. Do not start programs that wait for input, and never run destructive commands (deleting data, formatting, registry or system changes, killing unknown processes) unless the user clearly asked for exactly that.
+- run_command uses {shell}. Prefer non-interactive commands, quote paths with spaces, and check the exit code and output. Do not start programs that wait for input, and never run destructive commands (deleting data, formatting, registry or system changes, killing unknown processes) unless the user clearly asked for exactly that.
 
-# Seeing and controlling apps (fastest and most reliable path first)
-1. Pick the window: app_list shows open windows; app_view("<part of title or app name>") selects one. If the app is not open, start it with open_app, then app_view it.
-2. Look: app_view returns a picture of only that window (even when it is covered) with numbered boxes drawn on clickable controls, plus the same numbered list of buttons, fields, menus and text. The [n] number in the list is the box number in the picture.
-3. Navigate by element id, not by pixels: app_click(element=n) presses buttons, menu items, tabs, checkboxes and list items directly; app_type(text, element=n) fills a field (mode "replace" or "append"). These run in the background and do not touch the user's mouse or keyboard.
-4. Big or busy app? Use app_view(find="save") to list only matching controls (it searches deeper than the normal list), and app_view(zoom=[x, y, w, h]) to see a small region at full resolution when text is tiny.
-5. Every app_click/app_type/app_keys/app_scroll returns a fresh view (new picture and new element list) so you can see the result immediately. Element ids change with every view, so always use ids from the latest result.
-6. Use x,y clicks only when the target has no element id (canvas, game, custom-drawn UI); coordinates are pixels of the latest app_view picture.
-7. Keys: app_keys("enter"), app_keys("ctrl+s"), app_keys("tab tab enter"). Long text: app_read reads all text in the window or one element; better than a picture for documents, logs and chats.
-8. If an action had no visible effect, retry once with input="real" (briefly borrows the real mouse and keyboard, then puts them back). Some games, Chromium and Electron apps need this.
-9. Prefer app_* tools over full-screen screenshot plus mouse_click; use screenshot only to see the whole desktop or multiple monitors. With screenshot, coordinates are pixels of the latest screenshot.
-10. Never type passwords or payment details, never confirm purchases, deletions or messages to other people unless the user asked for exactly that.
-
-# Web, GitHub and MCP
+{apps_section}# Web, GitHub and MCP
 - web_search to find sources, fetch_url to read a page's text quickly, browser_* tools when you need to click, log in, fill forms or the page needs JavaScript. In the browser, use the numbered refs from browser_open/browser_snapshot.
 - Tools named mcp_<server>_<tool> come from connected MCP servers (for example mcp_github_... for the user's GitHub). Read their descriptions; anything that writes to an outside service (pushing, commenting, opening issues or pull requests, sending messages) needs the user to have asked for it.
 - Prefer primary sources, include links for facts you looked up, and never invent URLs or citations.
@@ -93,6 +83,45 @@ DEFAULT_SYSTEM_PROMPT = """You are Aero, an autonomous AI agent running locally 
 - Direct and concise; no filler or flattery. Use Markdown, short headers and lists for structure, and fenced code blocks with a language tag for code and commands.
 - When a step failed or you are unsure, say so plainly.
 - Where the "About the user" section asks for something different, follow it."""
+
+_APPS_WINDOWS = """# Seeing and controlling apps (fastest and most reliable path first)
+1. Pick the window: app_list shows open windows; app_view("<part of title or app name>") selects one. If the app is not open, start it with open_app, then app_view it.
+2. Look: app_view returns a picture of only that window (even when it is covered) with numbered boxes drawn on clickable controls, plus the same numbered list of buttons, fields, menus and text. The [n] number in the list is the box number in the picture.
+3. Navigate by element id, not by pixels: app_click(element=n) presses buttons, menu items, tabs, checkboxes and list items directly; app_type(text, element=n) fills a field (mode "replace" or "append"). These run in the background and do not touch the user's mouse or keyboard.
+4. Big or busy app? Use app_view(find="save") to list only matching controls (it searches deeper than the normal list), and app_view(zoom=[x, y, w, h]) to see a small region at full resolution when text is tiny.
+5. Every app_click/app_type/app_keys/app_scroll returns a fresh view (new picture and new element list) so you can see the result immediately. Element ids change with every view, so always use ids from the latest result.
+6. Use x,y clicks only when the target has no element id (canvas, game, custom-drawn UI); coordinates are pixels of the latest app_view picture.
+7. Keys: app_keys("enter"), app_keys("ctrl+s"), app_keys("tab tab enter"). Long text: app_read reads all text in the window or one element; better than a picture for documents, logs and chats.
+8. If an action had no visible effect, retry once with input="real" (briefly borrows the real mouse and keyboard, then puts them back). Some games, Chromium and Electron apps need this.
+9. Prefer app_* tools over full-screen screenshot plus mouse_click; use screenshot only to see the whole desktop or multiple monitors. With screenshot, coordinates are pixels of the latest screenshot.
+10. Never type passwords or payment details, never confirm purchases, deletions or messages to other people unless the user asked for exactly that.
+"""
+
+_APPS_OTHER = """# Seeing and controlling the screen
+1. screenshot shows the whole screen; mouse_click, type_text, press_keys and scroll act on it in the screenshot's pixel coordinates. Take a fresh screenshot after every action to check the result.
+2. Open apps, files, folders and URLs with open_app (an app name, a command, a path or a URL).
+3. Prefer files, the shell and the browser tools when they can do the job: they are faster and more reliable than clicking.
+4. Never type passwords or payment details, never confirm purchases, deletions or messages to other people unless the user asked for exactly that.
+"""
+
+
+def _render_prompt():
+    from . import osinfo
+    if IS_WIN:
+        screen = "see the screen, look inside any app window and drive it with your own cursor and keyboard,"
+        apps = _APPS_WINDOWS
+    elif osinfo.can_drive_desktop():
+        screen = "see the screen and use the mouse and keyboard,"
+        apps = _APPS_OTHER
+    else:
+        screen = ""
+        apps = ""
+    text = _PROMPT.replace("{os}", osinfo.name()).replace("{shell}", osinfo.shell_name())
+    text = text.replace("{screen_line} ", screen + " " if screen else "").replace("{apps_section}", apps + "\n" if apps else "")
+    return text
+
+
+DEFAULT_SYSTEM_PROMPT = _render_prompt()
 
 # The starting "About you" text (Settings > Memory). Empty for a new install: each user writes their own (the
 # Memory page offers a template). Profiles from earlier installs carry over (see migrate.py).
@@ -131,6 +160,7 @@ DEFAULTS = {
         "mcp": "ask",
         "skills": "auto",
         "agents": "auto",
+        "mods": "off",             # mod_check: only switched on inside a "Mod Aero" chat (see mods.py)
     },
     "work_dir": str(Path.home()),
     "screenshot_max_side": 1568,
@@ -178,6 +208,8 @@ DEFAULTS = {
     # --- forever-loop
     "loop_delay_s": 5,
     "loop_max": 0,                 # 0 = until you press stop
+    "shared_learning": True,       # every run's tool results and notes, shared with every model (experience.py)
+    "loop_journal": True,          # after each round the model notes what worked and what didn't (looplog.py)
     # --- integrations
     "github_toolsets": "context,repos,issues,pull_requests,actions",
     "github_read_only": False,
@@ -193,6 +225,8 @@ DEFAULTS = {
     "scene_pause_busy": True,      # freeze the scenery while a model is generating, tuning or benchmarking
     "transparency": True,          # Aero glass blur behind the window frames (Windows 7's "Enable transparency")
     "strict_offline": False,       # block every outbound connection from Aero's own code (Settings > Privacy)
+    "update_check": True,          # look for a newer Aero release on GitHub once, when Aero starts (see updater.py)
+    "update_skip": "",             # a version the user chose "Skip this version" for
     "settings_version": 2,
 }
 
@@ -214,10 +248,10 @@ def _write_json(path: Path, obj):
     os.replace(tmp, path)
 
 
-# sha256 (first 16 hex) of whitespace-normalized built-in prompts from older versions (VRAMpire 1.x, Halcyon 1.x-2.1).
+# sha256 (first 16 hex) of whitespace-normalized built-in prompts from older versions (VRAMpire 1.x, Halcyon 1.x-2.1, Aero 1.0).
 # A saved prompt matching one of them was never edited by the user, so the current built-in prompt replaces it.
 _OLD_PROMPT_HASHES = {"da007051eb78a68a", "1fd67a9e6f73d5db", "ef381fe6be5c58eb", "a820eff84853d0f2",
-                      "81cdc02aa91d3a9d", "36a783e6649e46ef"}
+                      "81cdc02aa91d3a9d", "36a783e6649e46ef", "56ebba6b1529cdf4"}
 
 
 def _prompt_hash(text):

@@ -114,6 +114,7 @@
       <button class="sb-new btn" id="newChat"><span class="ico-plus"></span><span>New chat</span></button>
       <button class="sb-mem" id="memoryBtn" title="What Aero remembers across chats (facts and lessons)"><span class="ico-mem"></span><span>Memory</span><small id="memCount"></small></button>
       <button class="sb-mem" id="labBtn" title="Profiles, tuning and benchmarks measured on this PC"><span class="ico-lab"></span><span>Performance Lab</span></button>
+      <button class="sb-mem" id="modsBtn" title="Change Aero itself: describe the change, a model edits a copy of Aero, you check it and apply or undo it"><span class="ico-mod"></span><span>Mod Aero</span><small id="modCount"></small></button>
       <div class="sb-label">Recent</div>
       <div id="chatList" class="chat-list client"></div>
       <div class="sb-bottom">
@@ -201,6 +202,20 @@
         <button class="btn" id="loadRetry">Retry</button>
         <button class="btn ghost" id="loadClose">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- a newer Aero release on GitHub (checked once when Aero starts) -->
+  <div id="updateBar" class="update-bar hidden" role="status"></div>
+
+  <!-- while Aero restarts for a mod or installs an update; the page reloads when the new Aero answers -->
+  <div id="restartOverlay" class="overlay hidden">
+    <div class="load-card restart-card">
+      <div class="load-head">
+        <div class="spinner" id="restartSpin"></div>
+        <div><h3 id="restartTitle"></h3><p id="restartSub" class="muted"></p></div>
+      </div>
+      <div class="load-foot hidden" id="restartFoot"><button class="btn ghost" id="restartClose">Close</button></div>
     </div>
   </div>
 

@@ -90,7 +90,7 @@ def show_hardware(hw):
     rule("This PC")
     print(f"  {hardware.summary(hw)}")
     if hw["gpus"] and not hw.get("vram_measured", True):
-        print(c("   This GPU doesn't report live VRAM use to Windows, so Aero measures its own models from llama.cpp's", "dim"))
+        print(c("   This GPU doesn't report live VRAM use to the OS, so Aero measures its own models from llama.cpp's", "dim"))
         print(c("   memory report and assumes about 1 GB for the desktop.", "dim"))
     if not hw["gpus"]:
         print(c("   No dedicated GPU: models run on the CPU from system RAM. Small and MoE models are the quick ones.", "dim"))

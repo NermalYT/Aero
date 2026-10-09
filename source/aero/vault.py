@@ -1,13 +1,17 @@
 """Local secret store (API keys, GitHub token, MCP OAuth tokens).
 
-Values are encrypted with Windows DPAPI (CryptProtectData, bound to the current Windows user), so the
-file data/secrets.json is useless if copied to another account or PC. Off Windows (tests) they are only
-base64-obfuscated. Secrets never leave this machine except to the service they belong to, and the UI
-only ever sees a masked form.
+- Windows: values are encrypted with DPAPI (CryptProtectData, bound to the current Windows user), so the file
+  data/secrets.json is useless if copied to another account or PC.
+- macOS: values live in the login Keychain (service "Aero"); secrets.json only notes that they are there.
+- Linux: values live in the desktop keyring through the Secret Service (secret-tool, from libsecret) when one is
+  running; otherwise they stay in secrets.json, which only your user account can read (mode 600).
+Secrets never leave this machine except to the service they belong to, and the UI only ever sees a masked form.
 """
 import base64
 import json
 import os
+import shutil
+import subprocess
 import sys
 import threading
 
@@ -63,6 +67,52 @@ else:
         return enc[6:] if enc.startswith(b"plain:") else enc
 
 
+KEYCHAIN = "@keychain"          # secrets.json value: the secret itself is in the OS keychain
+
+
+def _keychain_put(name, value):
+    """Store in the OS keychain. True on success; False sends the value to the file instead."""
+    try:
+        if sys.platform == "darwin":
+            r = subprocess.run(["security", "add-generic-password", "-U", "-s", "Aero", "-a", name, "-w", value],
+                               capture_output=True, timeout=20)
+            return r.returncode == 0
+        if sys.platform.startswith("linux") and shutil.which("secret-tool") and os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+            r = subprocess.run(["secret-tool", "store", "--label", f"Aero: {name}", "application", "aero", "name", name],
+                               input=value.encode("utf-8"), capture_output=True, timeout=20)
+            return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return False
+
+
+def _keychain_get(name):
+    try:
+        if sys.platform == "darwin":
+            r = subprocess.run(["security", "find-generic-password", "-s", "Aero", "-a", name, "-w"],
+                               capture_output=True, timeout=20)
+        elif shutil.which("secret-tool"):
+            r = subprocess.run(["secret-tool", "lookup", "application", "aero", "name", name],
+                               capture_output=True, timeout=20)
+        else:
+            return None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.decode("utf-8").rstrip("\n") if r.returncode == 0 else None
+
+
+def _keychain_del(name):
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["security", "delete-generic-password", "-s", "Aero", "-a", name], capture_output=True,
+                           timeout=20)
+        elif shutil.which("secret-tool"):
+            subprocess.run(["secret-tool", "clear", "application", "aero", "name", name], capture_output=True,
+                           timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def _load():
     try:
         return json.loads(PATH.read_text(encoding="utf-8"))
@@ -72,7 +122,12 @@ def _load():
 
 def _save(d):
     tmp = PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d, indent=1), encoding="utf-8")
+    if sys.platform != "win32":
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)     # readable by this user only
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(d, indent=1))
+    else:
+        tmp.write_text(json.dumps(d, indent=1), encoding="utf-8")
     os.replace(tmp, PATH)
 
 
@@ -81,6 +136,8 @@ def get(name, default=""):
         v = _load().get(name)
     if not v:
         return default
+    if v == KEYCHAIN:
+        return _keychain_get(name) or default
     try:
         return _unprotect(base64.b64decode(v)).decode("utf-8")
     except Exception:
@@ -90,11 +147,27 @@ def get(name, default=""):
 def put(name, value):
     with _lock:
         d = _load()
-        if value:
+        if d.get(name) == KEYCHAIN:
+            _keychain_del(name)
+        if value and sys.platform != "win32" and os.environ.get("AERO_VAULT") != "file" and _keychain_put(name, str(value)):
+            d[name] = KEYCHAIN
+        elif value:
             d[name] = base64.b64encode(_protect(str(value).encode("utf-8"))).decode("ascii")
         else:
             d.pop(name, None)
         _save(d)
+
+
+def where():
+    """Where secrets are kept on this computer, for Settings → Privacy."""
+    if sys.platform == "win32":
+        return "encrypted with Windows DPAPI for your Windows account"
+    if sys.platform == "darwin":
+        return "in your macOS login Keychain (service \"Aero\")"
+    d = _load()
+    if any(v == KEYCHAIN for v in d.values()):
+        return "in your desktop keyring (Secret Service)"
+    return f"in {PATH} (readable by your user account only)"
 
 
 def get_json(name, default=None):

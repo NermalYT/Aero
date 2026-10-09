@@ -159,14 +159,19 @@ class OfflineTests(unittest.TestCase):
         self.assertFalse(localonly.tool_allowed("mcp", s))
         self.assertTrue(localonly.tool_allowed("files_read", s))
         from aero import tools
-        tools.REGISTRY.clear()
-        tools.tool("web_search", "search", "web")(lambda ctx, query: "results")
-        tools.tool("read_file", "read", "files_read")(lambda ctx, path: "text")
-        names = [x["function"]["name"] for x in tools.schemas(s)]
-        self.assertEqual(names, ["read_file"])
-        r = tools.run("web_search", {"query": "x"}, tools.Ctx(s))
-        self.assertTrue(r["error"])
-        self.assertIn("strict offline", r["text"])
+        saved = dict(tools.REGISTRY)                  # other test modules share the registry
+        try:
+            tools.REGISTRY.clear()
+            tools.tool("web_search", "search", "web")(lambda ctx, query: "results")
+            tools.tool("read_file", "read", "files_read")(lambda ctx, path: "text")
+            names = [x["function"]["name"] for x in tools.schemas(s)]
+            self.assertEqual(names, ["read_file"])
+            r = tools.run("web_search", {"query": "x"}, tools.Ctx(s))
+            self.assertTrue(r["error"])
+            self.assertIn("strict offline", r["text"])
+        finally:
+            tools.REGISTRY.clear()
+            tools.REGISTRY.update(saved)
 
     def test_async_client_blocked(self):
         import asyncio
