@@ -228,6 +228,9 @@ def build_args(model, cfg, port, mmproj=None, final=False, settings=None, spec=N
         a += ["--no-webui"]
     if supports("--offline"):
         a += ["--offline"]              # local files only: llama-server must never download or phone home
+    if supports("--log-verbosity"):
+        a += ["-lv", "4"]               # newer builds only log their buffer sizes at trace level; Aero reads them
+                                        # for VRAM accounting and Remote Mode (about 20 lines per request)
     if spec:
         a += list(spec)
     if cfg.get("no_mmap"):

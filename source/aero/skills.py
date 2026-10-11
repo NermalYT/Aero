@@ -1,7 +1,8 @@
 """Skills: folders with a SKILL.md (YAML front matter `name` + `description`, then instructions).
 
 Aero reads the same skill format as Claude Code and Codex, from:
-    data\\skills\\<name>\\SKILL.md                       Aero's own
+    data\\skills\\<name>\\SKILL.md                       yours (a skill here wins over a built-in one with that name)
+    aero\\skills_builtin\\<name>\\SKILL.md               the ones that ship with Aero (switch them off in Settings)
     ~\\.claude\\skills\\<name>\\SKILL.md                  Claude Code personal skills
     ~\\.claude\\plugins\\...\\skills\\<name>\\SKILL.md       skills inside installed Claude Code plugins
     ~\\.codex\\skills\\<name>\\SKILL.md                   Codex skills
@@ -22,7 +23,8 @@ _cache = {"t": 0.0, "v": []}
 def _roots():
     home = Path.home()
     s = load_settings()
-    roots = [("aero", SKILLS_DIR, 2), ("claude", home / ".claude" / "skills", 2),
+    roots = [("aero", SKILLS_DIR, 2), ("builtin", Path(__file__).resolve().parent / "skills_builtin", 2),
+             ("claude", home / ".claude" / "skills", 2),
              ("claude-plugin", home / ".claude" / "plugins", 9), ("codex", home / ".codex" / "skills", 2)]
     wd = Path(str(s.get("work_dir") or "")).expanduser()
     if str(wd) and (wd / ".claude" / "skills").is_dir():

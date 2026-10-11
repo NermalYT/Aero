@@ -116,33 +116,104 @@ def _clipboard_cmd():
     return None
 
 
-def _paste_text(text):
-    """Type long or non-ASCII text through the clipboard (pyautogui can only type plain keys)."""
+def _clipboard_read():
+    import shutil
+    cmd = (["pbpaste"] if IS_MAC else ["wl-paste", "--no-newline"] if os.environ.get("WAYLAND_DISPLAY") and
+           shutil.which("wl-paste") else ["xclip", "-selection", "clipboard", "-o"] if shutil.which("xclip") else
+           ["xsel", "--clipboard", "--output"] if shutil.which("xsel") else None)
+    if not cmd:
+        return None
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=5)
+        return p.stdout if p.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _clipboard_write(text):
     cmd = _clipboard_cmd()
     if not cmd:
         return False
     try:
         p = subprocess.run(cmd, input=text, text=True, encoding="utf-8", creationflags=osinfo.NO_WINDOW, timeout=10)
+        return p.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
-    if p.returncode == 0:
-        _pg().hotkey("command" if IS_MAC else "ctrl", "v")
-        return True
-    return False
+
+
+def _paste_text(text):
+    """Non-ASCII text on macOS/Linux goes through the clipboard (pyautogui can only type plain keys); the clipboard's
+    previous text is put back afterwards."""
+    old = _clipboard_read()
+    if not _clipboard_write(text):
+        return False
+    _pg().hotkey("command" if IS_MAC else "ctrl", "v")
+    time.sleep(0.2)
+    if old is not None:
+        _clipboard_write(old)
+    return True
 
 
 @tool("type_text", "Type text at the current keyboard focus. Click the target field first.", "desktop",
       {"text": {"type": "string"}, "enter": {"type": "boolean", "description": "Press Enter afterwards."}},
       ["text"], summary=lambda a: repr(a.get("text", ""))[:80])
 def type_text(ctx, text, enter=False):
+    """Typed in short chunks so Stop takes effect mid-text. On Windows every character goes through SendInput's
+    Unicode mode, so the clipboard is never touched; elsewhere non-ASCII text is pasted and the previous clipboard
+    text is put back."""
     pg = _pg()
-    if text.isascii() and len(text) < 400:
-        pg.write(text, interval=0.01)
+    stop = getattr(ctx, "cancelled", lambda: False)
+    done = 0
+    if IS_WIN:
+        for i in range(0, len(text), 40):
+            if stop():
+                return {"text": f"Stopped after typing {done} of {len(text)} chars.", "error": True}
+            chunk = text[i:i + 40]
+            for line_i, part in enumerate(chunk.split("\n")):
+                if line_i:
+                    pg.press("enter")
+                _send_unicode(part)
+            done += len(chunk)
+    elif text.isascii():
+        for i in range(0, len(text), 40):
+            if stop():
+                return {"text": f"Stopped after typing {done} of {len(text)} chars.", "error": True}
+            pg.write(text[i:i + 40], interval=0.01)
+            done += len(text[i:i + 40])
     elif not _paste_text(text):
         pg.write(text, interval=0.01)
     if enter:
         pg.press("enter")
     return f"Typed {len(text)} chars" + (" + Enter" if enter else "")
+
+
+def _send_unicode(text):
+    """Windows SendInput with KEYEVENTF_UNICODE: any character, no clipboard, no keyboard-layout guessing."""
+    import ctypes
+    from ctypes import wintypes
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD), ("dwFlags", wintypes.DWORD),
+                    ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+    class INPUT(ctypes.Structure):
+        class _U(ctypes.Union):
+            _fields_ = [("ki", KEYBDINPUT), ("pad", ctypes.c_byte * 32)]
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wintypes.DWORD), ("u", _U)]
+
+    units = text.encode("utf-16-le")
+    seq = []
+    for i in range(0, len(units), 2):
+        code = int.from_bytes(units[i:i + 2], "little")
+        for flags in (0x0004, 0x0004 | 0x0002):          # KEYEVENTF_UNICODE, then with KEYEVENTF_KEYUP
+            inp = INPUT(type=1)
+            inp.ki = KEYBDINPUT(0, code, flags, 0, 0)
+            seq.append(inp)
+    if seq:
+        arr = (INPUT * len(seq))(*seq)
+        ctypes.windll.user32.SendInput(len(seq), arr, ctypes.sizeof(INPUT))
+        time.sleep(0.004 * len(text))
 
 
 @tool("press_keys", "Press a key or chord, e.g. 'enter', 'ctrl+c', 'alt+tab', 'win+r', 'ctrl+shift+esc'. "

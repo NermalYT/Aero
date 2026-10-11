@@ -10,6 +10,7 @@ Token economics that shape this file:
   so the cached prefix survives from one turn to the next as long as nothing new is needed.
 """
 import asyncio
+import copy
 import difflib
 import getpass
 import json
@@ -20,18 +21,31 @@ from pathlib import Path
 
 import httpx
 
-from . import agents, attachments, control, memory, osinfo, stats, tools
+from . import (action_results, agents, attachments, capabilities, clarifications, control, input_guard, memory,
+               osinfo, resources, stats, task_graph, tools)
 
 _approvals = {}        # call_id -> Future
+_approval_chat = {}    # call_id -> chat id it belongs to (Stop in one chat must not answer another chat's cards)
 _chat_allow = {}       # chat_id -> set(categories) allowed for the rest of the chat
 _cancel = {}           # chat_id -> asyncio.Event
 
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 WRITE_TOOLS = {"write_file", "edit_file", "move_path", "delete_path"}
+LOOP_TOOLS = {"run_subagent", "load_tools", "ask_user", "get_answer"}     # run by the loop itself, not tools.run
+PARALLEL_MAX = 4               # read-only tool calls from one step that may run at the same time
+TIMEOUT_RE = re.compile(r"time(d)? ?out|TimeoutError|timeout", re.I)
+
+
+def _ask(call_id, chat_id):
+    fut = asyncio.get_running_loop().create_future()
+    _approvals[call_id] = fut
+    _approval_chat[call_id] = chat_id
+    return fut
 
 
 def resolve_approval(call_id, decision, chat_id=None, category=None):
     fut = _approvals.pop(call_id, None)
+    _approval_chat.pop(call_id, None)
     if decision == "allow_chat" and chat_id and category:
         _chat_allow.setdefault(chat_id, set()).add(category)
     if fut and not fut.done():
@@ -50,8 +64,22 @@ def stop(chat_id):
     if ev:
         ev.set()
     for cid, fut in list(_approvals.items()):
-        if not fut.done():
+        if _approval_chat.get(cid) in (chat_id, None) and not fut.done():
             fut.set_result("deny")
+    release(chat_id, close_browser=True)
+
+
+def release(chat_id, close_browser=False):
+    """Everything a chat's agents hold: resource locks (windows, the real input), foreground grants, and on Stop the
+    agent's browser tab."""
+    resources.release_owner(chat_id)
+    input_guard.clear(chat_id)
+    if close_browser:
+        try:
+            from .tools import browser
+            browser.stop_owner(chat_id)
+        except Exception:
+            pass
 
 
 def stop_all():
@@ -61,6 +89,8 @@ def stop_all():
     for fut in list(_approvals.values()):
         if not fut.done():
             fut.set_result("deny")
+    for cid in list(_cancel):
+        release(cid, close_browser=True)
     return len(_cancel)
 
 
@@ -348,7 +378,10 @@ class Turn:
         _cancel[chat_id] = self.cancel
         self.vision = bool(engine_state.get("vision"))
         self.ctx_size = int(engine_state.get("ctx") or 8192)
-        self.tctx = tools.Ctx(settings, self.vision, chat_id)
+        self.tctx = tools.Ctx(settings, self.vision, chat_id, self.cancel)
+        self.graph = task_graph.TaskGraph(title, chat_id)
+        self.ambiguous = {}          # op key -> observation count when a consequential call ended in an unknown state
+        self.observed = 0            # read-only calls so far (an observation between attempts allows a repeat)
         self.exposed = None          # None = every enabled tool; else a list of names (router focus)
         self.think = settings.get("thinking", True)
         self.memory_text = ""
@@ -372,6 +405,7 @@ class Turn:
         self.chat_id = new_id
         _cancel[new_id] = self.cancel
         self.tctx.chat_id = new_id
+        self.graph.chat_id = new_id
 
     def close(self):
         for k in [k for k, v in _cancel.items() if v is self.cancel]:
@@ -406,6 +440,16 @@ class SubTurn:
         self.model_name = parent.model_name
         self.persona = agents.SUB_PERSONA.format(name=name)
         self.sub_id, self.sub_name = sid, name
+        self.graph = self.root.graph
+        self.ambiguous = self.root.ambiguous
+
+    @property
+    def observed(self):
+        return self.root.observed
+
+    @observed.setter
+    def observed(self, v):
+        self.root.observed = v
 
     @property
     def controlling(self):
@@ -494,8 +538,137 @@ def sandbox_ok(turn, name, args):
     return True
 
 
+def _root(turn):
+    return getattr(turn, "root", turn)
+
+
+def _graph_node(turn, name, label, lane, category):
+    """A task-graph node for this call (the UI's progress list and Stop's summary come from these)."""
+    g = getattr(turn, "graph", None)
+    if g is None:
+        return None
+    caps = capabilities.caps_of(name, category)
+    who = getattr(turn, "sub_name", "")
+    return g.add(f"{tools_name(name)} {label}".strip(), name, capability=(caps.capabilities or ("",))[0],
+                 risk=caps.side_effect, locks=caps.locks, lane=lane, label=(f"{who}: " if who else "") +
+                 f"{tools_name(name)} {label}".strip())
+
+
+def tools_name(name):
+    return agents.doing_text(name, "") if name else ""
+
+
+def _node_event(turn, node):
+    if node is None:
+        return None
+    g = turn.graph
+    g.save()
+    return {"t": "task", "graph": g.id, "node": {k: getattr(node, k) for k in ("id", "label", "state", "action", "lane",
+                                                                               "error", "waiting_on")}}
+
+
+def _lock_keys(turn, name, args, physical):
+    keys = []
+    caps = capabilities.caps_of(name)
+    if "window" in caps.locks:
+        try:
+            from .tools import apps
+            h = apps.selected_hwnd(_root(turn).chat_id)
+            if h:
+                keys.append(f"window:{h}")
+        except Exception:
+            pass
+    if physical:
+        keys.append(resources.EXCLUSIVE_INPUT)
+    return keys
+
+
+def _lock_text(keys, owner):
+    for k in keys:
+        h = resources.holder(k)
+        if h and h["owner"] != owner:
+            other = agents.LIVE.get(h["owner"], {}).get("name") or "another Aero agent"
+            what = "your real mouse and keyboard" if k == resources.EXCLUSIVE_INPUT else "that window"
+            return (f"{other} is using {what} right now, so this call did not run (no two agents act on the same "
+                    "window or input at once). Wait for it to finish, work on something else, or pick another window.")
+    return "The resource this call needs is busy."
+
+
+async def _acquire(keys, owner, cancel, timeout):
+    if not keys:
+        return True
+    t0 = time.monotonic()
+    while True:
+        if resources.acquire(keys, owner, 0):
+            return True
+        if cancel.is_set() or time.monotonic() - t0 >= timeout:
+            return False
+        await asyncio.sleep(0.2)
+
+
+def _repeat_guard(turn, name, args):
+    """Verify before repeating: a consequential call whose last attempt ended in an unknown state (a timeout) may
+    only run again after the agent has looked at something in between (this turn or an earlier one)."""
+    caps = capabilities.caps_of(name)
+    if caps.side_effect not in capabilities.NON_IDEMPOTENT or args is None:
+        return None
+    key = task_graph.op_key(_root(turn).chat_id, name, args)
+    if key not in turn.ambiguous and caps.side_effect in ("external_write", "destructive"):
+        prev = task_graph.peek(key)
+        if prev and prev.get("status") == "unknown":
+            turn.ambiguous[key] = turn.observed                       # from an earlier turn: look first in this one
+    seen = turn.ambiguous.get(key)
+    if seen is not None and turn.observed <= seen:
+        return {"text": f"The same {name} call ran before and its result is unknown (it timed out), so it may already "
+                        "have happened. Check first (read the page, the sent folder, the file or the app), then try "
+                        "again only if it didn't.", "error": True, "denied": True}
+    return None
+
+
+def _note_outcome(turn, name, args, res):
+    caps = capabilities.caps_of(name)
+    if capabilities.read_only(name, args):
+        turn.observed += 1
+        return
+    if caps.side_effect not in capabilities.NON_IDEMPOTENT or args is None or res.get("denied"):
+        return
+    key = task_graph.op_key(_root(turn).chat_id, name, args)
+    text = (res.get("text") or "") + " " + str((res.get("envelope") or {}).get("error") or "")
+    if res.get("error") and TIMEOUT_RE.search(text):
+        turn.ambiguous[key] = turn.observed
+        if caps.side_effect in ("external_write", "destructive"):
+            task_graph.end(key, "unknown", "timed out")
+    else:
+        if turn.ambiguous.pop(key, None) is not None or caps.side_effect in ("external_write", "destructive"):
+            task_graph.clear_op(key)
+
+async def _handoff(turn, lane):
+    """Wait until the user has stopped typing or moving the mouse. Yields notices; leaves turn.handoff True/False."""
+    turn.handoff = True
+    idle = input_guard.idle_ms()
+    if idle is None or idle >= input_guard.IDLE_MS:
+        return
+    yield {"t": "notice", "lane": lane, "text": "Waiting for you to stop typing and moving the mouse before Aero "
+                                                "takes them."}
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < input_guard.IDLE_WAIT_S:
+        await asyncio.sleep(0.2)
+        if turn.cancel.is_set():
+            turn.handoff = False
+            return
+        i = input_guard.idle_ms()
+        if i is None or i >= input_guard.IDLE_MS:
+            return
+    turn.handoff = False
+
+
 async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=None, out=None):
-    """Run one tool call with the user's approval policy. Yields UI events; the result lands in out['res']."""
+    """Run one tool call with the user's approval policy. Yields UI events; the result lands in out['res'].
+
+    On the way: Strict Background Only and the foreground-control grant for anything that would use the user's real
+    mouse or keyboard (input_guard.py), the exclusive locks for that input and for the agent's app window
+    (resources.py), the verify-before-repeat check for consequential calls, a task-graph node, and the evidence
+    note the model sees (action_results.py)."""
     t = tools.REGISTRY.get(name)
     category = t.category if t else None
     pol = tools.policy(name, turn.settings)
@@ -503,10 +676,24 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
         pol = "off"
     if name in (getattr(turn, "blocked", None) or ()):
         pol = "off"
-    needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set())
+    owner = _root(turn).chat_id
+    physical = bool(t) and isinstance(args, dict) and capabilities.is_physical(name, args)
+    strict = physical and input_guard.strict(turn.settings)
+    fg_needed = physical and not strict and pol == "ask" and not input_guard.has_grant(owner)
+    needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set()) and not physical
     label = tools.label(name, args or {})
+    node = _graph_node(turn, name, label, lane, category) if t else None
+    ask_fut = None
+    if needs and args is not None:          # registered before the card goes out, so an instant answer or Stop finds it
+        ask_fut = _ask(call_id, _root(turn).chat_id)
     yield {"t": "tool_start", "call_id": call_id, "name": name, "args": args, "label": label, "category": category,
-           "needs_approval": needs and args is not None, "lane": lane}
+           "needs_approval": needs and args is not None, "foreground": fg_needed and args is not None, "lane": lane}
+    if node is not None:
+        turn.graph.set(node.id, "running")
+        ev = _node_event(turn, node)
+        if ev:
+            yield ev
+    res = None
     if args is None:
         res = {"text": "Could not parse the arguments as JSON. Send valid JSON matching the tool's schema.", "error": True}
     elif pol == "off" or not t:
@@ -514,32 +701,95 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
     elif not sandbox_ok(turn, name, args):
         res = {"text": f"In a Mod Aero chat only files inside your copy of Aero ({turn.sandbox}) can be changed.",
                "error": True}
+    elif strict:
+        res = {"text": f"Strict Background Only is on (Settings > Tools), so Aero does not use the real mouse or "
+                       f"keyboard, not even for {name} {label}. Use element ids (app_view, app_click, app_type), "
+                       "files, the shell or the browser tools, or tell the user what would need their own input.",
+               "error": True, "denied": True}
+    elif (guard := _repeat_guard(turn, name, args)) is not None:
+        res = guard
     else:
         decision = "allow"
-        if needs:
-            fut = asyncio.get_running_loop().create_future()
-            _approvals[call_id] = fut
-            decision = await fut
+        if ask_fut is not None:
+            decision = "deny" if turn.cancel.is_set() else await ask_fut
+        if fg_needed and decision != "deny" and not turn.cancel.is_set():
+            what, _rect = await asyncio.to_thread(control.target, name, args, owner)
+            fut = _ask(call_id, owner)
+            yield {"t": "foreground_request", "call_id": call_id, "name": name, "label": label, "target": what,
+                   "by": control.actor(turn, lane), "lane": lane}
+            decision = "deny" if turn.cancel.is_set() else await fut
+            if decision in ("allow", "allow_task"):
+                input_guard.grant(owner, "task" if decision == "allow_task" else "once")
         if decision == "deny" or turn.cancel.is_set():
             res = {"text": "The user denied this action. Ask what they want instead, or try another approach.",
                    "error": True, "denied": True}
         else:
-            if name in control.CONTROL_TOOLS:
-                by = control.actor(turn, lane)
-                what, rect = await asyncio.to_thread(control.target, name, args)
-                turn.controlling = {"by": by, "target": what}
-                await asyncio.to_thread(control.banner_on, f"{by} is controlling {what}", rect)
-                yield {"t": "control", "by": by, "target": what, "tool": name, "lane": lane}
-            if name in WRITE_TOOLS:
-                _track(turn, name, args, before=True)
-            res = await asyncio.to_thread(tools.run, name, args, turn.tctx)
-            if name in WRITE_TOOLS:
-                _track(turn, name, args, before=False)
-            stats.note_tool(category)
-    tmsg = {"role": "tool", "tool_call_id": call_id, "name": name, "content": res.get("text", ""),
+            keys = _lock_keys(turn, name, args, physical)
+            if physical:
+                async for ev in _handoff(turn, lane):
+                    yield ev
+            if physical and not getattr(turn, "handoff", True):
+                res = {"text": "You kept using the mouse and keyboard, so Aero did not take them. It can try again "
+                               "when you stop, or use a background route.", "error": True}
+            elif not await _acquire(keys, owner, turn.cancel, 30 if physical else 0):
+                res = {"text": _lock_text(keys, owner), "error": True}
+            else:
+                input_keys = [k for k in keys if k == resources.EXCLUSIVE_INPUT]
+                try:
+                    if name in control.CONTROL_TOOLS:
+                        by = control.actor(turn, lane)
+                        what, rect = await asyncio.to_thread(control.target, name, args, owner)
+                        mode = control.mode_of(name, args, physical)
+                        text = control.phrase(by, what, mode)
+                        turn.controlling = {"by": by, "target": what, "mode": mode, "text": text}
+                        if control.on_screen(name, mode):
+                            await asyncio.to_thread(control.banner_on, text, rect)
+                        else:
+                            await asyncio.to_thread(control.banner_off)
+                        yield {"t": "control", "by": by, "target": what, "tool": name, "lane": lane, "mode": mode,
+                               "text": text}
+                    if name in WRITE_TOOLS:
+                        _track(turn, name, args, before=True)
+                    cctx = turn.tctx
+                    if physical:
+                        cctx = copy.copy(turn.tctx)
+                        cctx.physical_ok = True
+                        with input_guard.Session(owner) as gs:
+                            res = await asyncio.to_thread(tools.run, name, args, cctx)
+                        if gs.note() and isinstance(res, dict):
+                            res["text"] = (res.get("text") or "") + gs.note()
+                        input_guard.consume(owner)
+                    else:
+                        res = await asyncio.to_thread(tools.run, name, args, cctx)
+                    if name in WRITE_TOOLS:
+                        _track(turn, name, args, before=False)
+                    stats.note_tool(category)
+                finally:
+                    if input_keys:
+                        resources.release(input_keys, owner)
+    if ask_fut is not None and not ask_fut.done():
+        _approvals.pop(call_id, None)
+        ask_fut.cancel()
+    if t:
+        _note_outcome(turn, name, args, res)
+    evidence = action_results.evidence(res.get("envelope"))
+    content = res.get("text", "") + (("\n" + evidence) if evidence else "")
+    tmsg = {"role": "tool", "tool_call_id": call_id, "name": name, "content": content,
             "error": bool(res.get("error")), "image": res.get("image"), "label": label, "lane": lane}
+    env = res.get("envelope") or {}
+    if "verification_method" in env:
+        tmsg["verified"] = env.get("verified")
+        if env.get("control_mode"):
+            tmsg["mode"] = env["control_mode"]
     if res.get("denied"):
         tmsg["denied"] = True
+    if node is not None:
+        st = "cancelled" if res.get("denied") or turn.cancel.is_set() else "failed" if res.get("error") else "completed"
+        turn.graph.set(node.id, st, result=(res.get("text") or "")[:200] if st == "completed" else None,
+                       error=(res.get("text") or "")[:200] if st != "completed" else None)
+        ev = _node_event(turn, node)
+        if ev:
+            yield ev
     if out is not None:
         out["res"] = res
         out["msg"] = tmsg
@@ -747,14 +997,42 @@ async def run_local(turn, lane="local", max_steps=None):
         if turn.cancel.is_set() or not tool_calls:
             return
 
+        parsed = []
         for tc in tool_calls:
-            name = tc["function"]["name"]
             try:
-                args = json.loads(tc["function"]["arguments"] or "{}")
-                if not isinstance(args, dict):
-                    args = {"value": args}
+                a = json.loads(tc["function"]["arguments"] or "{}")
+                if not isinstance(a, dict):
+                    a = {"value": a}
             except Exception:
-                args = None
+                a = None
+            parsed.append((tc, tc["function"]["name"], a))
+        i = 0
+        while i < len(parsed):
+            tc, name, args = parsed[i]
+            batch = []
+            j = i
+            while j < len(parsed) and len(batch) < PARALLEL_MAX and parsed[j][1] not in LOOP_TOOLS and \
+                    parsed[j][2] is not None and capabilities.read_only(parsed[j][1], parsed[j][2]):
+                batch.append(parsed[j])
+                j += 1
+            if len(batch) > 1:                      # independent lookups from one step run side by side
+                async for ev in _run_parallel(turn, batch, lane):
+                    yield ev
+                i = j
+                if turn.cancel.is_set():
+                    return
+                continue
+            i += 1
+            if name == "ask_user":
+                async for ev in ask_user(turn, tc["id"], args, lane):
+                    yield ev
+                continue
+            if name == "get_answer":
+                async for ev in get_answer(turn, tc["id"], args, lane):
+                    yield ev
+                if turn.cancel.is_set():
+                    return
+                continue
             if name == "run_subagent":
                 async for ev in run_subagent(turn, tc["id"], args, lane):
                     yield ev
@@ -778,6 +1056,121 @@ async def run_local(turn, lane="local", max_steps=None):
             if turn.cancel.is_set():
                 return
     yield {"t": "notice", "text": f"Stopped after {max_steps} tool steps (Settings → Agent max steps)."}
+
+
+async def _run_parallel(turn, batch, lane):
+    """Run read-only calls at the same time; their events stream as they come, their results enter the history in
+    the order the model asked for them."""
+    q = asyncio.Queue()
+    boxes = [{} for _ in batch]
+
+    async def one(k, tc, name, args):
+        try:
+            async for ev in exec_tool(turn, tc["id"], name, args, lane, out=boxes[k]):
+                await q.put(ev)
+        except Exception as e:  # noqa: BLE001
+            boxes[k]["msg"] = {"role": "tool", "tool_call_id": tc["id"], "name": name, "content": f"{type(e).__name__}: {e}",
+                               "error": True, "label": "", "lane": lane}
+            await q.put({"t": "tool_result", "message": boxes[k]["msg"]})
+        finally:
+            await q.put(None)
+    tasks = [asyncio.create_task(one(k, tc, n, a)) for k, (tc, n, a) in enumerate(batch)]
+    left = len(tasks)
+    while left:
+        ev = await q.get()
+        if ev is None:
+            left -= 1
+            continue
+        yield ev
+    for k, (tc, name, _a) in enumerate(batch):
+        msg = boxes[k].get("msg") or {"role": "tool", "tool_call_id": tc["id"], "name": name, "content": "Not run.",
+                                      "error": True, "label": "", "lane": lane}
+        turn.history.append(msg)
+
+
+# ------------------------------------------------------------------------------------------------ questions
+
+async def ask_user(turn, call_id, args, lane="local"):
+    """ask_user: post a question card and return at once (clarifications.py)."""
+    args = args if isinstance(args, dict) else {}
+    who = getattr(turn, "sub_name", "")
+    label = str(args.get("question") or "")[:160]
+    yield {"t": "tool_start", "call_id": call_id, "name": "ask_user", "args": args, "label": label, "category": "ask",
+           "needs_approval": False, "lane": lane}
+    pol = tools.policy("ask_user", turn.settings)
+    try:
+        if pol == "off":
+            raise ValueError("Questions are turned off in Settings → Tools. Pick a sensible default and say which.")
+        q, created = clarifications.ask(_root(turn).chat_id, args.get("question"), args.get("choices"),
+                                        args.get("kind") or "", args.get("free_text", True), owner=who)
+        if created:
+            yield {"t": "question", "question": clarifications.public(q), "lane": lane}
+            node = turn.graph.add(f"Question: {q['text']}", "ask_user", label=f"Asked you: {q['text']}", lane=lane)
+            turn.graph.set(node.id, "waiting_for_user", waiting_on=q["id"])
+            ev = _node_event(turn, node)
+            if ev:
+                yield ev
+        text = (f"Asked the user (question id {q['id']}): {q['text']}" +
+                (f" Choices: {', '.join(q['choices'])}." if q["choices"] else "") +
+                ("" if created else " (already asked; still the same question)") +
+                "\nKeep working on everything that doesn't depend on the answer. Don't open, read or change anything "
+                "that depends on it until you have it: call get_answer with this id when you need it.")
+        if q["status"] == "answered":
+            text = f"The user already answered question {q['id']}: {q['answer']}"
+        err = False
+    except ValueError as e:
+        text, err = str(e), True
+    tmsg = {"role": "tool", "tool_call_id": call_id, "name": "ask_user", "content": text, "error": err,
+            "label": label, "lane": lane}
+    turn.history.append(tmsg)
+    yield {"t": "tool_result", "message": tmsg}
+
+
+def _q_node(turn, qid):
+    for n in turn.graph.nodes.values():
+        if n.action == "ask_user" and n.waiting_on == qid:
+            return n
+    return None
+
+
+async def get_answer(turn, call_id, args, lane="local"):
+    """get_answer: the answer, waiting for it when needed (Stop still works)."""
+    args = args if isinstance(args, dict) else {}
+    qid = str(args.get("id") or "").strip()
+    yield {"t": "tool_start", "call_id": call_id, "name": "get_answer", "args": args, "label": qid, "category": "ask",
+           "needs_approval": False, "lane": lane}
+    q = clarifications.get(qid)
+    err = False
+    if q is None or q.get("chat_id") != _root(turn).chat_id:
+        text, err = f"No question with id '{qid}' in this chat. Ask with ask_user first.", True
+    elif q["status"] == "answered":
+        text = f"The user answered: {q['answer']}"
+    elif q["status"] != "pending":
+        text, err = f"That question was {q['status']} without an answer.", True
+    elif args.get("wait") is False:
+        text = "No answer yet. Keep working on other parts and check again later."
+    else:
+        yield {"t": "waiting", "question_id": qid, "text": q["text"], "lane": lane}
+        ans = await clarifications.wait(qid, turn.cancel, timeout=900)
+        if ans is not None:
+            text = f"The user answered: {ans}"
+        elif turn.cancel.is_set():
+            text, err = "Stopped while waiting for the answer.", True
+        else:
+            text = ("No answer after 15 minutes. Finish what you can, say clearly what is waiting on the user's "
+                    "answer, and stop there; when they answer, this chat continues from it.")
+    n = _q_node(turn, qid)
+    if n is not None and n.state == "waiting_for_user":
+        q2 = clarifications.get(qid) or {}
+        if q2.get("status") == "answered":
+            turn.graph.set(n.id, "completed", result=f"Answered: {q2.get('answer')}")
+            ev = _node_event(turn, n)
+            if ev:
+                yield ev
+    tmsg = {"role": "tool", "tool_call_id": call_id, "name": "get_answer", "content": text, "error": err,
+            "label": qid, "lane": lane}
+    turn.history.append(tmsg)
+    yield {"t": "tool_result", "message": tmsg}
 
 
 # ------------------------------------------------------------------------------------------------ subagents
@@ -817,8 +1210,7 @@ async def run_subagent(turn, call_id, args, lane="local"):
     elif pol == "off":
         err = "Subagents are turned off in Settings → Tools."
     elif needs:
-        fut = asyncio.get_running_loop().create_future()
-        _approvals[call_id] = fut
+        fut = _ask(call_id, _root(turn).chat_id)
         if await fut == "deny" or turn.cancel.is_set():
             err = "The user denied starting this subagent. Do the work yourself or ask what they want."
     if err:

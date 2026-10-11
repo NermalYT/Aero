@@ -61,6 +61,8 @@ class ScanTests(unittest.TestCase):
         hardware._cache.update(t=0.0, other=None)
         vm = types.SimpleNamespace(total=ram_gb * GB, available=ram_gb * GB // 2)
         with mock.patch.object(hardware, "IS_WIN", True), \
+                mock.patch.object(hardware, "IS_MAC", False), \
+                mock.patch.object(hardware, "IS_LINUX", False), \
                 mock.patch.dict(sys.modules, {"winreg": fake_winreg(adapters)}), \
                 mock.patch.object(hardware, "_nvidia_smi", return_value="nvidia-smi" if smi else None), \
                 mock.patch.object(hardware, "_run", return_value=smi or ""), \
