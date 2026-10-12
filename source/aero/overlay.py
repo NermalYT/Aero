@@ -35,8 +35,10 @@ def _running():
 
 
 def _ensure():
-    """Start the overlay process if it isn't running. False when it can't run (not Windows, or Tk is missing)."""
-    if sys.platform != "win32":
+    """Start the overlay process if it isn't running. False when it can't run (not Windows, or Tk is missing) or
+    shouldn't: only the Aero app shows it (server.py sets AERO_OVERLAY=1). Tests and scripts that run tool code
+    used to pop up banners and take over the app's overlay (1.2.5)."""
+    if sys.platform != "win32" or os.environ.get("AERO_OVERLAY") != "1":
         return False
     p = _proc["p"]
     if not _proc["fresh"]:

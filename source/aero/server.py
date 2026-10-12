@@ -1801,16 +1801,29 @@ def integrations_overview():
     return {"workspaces": integrations.overview()}
 
 
-@app.get("/api/browser/session")
-def browser_session():
-    """Settings > Tools: can Aero work in the user's own signed-in browser?"""
+@app.get("/api/browser/signin")
+def browser_signin_state():
+    """Settings > Tools: is Aero's browser open for signing in?"""
     from .tools import browser
-    ub = osinfo.user_browser()
-    if not ub:
-        return {"supported": False, "default": osinfo.default_browser()}
-    on = (Path(ub["user_data"]) / "DevToolsActivePort").exists()
-    return {"supported": True, "name": ub["name"], "inspect_url": ub["inspect_url"], "switch_on": on,
-            "connected": browser.B.kind == "mine", "screen": osinfo.IS_WIN, "setting": load_settings().get("browser_session", "mine")}
+    return {"open": browser.signin_open(), "browser": osinfo.browser_executable()}
+
+
+@app.post("/api/browser/signin")
+async def browser_signin(req: Request):
+    """Open Aero's own browser profile in a plain window for the user to sign in (their Chrome profile with sync,
+    or any site)."""
+    from .tools import browser
+    b = await req.json()
+    if not await asyncio.to_thread(browser.open_signin, str(b.get("url") or "")):
+        raise HTTPException(404, "No Chrome, Edge, Brave or Chromium found to open.")
+    return {"open": True}
+
+
+@app.post("/api/browser/signin/done")
+async def browser_signin_done():
+    from .tools import browser
+    await asyncio.to_thread(browser.end_signin)
+    return {"open": False}
 
 
 @app.get("/api/integrations/bundle")
@@ -2305,6 +2318,7 @@ async def _startup():
     except Exception:
         pass
     tools.load_all()
+    os.environ.setdefault("AERO_OVERLAY", "1")      # the on-screen cursor, banner and outline belong to the app only
     from . import gpu_lend
     gpu_lend.register(_lend_stop, _lend_restore)
     router.start()

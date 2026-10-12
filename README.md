@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2.3**](#whats-new-in-123) ·
+[**What's new in 1.2.5**](#whats-new-in-125) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -86,10 +86,12 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
-## What's new in 1.2.3
+## What's new in 1.2.5
 
-- **Your own browser, no setup.** Aero opens a window of your default browser, already signed in as you, and works
-  in it by sight: numbered controls read through UI Automation, never your mouse or keyboard, never a password.
+- **Aero has its own browser.** It never uses or touches your own browser. Settings → Tools → **Sign in to your
+  accounts** opens Aero's browser as a normal window: sign in to your Chrome profile (profile icon → Turn on sync) or
+  to single sites once, press **Done**, and Aero stays signed in. When a page needs a sign-in mid-task, the same
+  window opens on that page.
 - **See what it's using.** The app Aero is using gets a blue outline and a "*model* is using *app*" banner with
   **Stop**, on whichever monitor it's on.
 - **Fixes from hands-on testing:** images 16.7 s instead of 8 minutes beside a big model, a calmer tuning advisor,
@@ -270,11 +272,10 @@ unless you trust the model.
 - **Watch it work:** apps and Aero's browser are on screen while the model uses them. Say "in the background" to keep
   a request out of sight. When a site needs a sign-in, Aero shows the page and waits (*I've signed in* / *Skip this
   site*); it never types your passwords.
-- **Your browser, your sign-ins:** Aero works in your default browser. To let it use the one you're already signed in
-  to, open `chrome://inspect/#remote-debugging` in Chrome (Edge: `edge://…`, Brave: `brave://…`) and switch on remote
-  debugging; Settings → Tools → *Which browser Aero works in* copies the address. Your browser asks you to **Allow**
-  each time Aero connects; Aero opens its own tabs there, never reads or closes yours, and lets go when it's done.
-  Without the switch, Aero uses its own profile of that browser, where you sign in to each site once.
+- **Aero's own browser** (1.2.5): Aero browses in its own profile of your default browser (Chrome, Edge, Brave,
+  Vivaldi or Chromium), never in your own browser. Sign in there once with Settings → Tools → **Sign in to your
+  accounts** (your Chrome profile with sync, or single sites); it opens as a normal window because Google refuses
+  sign-ins in automated browsers. The sign-ins stay for next time.
 </details>
 
 ### Workspaces

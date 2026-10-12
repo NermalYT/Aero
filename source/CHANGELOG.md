@@ -1,5 +1,27 @@
 # Changelog
 
+## Aero 1.2.5 (2026-10-12)
+
+Aero has its own browser and never uses yours.
+
+- **One browser: Aero's own.** 1.2.3's "your own browser by sight" mode is gone, and so is 1.2.1's connection over the
+  remote-debugging switch. In a live test on the owner's PC, the screen mode's window of the owner's own Chrome led to
+  the whole Chrome closing at the end of the request, taking an open page with it. Aero now always browses in its own
+  profile of your default browser (`data/browser-profile`), on screen unless a request says "in the background".
+- **Sign in once, as yourself.** Settings → Tools → **Sign in to your accounts** opens Aero's profile as a normal
+  browser window, without automation, because Google refuses sign-ins in automated browsers. Sign in to your Chrome
+  profile (profile icon → Turn on sync) or to single sites, then press **Done**. Aero closes the window the way you
+  would, so the browser saves the sign-ins, and uses them from then on. When a page asks for a sign-in mid-task, the
+  same window opens on that page; Aero waits, then continues signed in on it. While the window is open, Aero's
+  browser waits instead of fighting over the profile.
+- **The banner fits.** It shows the model's short name ("Qwen3.8-27B is using Aero's browser"); 1.2.3 showed 90
+  characters of a long file name and cut off the app. Live check on the owner's PC: the outline sat on Aero's browser
+  window, and the real Stop button stopped the task at once and closed the browser, outline and banner.
+- **No more random banners.** Only the Aero app shows the cursor, banner and outline. Tests and scripts that ran
+  Aero's tool code used to pop them up and take over the app's overlay.
+- `AERO_BROWSER_ARGS` adds switches for Aero's browser (e.g. `--window-position=...` to keep test windows on one
+  monitor).
+
 ## Aero 1.2.3 (2026-10-12)
 
 Fixes from a day of hands-on testing of 1.2.1 on a real PC, and Aero now works in your own signed-in browser without

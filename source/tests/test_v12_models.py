@@ -252,35 +252,6 @@ class DefaultBrowser(unittest.TestCase):
                          r"FirefoxURL\shell\open\command": {"": f'"{firefox}" -osint -url "%1"'}})
             self.assertIsNone(osinfo.default_browser())                    # not Chromium: the usual search instead
 
-    def test_own_signed_in_browser_or_a_clear_fallback(self):
-        """Aero works in the user's running browser through its remote-debugging switch; without the switch, or when
-        the user declines, it says why and uses its own profile. (Connect/close against a real Chrome: live test.)"""
-        from aero import osinfo
-        from aero.tools import browser
-        d = Path(tempfile.mkdtemp())
-        fake = {"exe": "chrome.exe", "user_data": str(d), "inspect_url": "chrome://inspect/#remote-debugging",
-                "name": "Chrome"}
-        b = browser._Browser()
-        with mock.patch.object(osinfo, "user_browser", lambda: fake):
-            self.assertIsNone(b._connect_mine())                                   # switch off: no port file
-            self.assertIn("chrome://inspect/#remote-debugging", b.note)
-            (d / "DevToolsActivePort").write_text("9\n/devtools/browser/x", encoding="utf-8")
-            b.pw = mock.Mock()
-            b.pw.chromium.connect_over_cdp.side_effect = RuntimeError("user clicked Deny")
-            self.assertIsNone(b._connect_mine())
-            self.assertIn("didn't accept the connection", b.note)
-            b.pw.chromium.connect_over_cdp.assert_called_with("ws://127.0.0.1:9/devtools/browser/x", timeout=120000)
-            b.pw.chromium.connect_over_cdp.side_effect = None
-            ctx = mock.Mock()
-            b.pw.chromium.connect_over_cdp.return_value = mock.Mock(contexts=[ctx])
-            self.assertIs(b._connect_mine()[0], ctx)
-        b.mine_failed = 0
-        with mock.patch("aero.config.load_settings", lambda: {"browser_session": "aero"}):
-            self.assertFalse(b._mine_wanted())
-        with mock.patch("aero.config.load_settings", lambda: {}), \
-                mock.patch("aero.localonly.strict", lambda: True):
-            self.assertFalse(b._mine_wanted())                                    # can't police another browser
-
     def test_signin_pages(self):
         from aero.tools import browser
         for u in ("https://accounts.google.com/v3/signin/identifier", "https://login.microsoftonline.com/common/oauth2",

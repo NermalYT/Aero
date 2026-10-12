@@ -161,7 +161,23 @@ def actor(turn, lane):
         return name_of(s.get("gpt_fix_model") or "gpt-6.1-sol")
     if lane in ("fable", "astra"):
         return {"fable": "Claude Fable 5.1", "astra": "GPT-6 Astra"}[lane]
-    return getattr(turn, "model_name", "") or "Aero"
+    return short_model(getattr(turn, "model_name", "")) or "Aero"
+
+
+def short_model(name):
+    """A model's name as people say it, for the banner: "Qwen3.8-27B-TURBO-Fable-...-MAX-MTP-GGUF · IQ2_M" ->
+    "Qwen3.8-27B" (1.2.3's banner showed 90 characters of name and cut off what it was using)."""
+    n = re.sub(r"\s*[·|]\s*\S+$", "", (name or "").strip())           # the quant: " · IQ2_M"
+    n = re.sub(r"[-_.]?gguf$", "", n, flags=re.I)
+    if len(n) <= 28:
+        return n
+    parts = re.split(r"[-_]", n)
+    keep = parts[0]
+    for p in parts[1:]:
+        if len(keep) + 1 + len(p) > 28 or not re.search(r"\d", p):
+            break
+        keep += "-" + p
+    return keep
 
 
 def banner_on(text, rect=None, hwnd=None):

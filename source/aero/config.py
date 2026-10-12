@@ -17,7 +17,7 @@ from pathlib import Path
 from .osinfo import IS_LINUX, IS_MAC, IS_WIN  # noqa: F401  (re-exported for the other modules)
 
 APP_NAME = "Aero"
-VERSION = "1.2.3"
+VERSION = "1.2.5"
 REPO = "NermalYT/Aero"            # GitHub repository the updater reads releases from
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -80,7 +80,7 @@ _PROMPT = """You are Aero, an autonomous AI agent running locally on the user's 
 - web_search to find sources, fetch_url to read a page quickly (it returns the page as numbered sections with their headings), browser_* tools when you need to click, log in, fill forms or the page needs JavaScript. In the browser, use the numbered refs from browser_open/browser_snapshot.
 - Read a whole page with browser_read_sections (every section, not just what is on screen; pass query to get only matching sections), and tables, links, forms or page facts with browser_extract. Each result says when it was cut short; never claim to have read what was cut.
 - After starting a program with run_command, check that its window appeared (app_find or app_view) before saying it is open; a command that returned isn't proof.
-- The browser tools work on screen (the user watches) in the user's own browser, already signed in to their accounts: in tabs Aero opens there, or in a window of it Aero opens and reads as a picture with numbered controls (use those numbers with browser_click / browser_type). Without it, in Aero's own profile, signed in wherever the user signed in to it once. A request for the background uses Aero's hidden profile. Never touch tabs you didn't open. When a page asks for a sign-in, Aero shows it and asks the user to sign in, then you continue on the same page; never type their passwords. If they skip, say that site wasn't checked.
+- The browser tools work in Aero's own browser, on screen (the user watches), signed in wherever the user signed in to it. A request for the background uses a hidden window of it. Never use the user's own browser or its windows. When a page asks for a sign-in, Aero shows it and asks the user to sign in, then you continue on the same page; never type their passwords. If they skip, say that site wasn't checked.
 - Tools named mcp_<server>_<tool> come from connected MCP servers (for example mcp_github_... for the user's GitHub). Read their descriptions; anything that writes to an outside service (pushing, commenting, opening issues or pull requests, sending messages) needs the user to have asked for it.
 - Prefer primary sources, include links for facts you looked up, and never invent URLs or citations.
 
@@ -189,8 +189,6 @@ DEFAULTS = {
     "batch_wait_s": 600,           # batch: how long a reply waits at its end for your decision (loop rounds don't wait)
     "authority_model": "",         # auto: the small model that decides ("" = best installed, else the router's)
     "browser_mode": "visible",       # 1.2: on screen unless the request says background
-    "browser_session": "mine",       # 1.2.1: work in the user's own signed-in browser when its remote-debugging
-                                     # switch is on ("aero" = always Aero's own profile)
     "show_work": True,               # apps the model uses are brought on screen (no focus taken)
     "tune_tool_eval": True,          # tuning ends with the tool-calling exam (tool_eval.py)
     "bundle_integrations": True,     # set up every integration in the background when missing (integrations/bundle.py)
