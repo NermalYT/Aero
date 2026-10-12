@@ -56,7 +56,21 @@ everything in it.
   recommends the largest-quality model that fits: fully on the GPU, MoE experts in system RAM, or CPU only.
 - **Tunes for real.** Measures llama.cpp settings on your PC within a VRAM limit you choose. HAPO turns the measured
   trials into profiles (Maximum Speed, Balanced, Maximum Context, Maximum Quality, Agent Optimized, Efficiency).
-- **A tiny router on the CPU** reads each request first and gives the main model only the tools it needs.
+- **A tiny router on the CPU** reads each request first and gives the main model only the tools it needs (1.2: in
+  about 1.6 s on the CPU, or under half a second when you put it on the GPU).
+- **Workspaces with the tools built in.** Code (Python, JS/TS, Rust, Go, CSS toolchains and one diagnostics view),
+  Mobile apps (Flutter with a live preview and hot reload inside Aero; iOS through xtool), Create (images made on your
+  GPU), Diagrams (diagram-design's 44 diagram types), Review & test (open-code-review, e2e), Debug & reverse (RAD
+  Debugger, rea), Finance (Anthropic's financial-services skills), Library (awesome-python, awesome-selfhosted,
+  the-book-of-secret-knowledge), Memory+ (Hindsight) and Big models. Ask for the work ("build me a mobile app for my
+  bakery") and the right workspace opens with its tools; anything it needs installs into Aero's own folder after you
+  say yes.
+- **Ask, collect, or full auto.** Per chat and per forever-loop: a card for every action that needs your OK, or one
+  list you approve while the agent keeps working, or full automation where a small authority model on the CPU
+  allows or denies each action with a reason (it allowed none of the 14 traps in its 32-decision exam).
+- **Big models on small GPUs.** Aero plans where every tensor of a GGUF goes for the VRAM you have, adds a small
+  draft model of the same family, and loads it: Llama-3.3-70B at Q6_K generated 4.85 tokens a second on a 16 GB card
+  (1.0 without the draft). AirLLM is built in for full-precision checkpoints that fit nowhere else.
 - **Agents and subagents.** Each chat's task gets an agent named for what it does ("Photo Renamer", "Crash
   Investigator"). An agent can hand a self-contained part of the job to a subagent (a fresh copy of the local model
   with its own context) and gets back its report. The dashboard lists models, agents and subagents in one scrolling
@@ -125,6 +139,9 @@ everything in it.
   tools, troubleshooting.
 - [Changelog](source/CHANGELOG.md)
 - [Validation report](source/docs/VALIDATION_REPORT.md): what has been tested, and what still needs a Windows PC.
+- 1.2: [integrations and workspaces](source/docs/V1.2_INTEGRATIONS.md), [autonomy](source/docs/V1.2_AUTONOMY.md),
+  [big models](source/docs/V1.2_BIG_MODELS.md), [performance](source/docs/V1.2_PERFORMANCE_REPORT.md),
+  [test matrix](source/docs/V1.2_TEST_MATRIX.md).
 - 1.1: [architecture](source/docs/V1.1_ARCHITECTURE.md), [test matrix](source/docs/V1.1_TEST_MATRIX.md),
   [performance](source/docs/V1.1_PERFORMANCE_REPORT.md), [limits](source/docs/V1.1_LIMITATIONS.md),
   [baseline](source/docs/V1.1_BASELINE.md), [open-source research](source/docs/V1.1_OPEN_SOURCE_RESEARCH.md),

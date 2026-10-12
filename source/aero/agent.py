@@ -671,7 +671,7 @@ async def _handoff(turn, lane):
 def _recent(turn, n=6):
     """One line per recent tool call of this turn, for the authority model."""
     out = []
-    for m in turn.history[getattr(_root(turn), "start_index", 0):]:
+    for m in turn.history[getattr(turn, "start_index", 0):]:          # a subagent's own history from its start
         if m.get("role") == "tool":
             out.append(f"{m.get('name')} {m.get('label') or ''}: {(m.get('content') or '')[:120]}".replace("\n", " "))
     return out[-n:]

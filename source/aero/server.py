@@ -16,12 +16,32 @@ from . import (advisor, agent, agents, app_registry, attachments, autonomy, benc
                gguf, github, hapo, hardware, hf, input_guard, localonly, looplog, memory, migrate, models, mods, osinfo,
                pipeline, remote_sessions, resources, router, skills, stats, task_graph, tools, tuner, updater, vault,
                vram_policy)
-from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, VERSION, load_settings, save_settings)
+from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, UI_PORT, VERSION, load_settings,
+                     save_settings)
 from .engine import LlamaServer, build_args, server_binary, server_version, spec_args
 from .tools import mcp_client, mcp_import
 
 localonly.install()          # every outbound request from this process is checked (strict offline) and audited
 app = FastAPI(title=APP_NAME)
+
+
+# Only Aero's own window may change anything. Without this, any web page open in a browser on this PC could POST to
+# 127.0.0.1 (a text/plain body is a "simple" request: no CORS preflight) and start turns, approve queued actions or
+# install integrations; and a DNS-rebinding page could even read the answers. Programs on this PC (the overlay, the
+# updater, tests) send no Origin and are not affected.
+_OWN_HOSTS = {f"127.0.0.1:{UI_PORT}", f"localhost:{UI_PORT}", "127.0.0.1", "localhost", "testserver"}
+
+
+@app.middleware("http")
+async def _same_origin_only(request: Request, call_next):
+    host = (request.headers.get("host") or "").lower()
+    if host and host not in _OWN_HOSTS:
+        return JSONResponse({"detail": "Unknown host"}, status_code=421)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = (request.headers.get("origin") or "").rstrip("/").lower()
+        if (origin and origin not in {f"http://{h}" for h in _OWN_HOSTS}) or                 request.headers.get("sec-fetch-site") == "cross-site":
+            return JSONResponse({"detail": "Cross-site request refused"}, status_code=403)
+    return await call_next(request)
 class _Engine:
     """The model server Aero talks to on its model port: llama-server, or AirLLM's layer-streaming server for a
     full-precision checkpoint (integrations/models.py). Same interface either way; use() switches."""

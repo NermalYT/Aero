@@ -295,6 +295,27 @@ class BigModelPlanner(unittest.TestCase):
         self.assertFalse(plans[0]["fits_ram"])
         self.assertIn("streams from disk", plans[0]["note"])
 
+    def test_draft_model_by_family_reserves_vram(self):
+        self.assertEqual(bigmodel.family({"arch": "llama", "name": "Llama 3.3 70B Instruct"}), "llama3")
+        self.assertEqual(bigmodel.family({"arch": "gemma3", "name": "Gemma-3-27B-It"}), "gemma3")
+        self.assertIsNone(bigmodel.family({"arch": "llama", "name": "Llama 2 70B"}))
+        root = Path(tempfile.mkdtemp())
+        d = root / bigmodel.DRAFT_DIR / "bartowski__Llama-3.2-1B-Instruct-GGUF"
+        d.mkdir(parents=True)
+        draft = d / "Llama-3.2-1B-Instruct-Q8_0.gguf"
+        draft.write_bytes(b"\0" * 1024 * 1024)
+        info = self._info()
+        info["meta"].update(arch="llama", name="Llama 3.3 70B Instruct")
+        self.assertEqual(bigmodel.draft_for(info, root)[2], str(draft))
+        with mock.patch.object(bigmodel.gguf, "kv_mb", lambda meta, ctx, kv="q8_0": 1600.0):
+            plain = bigmodel.plan(info, 12000, 64000)
+            with_d = bigmodel.plan(info, 12000, 64000, draft_path=str(draft))
+        self.assertTrue(all(p["spec"][3] == str(draft) for p in with_d))
+        self.assertTrue(all(p["gpu_mb"] <= 12000 + 1 for p in with_d))
+        lp = next(p for p in plain if p["strategy"] == "layers")
+        ld = next(p for p in with_d if p["strategy"] == "layers")
+        self.assertLess(ld["cfg"]["ngl"], lp["cfg"]["ngl"])          # the draft's VRAM came out of the big model's
+
     def test_override_is_passed_to_llama_server(self):
         from aero import engine
         with mock.patch.object(engine, "server_help", lambda: ""), mock.patch.object(engine, "supports", lambda f: False):
@@ -361,6 +382,19 @@ class Endpoints(unittest.TestCase):
                                                                     "args": {"command": "echo hi"}}).status_code, 400)
         r = self.c.post("/api/integrations/run", json={"tool": "library_search", "args": {"query": "orm"}}).json()
         self.assertFalse(r["error"])
+
+    def test_cross_site_requests_are_refused(self):
+        evil = {"Origin": "http://evil.example", "Content-Type": "text/plain"}
+        r = self.c.post("/api/integrations/run", content=json.dumps({"tool": "library_search", "args": {"query": "x"}}),
+                        headers=evil)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.c.put("/api/settings", json={"approval_mode": "auto"},
+                                    headers={"Sec-Fetch-Site": "cross-site"}).status_code, 403)
+        self.assertEqual(self.c.get("/api/integrations", headers={"Host": "attacker.example:8180"}).status_code, 421)
+        from aero.config import UI_PORT
+        ok = self.c.post("/api/integrations/run", json={"tool": "library_search", "args": {"query": "orm"}},
+                         headers={"Origin": f"http://127.0.0.1:{UI_PORT}", "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(ok.status_code, 200)
 
     def test_file_endpoint_stays_in_its_folder(self):
         diagrams.DIR.mkdir(parents=True, exist_ok=True)

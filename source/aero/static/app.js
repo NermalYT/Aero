@@ -1934,7 +1934,7 @@ function autonomySection(s) {
       a.model ? (a.shared_with_router ? 'shares the router\'s server' : a.ready ? 'running on the CPU' : 'starts on its first decision') : 'install the recommended one below',
       a.error ? h('div', { class: 'err-msg' }, a.error) : null);
     const btns = h('div', { style: 'display:flex;gap:8px;margin:8px 0 12px;flex-wrap:wrap' },
-      h('button', { class: 'btn ghost sm', onclick: async e => {
+      a.model ? null : h('button', { class: 'btn ghost sm', onclick: async e => {
         e.target.disabled = true; e.target.textContent = 'Downloading…';
         try { const x = await api('/api/autonomy/install', { method: 'POST' }); toast('Installed ' + (x.authority?.model || '')); } catch (err) { toast(err.message, true); }
         e.target.disabled = false; e.target.textContent = `Install ${(r.candidates || [])[0] || 'the recommended model'}`;

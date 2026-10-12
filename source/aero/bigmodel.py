@@ -78,7 +78,7 @@ def inspect(path):
         if not m:
             if name.startswith("token_embd"):
                 other["token_embd"] += size
-            elif name.startswith("output"):
+            elif name.startswith("output.") or name == "output":
                 other["output"] += size
             else:
                 other["rest"] += size
@@ -94,6 +94,9 @@ def inspect(path):
         else:
             L["other"] += size
     n = max(layers) + 1 if layers else 0
+    if not other["output"]:            # tied embeddings (Gemma, many small models): llama.cpp puts a copy of
+        other["output"] = other["token_embd"]      # token_embd on the GPU as the output layer (measured: 1.42 GB, Gemma-3-27B Q8)
+        other["tied"] = True
     return {"path": str(path), "meta": meta, "layers": [layers.get(i, {"attn": 0, "ffn": 0, "exps": 0, "other": 0})
                                                           for i in range(n)],
             "other": other, "total": sum(s for _, s in tensors), "moe": any(L["exps"] for L in layers.values())}
@@ -130,10 +133,12 @@ def plan(info, budget_mb, ram_free_mb, ctx=8192, kv="q8_0", draft_path=None):
     kvl = kv_layer_mb(info, ctx, kv)
     out_b = info["other"]["output"]
     total = info["total"]
+    tied = out_b if info["other"].get("tied") else 0       # the output copy of tied embeddings: on the GPU, and the
+                                                           # embedding table stays in RAM as well
     layer_b = [sum(x.values()) for x in L]
     plans = []
     # all on the GPU
-    full = _mb(total - info["other"]["token_embd"]) + kvl * n + fixed
+    full = _mb(total - info["other"]["token_embd"] + tied) + kvl * n + fixed
     if full <= budget_mb:
         plans.append({"strategy": "gpu", "cfg": {"ngl": 999}, "gpu_mb": round(full), "cpu_mb": round(_mb(info["other"]["token_embd"])),
                       "kv_gpu_mb": round(kvl * n), "note": "everything fits on the GPU"})
@@ -146,14 +151,14 @@ def plan(info, budget_mb, ram_free_mb, ctx=8192, kv="q8_0", draft_path=None):
         g = _mb(out_b + sum(on)) + kvl * k + fixed
         if g <= budget_mb:
             best = {"strategy": "layers", "cfg": {"ngl": ngl}, "gpu_mb": round(g),
-                    "cpu_mb": round(_mb(total - out_b - sum(on))), "kv_gpu_mb": round(kvl * k),
+                    "cpu_mb": round(_mb(total - (0 if tied else out_b) - sum(on))), "kv_gpu_mb": round(kvl * k),
                     "note": f"{k} of {n} layers and the output layer on the GPU"}
             break
     if best:
         plans.append(best)
     # feed-forward of the first K layers in RAM, attention and KV of every layer on the GPU
     if not info["moe"]:
-        base = _mb(total - info["other"]["token_embd"]) + kvl * n + fixed
+        base = _mb(total - info["other"]["token_embd"] + tied) + kvl * n + fixed
         moved = 0
         for k in range(1, n + 1):
             moved += L[k - 1]["ffn"]
@@ -164,7 +169,7 @@ def plan(info, budget_mb, ram_free_mb, ctx=8192, kv="q8_0", draft_path=None):
                               "note": f"attention and KV of all {n} layers on the GPU, feed-forward of {k} layers in RAM"})
                 break
     else:
-        base = _mb(total - info["other"]["token_embd"]) + kvl * n + fixed
+        base = _mb(total - info["other"]["token_embd"] + tied) + kvl * n + fixed
         moved = 0
         for k in range(1, n + 1):
             moved += L[k - 1]["exps"]
