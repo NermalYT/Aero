@@ -7,13 +7,31 @@ passes the test, the built-in step policy (same rules, written in code) takes ov
 """
 import json
 import re
+import threading
+import time
 from pathlib import Path
 
 import httpx
 
 from . import gguf, hf
-from .config import ADVISOR_PORT, models_dir
-from .engine import LlamaServer, build_args, classify_failure, supports
+from .config import ADVISOR_PORT, models_dir, read_store, write_store
+from .engine import LlamaServer, build_args, classify_failure, server_version, supports
+
+CPU_MAX_MB = 3000             # an advisor on the CPU must be small: a 27B there read 7.8 tokens/s (minutes per move)
+CPU_MAX_B = 4.0               # ... and its parameter count (from the repo name) at most this many billions
+SLOW_S = 20                   # an exam answer slower than this: the advisor would hold up every trial
+RESULTS = "advisor_results.json"   # candidate file -> {"build", "result": passed|load|exam, "score"}
+
+
+def _results():
+    return read_store(RESULTS, {})
+
+
+def _record(key, result, score=None):
+    d = _results()
+    d[key] = {"build": server_version(), "result": result, "score": score, "repo": key.split("/", 2)[0] + "/" +
+              key.split("/", 2)[1]}
+    write_store(RESULTS, d)
 
 # Bonsai first (the original pick), then small models with reliable instruction following.
 FALLBACK_REPOS = ["unsloth/Qwen3-1.7B-GGUF", "Qwen/Qwen3-1.7B-GGUF",
@@ -93,6 +111,15 @@ class Advisor:
         self.where = None
         self.failures = 0
         self.vram_mb = 0
+        # Cancel (Stop) ends a pending advisor request at once: stopping its server fails the call
+        threading.Thread(target=self._stop_on_cancel, daemon=True, name="advisor-cancel").start()
+
+    def _stop_on_cancel(self):
+        self.cancel.wait()
+        try:
+            self.server.stop()
+        except Exception:  # noqa: BLE001
+            pass
 
     def log(self, text):
         self.emit({"type": "advisor", "text": text})
@@ -137,6 +164,9 @@ class Advisor:
         except Exception as e:  # noqa: BLE001
             self.log(f"Hugging Face search failed ({e}); trying the fallbacks.")
         out += [("repo", r, None) for r in FALLBACK_REPOS]
+        good = {v.get("repo") for v in _results().values()
+                if v.get("result") == "passed" and v.get("build") == server_version()}
+        out.sort(key=lambda c: 0 if c[1] in good else 1)          # the one that passed last time goes first
         return out
 
     def _gpu_need_mb(self, size_mb, path=None):
@@ -156,14 +186,21 @@ class Advisor:
         files = [f for f in d["files"] if f["size"] > 0]
         if not files:
             return None
+        m = hf.SIZE_RE.search(repo.split("/")[-1])
+        big = bool(m) and float(m.group(1)) > CPU_MAX_B      # a 27B computes like a 27B even when ternary
         native = "bonsai" in repo.lower()     # Bonsai is trained low-bit: its files ARE full accuracy
         ok = [f for f in files if native or (f["bpw"] or 0) >= 4.0] or files
         fits = [f for f in ok if self._gpu_need_mb(f["size"] / 2**20) <= self.headroom]
         if native:   # every Bonsai file is equally accurate, so the smallest one wins (GPU when it fits)
-            return min(fits or ok, key=lambda f: f["size"]), ("GPU" if fits else "CPU")
+            small = min(fits or ok, key=lambda f: f["size"])
+            if not fits and (big or small["size"] / 2**20 > CPU_MAX_MB):
+                return None                  # a 27B Bonsai on the CPU: far too slow to drive the trials
+            return small, ("GPU" if fits else "CPU")
         if fits:
             return max(fits, key=lambda f: ((f["bpw"] or 0), f["size"])), "GPU"
-        cpu = [f for f in ok if (f["bpw"] or 0) <= 8.5] or ok
+        cpu = [f for f in ok if (f["bpw"] or 0) <= 8.5 and f["size"] / 2**20 <= CPU_MAX_MB and not big]
+        if not cpu:
+            return None                      # too big to advise from the CPU in reasonable time
         return max(cpu, key=lambda f: ((f["bpw"] or 0), -f["size"])), "CPU"
 
     def _download(self, repo, f):
@@ -215,6 +252,7 @@ class Advisor:
             if self.cancel.is_set() or tried >= MAX_CANDIDATES:
                 break
             tried += 1
+            key = f = None
             try:
                 if kind == "local":
                     path, label = Path(ref), Path(ref).stem
@@ -225,6 +263,14 @@ class Advisor:
                         continue
                     f, where = picked
                     label = f"{ref.split('/')[-1]} · {f['quant'] if f['quant'] != '?' else 'native'}"
+                    key = f"{ref}/{f['parts'][0]}"
+                    seen = _results().get(key) or {}
+                    if seen.get("build") == server_version() and seen.get("result") in ("load", "exam"):
+                        # this llama.cpp build already couldn't use it: don't download or load it again
+                        tried -= 1
+                        why = "failed to load" if seen["result"] == "load" else f"scored {seen.get('score')}"
+                        self.log(f"Skipping {label}: it {why} with this llama.cpp build before.")
+                        continue
                     path = self._download(ref, f)
                     if where == "GPU" and self._gpu_need_mb(f["size"] / 2**20, path) > self.headroom:
                         where = "CPU"
@@ -240,6 +286,8 @@ class Advisor:
                         self.vram_mb = 0
                         self._start(path, where)
                 score = self._exam()
+                if key:
+                    _record(key, "passed" if score == len(EXAM) else "exam", f"{score}/{len(EXAM)}")
                 if score == len(EXAM):
                     self.name, self.where, self.ready = label, where, True
                     self.log(f"Advisor ready: {label} on the {where} (decision test {score}/{len(EXAM)}).")
@@ -252,8 +300,24 @@ class Advisor:
                     break
                 self.log(f"{ref}: {e}")
                 self.server.stop()
+                if key and "failed to load" in str(e):
+                    _record(key, "load")
+                    self._drop_download(ref, f)
         self.log("No advisor passed; the built-in step policy will drive the trials (same rules, same verification).")
         return False
+
+    def _drop_download(self, repo, f):
+        """An advisor download this llama.cpp can't load: delete it (it is Aero's own file under models/_advisor,
+        never one of the user's models). Measured on one PC: 17 GB of Bonsai files nothing could use."""
+        root = (models_dir() / hf.ADVISOR_DIR).resolve()
+        freed = 0
+        for part in f["parts"]:
+            p = hf.local_path(repo, part, models_dir() / hf.ADVISOR_DIR).resolve()
+            if root in p.parents and p.suffix.lower() == ".gguf" and p.exists():
+                freed += p.stat().st_size
+                p.unlink(missing_ok=True)
+        if freed:
+            self.log(f"Deleted {repo.split('/')[-1]} ({freed / 2**30:.1f} GB): this llama.cpp can't load it.")
 
     def _vram(self):
         from . import hardware
@@ -261,9 +325,15 @@ class Advisor:
 
     def _exam(self):
         score = 0
-        for state, opts, expected in EXAM:
+        for i, (state, opts, expected) in enumerate(EXAM):
+            if self.cancel.is_set():
+                return 0
+            t0 = time.time()
             got, _ = self.ask(state, opts, retries=0)
             score += int(got == expected)
+            if i == 0 and time.time() - t0 > SLOW_S:
+                self.log(f"Too slow: {time.time() - t0:.0f} s for one decision (every trial would wait that long).")
+                return 0
         return score
 
     # ---- asking -------------------------------------------------------------------------

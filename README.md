@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2.1**](#whats-new-in-121) ·
+[**What's new in 1.2.3**](#whats-new-in-123) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -85,6 +85,15 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 | Day | Night |
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
+
+## What's new in 1.2.3
+
+- **Your own browser, no setup.** Aero opens a window of your default browser, already signed in as you, and works
+  in it by sight: numbered controls read through UI Automation, never your mouse or keyboard, never a password.
+- **See what it's using.** The app Aero is using gets a blue outline and a "*model* is using *app*" banner with
+  **Stop**, on whichever monitor it's on.
+- **Fixes from hands-on testing:** images 16.7 s instead of 8 minutes beside a big model, a calmer tuning advisor,
+  no false "it's open", Hindsight starts on every PC. ([test report](source/docs/V1.2.1_HANDS_ON_TESTS.md))
 
 ## What's new in 1.2.1
 

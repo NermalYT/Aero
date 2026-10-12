@@ -63,17 +63,15 @@ class Control(unittest.TestCase):
         self.assertEqual(control.target("open_app", {"target": "notepad"}), ("Notepad", None))
         self.assertEqual(control.target("open_app", {"target": r"C:\Windows\notepad.exe"}), ("Notepad", None))
         self.assertEqual(control.target("browser_click", {}), ("Aero's browser", None))
-        # v1.1: how it is controlled is part of the message, and background work never claims the user's input
-        self.assertEqual(control.phrase("Qwen", "Notepad", "ACCESSIBILITY_BACKGROUND"),
-                         "Qwen is controlling Notepad in the background")
+        # 1.2.3: "MODEL is using APP"; the real mouse and keyboard are always named
+        self.assertEqual(control.phrase("Qwen", "Notepad", "ACCESSIBILITY_BACKGROUND"), "Qwen is using Notepad")
         self.assertEqual(control.phrase("Qwen", "Notepad", "FOREGROUND_CONSENT_REQUIRED"),
-                         "Qwen is controlling Notepad with your mouse and keyboard")
+                         "Qwen is using Notepad with your mouse and keyboard")
         with mock.patch.object(control, "_browser_shown", lambda: False):
             self.assertEqual(control.phrase("Qwen", "Aero's browser", "BROWSER_ISOLATED"),
                              "Qwen is using Aero's browser in the background")
         with mock.patch.object(control, "_browser_shown", lambda: True):         # 1.2: on screen by default
-            self.assertEqual(control.phrase("Qwen", "Aero's browser", "BROWSER_ISOLATED"),
-                             "Qwen is using Aero's browser on screen")
+            self.assertEqual(control.phrase("Qwen", "Chrome", "BROWSER_ISOLATED"), "Qwen is using Chrome")
         self.assertEqual(control.mode_of("mouse_click", {}), "FOREGROUND_CONSENT_REQUIRED")
         self.assertEqual(control.mode_of("app_click", {"element": 3}), "ACCESSIBILITY_BACKGROUND")
         self.assertEqual(control.mode_of("app_click", {"element": 3, "input": "real"}, physical=True),
@@ -98,6 +96,20 @@ class Control(unittest.TestCase):
         self.assertEqual(overlay.banner_pos(None, (300, 34), (1920, 1080)), (810, 8))
         self.assertEqual(overlay.banner_pos(None, (300, 34), (1920, 1080), low=True), (810, 990))
         self.assertTrue(overlay.covers((350, 108), (300, 34), (400, 120)))
+        # 1.2.3: a monitor left of / above the main one (negative coordinates) keeps the banner on that monitor
+        self.assertEqual(overlay.banner_pos((-1080, -645, 0, 1275), (300, 34), (-1080, -645, 0, 1275)), (-690, -637))
+        self.assertEqual(overlay.banner_pos(None, (300, 34), (244, -1080, 2164, 0)), (1054, -1072))
+
+    def test_hidden_pieces_are_parked_off_every_monitor(self):
+        """1.2.1 parked the idle cursor at -500,-500: on screen for a monitor left of the main one (seen live)."""
+        virtual = (-1080, -1080, 3640, 2520)           # the owner's three monitors
+        x, y = (int(v) for v in overlay.parked(virtual).lstrip("+").split("+"))
+        self.assertLess(x + 240, virtual[0])
+        self.assertLess(y + 64, virtual[1])
+
+    def test_outline_edges_sit_inside_the_window(self):
+        edges = overlay.outline_rects((100, 50, 900, 650), t=4)
+        self.assertEqual(edges, [(800, 4, 100, 50), (800, 4, 100, 646), (4, 600, 100, 50), (4, 600, 896, 50)])
         self.assertFalse(overlay.covers((350, 108), (300, 34), (400, 600)))
 
 

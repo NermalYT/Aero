@@ -231,6 +231,7 @@ def intent_context(turn, task):
     turn.visible = it.visible
     turn.tctx.visible = it.visible               # tools read it: browser on screen or not, apps raised or not
     if not turn.settings.get("tools_enabled", True):
+        turn.tools_off_told = True               # the agent then doesn't say it again after the reply
         return {"t": "notice", "kind": "tools_off", "text": f"This request needs Aero to act ({it.label}), but tools "
                 "are off, so the model can only answer in words. Turn on Tools and send it again.",
                 "action": {"label": "Turn on tools", "settings": {"tools_enabled": True}}}

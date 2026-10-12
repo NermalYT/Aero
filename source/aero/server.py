@@ -1810,7 +1810,7 @@ def browser_session():
         return {"supported": False, "default": osinfo.default_browser()}
     on = (Path(ub["user_data"]) / "DevToolsActivePort").exists()
     return {"supported": True, "name": ub["name"], "inspect_url": ub["inspect_url"], "switch_on": on,
-            "connected": browser.B.kind == "mine", "setting": load_settings().get("browser_session", "mine")}
+            "connected": browser.B.kind == "mine", "screen": osinfo.IS_WIN, "setting": load_settings().get("browser_session", "mine")}
 
 
 @app.get("/api/integrations/bundle")
@@ -2252,6 +2252,21 @@ class _Hooks:
         return psutil.virtual_memory().available // 2**20
 
 
+def _lend_stop():
+    """gpu_lend: unload the main model for a moment. Returns the config to load it again, or None."""
+    if STATE.get("status") != "ready" or _job["busy"] or ENGINE.kind != "llama" or not STATE.get("cfg"):
+        return None
+    cfg = dict(STATE["cfg"])
+    ENGINE.stop()
+    STATE.update(status="loading")
+    return cfg
+
+
+def _lend_restore(cfg):
+    ok, _ = _engine_reload(cfg)
+    return ok
+
+
 _REMOTE = {"runner": None}
 
 
@@ -2290,6 +2305,8 @@ async def _startup():
     except Exception:
         pass
     tools.load_all()
+    from . import gpu_lend
+    gpu_lend.register(_lend_stop, _lend_restore)
     router.start()
     app_registry.scan_async()
     task_graph.prune()

@@ -953,7 +953,11 @@ def launch(app_id_or_phrase, method=None, args=None, uri=None, background=True, 
     if method:
         ms = [m for m in ms if m.get("method") == method] or ms
     if not ms:
-        return {"ok": False, "error": f'{r["name"]} has no launch method Aero can use on this computer.'}
+        # a known app (app_catalog) that this computer doesn't have: say so, so the model doesn't start a stub
+        # (Windows' calc.exe without the Calculator app runs with no window; 1.2.1 then claimed "Calculator is open")
+        return {"ok": False, "not_installed": True,
+                "error": f"{r['name']} doesn't seem to be installed on this computer (it isn't in the Start menu, "
+                         "the Store apps or the installed programs). Tell the user; don't start it another way."}
     errors, used = [], None
     for m in ms[:3]:
         try:

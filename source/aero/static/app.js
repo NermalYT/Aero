@@ -467,7 +467,7 @@ const DEPTH_INFO = {
   short: ['Short', '10 trials', 'The estimator\'s best guess plus the 9 most promising one-step moves.'],
   medium: ['Medium', '25 trials', 'Explores context, GPU offload, batch and KV precision. Recommended.'],
   long: ['Long', '50 trials', 'Wider search plus repeat runs of the top configs to average out noise.'],
-  full: ['Full', 'until done', 'Keeps stepping until no one-step move can improve the goal (max 120).'],
+  full: ['Full', 'until done', 'Keeps going until 8 trials in a row bring nothing better (max 120), then tests tool calling.'],
 };
 const GOALS = [['balanced', 'Balanced'], ['max_context', 'Max context'], ['max_speed', 'Max speed']];
 const fmtDur = s => s < 90 ? `${Math.max(1, Math.round(s))} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
@@ -508,7 +508,7 @@ function askVramLimit(info) {
         info.suggest ? h('button', { class: 'btn ghost sm', title: info.suggest.why, onclick: () => { input.value = String(info.suggest.gb); check(); input.focus(); } },
           `Suggested for this PC: ${info.suggest.gb} GB`) : null),
       info.suggest ? h('small', { class: 'muted' }, `Suggestion: ${info.suggest.why}.`) : null,
-      info.last_limit_gb ? h('small', { class: 'muted' }, `Last time you typed ${info.last_limit_gb} GB.`) : null,
+      info.last_limit_gb ? h('small', { class: 'muted' }, ` Last time you typed ${info.last_limit_gb} GB.`) : null,
       live, msg, h('div', { class: 'gate-foot' }, cancel, go));
     const done = v => { g.close(); resolve(v); };
     const check = () => {
@@ -1846,7 +1846,7 @@ function renderControl() {
   document.body.classList.toggle('controlled', !!c);
   if (!c) { $('#controlStop').disabled = false; $('#controlStop').textContent = 'Stop'; return; }
   const what = !c.target || c.target === 'your PC' ? 'your PC' : c.target === 'the browser' ? 'the browser' : c.target;
-  $('#controlText').textContent = c.text || `${c.by || 'Aero'} is controlling ${what}`;
+  $('#controlText').textContent = c.text || `${c.by || 'Aero'} is using ${what}`;
   $('#controlBar').classList.toggle('fg', c.mode === 'FOREGROUND_CONSENT_REQUIRED');
 }
 function stopControl() {
@@ -2768,9 +2768,11 @@ function browserSessionField(s) {
   api('/api/browser/session').then(st => {
     if (!st.supported) { status.textContent = 'Your default browser isn\'t Chrome, Edge, Brave or Vivaldi, so Aero uses its own profile.'; return; }
     status.innerHTML = '';
+    const off = !(st.connected || st.switch_on);
     status.append(st.connected ? `Connected to your ${st.name}. ` : st.switch_on ? `${st.name} is ready: it asks you to Allow when Aero connects. ` :
-      `To let Aero work in your signed-in ${st.name}, open `, st.connected || st.switch_on ? '' : h('code', {}, st.inspect_url),
-      st.connected || st.switch_on ? '' : ` in ${st.name} and switch on remote debugging. ${st.name} asks you to Allow each time Aero connects; Aero opens its own tabs there and closes only those. `,
+      st.screen ? `Aero opens a window of your ${st.name} (your profile, signed in as you) and works in it on screen, by sight. Faster and more precise: open ` :
+      `To let Aero work in your signed-in ${st.name}, open `, off ? h('code', {}, st.inspect_url) : '',
+      off ? ` in ${st.name} and switch on remote debugging. ${st.name} asks you to Allow each time Aero connects; Aero opens its own tabs there and closes only those. ` : '',
       st.connected || st.switch_on ? '' : h('button', { class: 'btn ghost sm', onclick: async e => { try { await navigator.clipboard.writeText(st.inspect_url); e.target.textContent = 'Copied: paste it in the address bar'; } catch { e.target.textContent = st.inspect_url; } } }, 'Copy the address'));
   }).catch(() => { status.textContent = ''; });
   return box;

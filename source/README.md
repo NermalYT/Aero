@@ -516,6 +516,12 @@ and tool calls, review verdicts, ChatGPT and Claude usage and spending today, an
   yours, and disconnects when the request is done (Settings → Tools → *Which browser Aero works in*). Otherwise, with
   strict offline on, or for a request that says "in the background", it uses Aero's own profile
   (`C:\Aero\data\browser-profile`). Each agent has its own tab.
+  With the switch off (1.2.3, Windows), Aero opens a new window of your browser in your everyday profile and works in
+  it the way it works in apps: a picture with numbered controls, links and buttons pressed and fields set through UI
+  Automation. It types only into the page (never the address bar, menus or a password field), sees only that window,
+  and closes it when the request is done unless you added tabs to it.
+- **Seeing what Aero uses** (1.2.3): the window being used gets a blue outline and a banner, "*model* is using *app*",
+  with **Stop** (stops every running task). Both follow the window across monitors and are left out of screenshots.
 
 ## Folders
 

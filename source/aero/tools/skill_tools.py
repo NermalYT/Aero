@@ -10,9 +10,12 @@ def _use(ctx, name):
     if r[0] is None:
         return {"text": r[1], "error": True}
     sk, body, files = r
-    text = f"# Skill: {sk['name']}\n(from {sk['path']})\n\n{body[:30000]}"
+    root = Path(sk["path"]).parent
+    # first, not only in the list at the end: models read "references/x.md" against the working folder (seen live)
+    text = (f"# Skill: {sk['name']}\nThis skill's folder: {root}\nPaths in these instructions (references/..., "
+            f"assets/...) are inside that folder: read {root / 'references' / '<file>'} with read_file, not the "
+            f"working folder.\n\n{body[:30000]}")
     if files:
-        root = Path(sk["path"]).parent
         text += "\n\n## Files in this skill (read them with read_file when the instructions refer to them)\n" + \
                 "\n".join(f"- {root / f}" for f in files)
     return text

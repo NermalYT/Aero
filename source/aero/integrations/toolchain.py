@@ -48,6 +48,10 @@ def bin_dirs():
 def env(extra=None):
     e = dict(os.environ)
     e.update(TELEMETRY_OFF)
+    # Python tools print Unicode (Hindsight's start-up banner): with Aero started from its shortcut their output
+    # was cp1252 and Hindsight crashed before serving (UnicodeEncodeError '▄', found on the owner's PC)
+    e.setdefault("PYTHONUTF8", "1")
+    e.setdefault("PYTHONIOENCODING", "utf-8")
     e["PATH"] = os.pathsep.join([str(p) for p in bin_dirs()] + [e.get("PATH", "")])
     if (ROOT / "rust" / "cargo").is_dir():               # Aero's own rustup: its proxies need to know where it lives
         e["RUSTUP_HOME"], e["CARGO_HOME"] = str(ROOT / "rust" / "rustup"), str(ROOT / "rust" / "cargo")
