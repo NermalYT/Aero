@@ -127,8 +127,8 @@ function popMenu(anchor, items) {
 marked.setOptions({ gfm: true, breaks: false });
 // Tool-call markup a model prints as text (Hermes, Qwen-XML, GLM, functionary, Mistral, Llama, Granite, DeepSeek,
 // Gemma): never shown. The server turns it into real tool calls; the chat shows the tool cards instead.
-const CALL_OPEN = /<tool_call>|<function=[\w.:-]+>|\[TOOL_CALLS\]|<\|python_tag\|>|<\|tool_call\|>|<｜tool▁calls?▁begin｜>|```tool_code/;
-const CALL_BLOCK = /<tool_call>[\s\S]*?<\/tool_call>|<function=[\w.:-]+>[\s\S]*?<\/function>|<｜tool▁calls▁begin｜>[\s\S]*?<｜tool▁calls▁end｜>|```tool_code[\s\S]*?```/g;
+const CALL_OPEN = /<tool_call>|<function=[\w.:-]+>|\[TOOL_CALLS\]|<\|python_tag\|>|<\|tool_call\|>|<｜tool▁calls?▁begin｜>|```tool_code|```(?:python|py)\s*\n\s*(?:print\(\s*)?default_api\./;
+const CALL_BLOCK = /<tool_call>[\s\S]*?<\/tool_call>|<function=[\w.:-]+>[\s\S]*?<\/function>|<｜tool▁calls▁begin｜>[\s\S]*?<｜tool▁calls▁end｜>|```tool_code[\s\S]*?```|```(?:python|py)\s*\n\s*(?:print\(\s*)?default_api\.[\s\S]*?```/g;
 function hideCallMarkup(src, streaming) {
   let s = src.replace(CALL_BLOCK, '');
   const open = s.search(CALL_OPEN);
@@ -672,6 +672,8 @@ async function runLoad(req, info) {
         case 'tool_eval_start':
           $('#loadSub').textContent = `Tool-calling exam on #${ev.n}: can it pick the right tool and fill it in?`;
           log(`Tool-calling exam on #${ev.n} (${ev.desc})…`); break;
+        case 'tool_eval_progress':
+          $('#loadSub').textContent = `Tool-calling exam on #${ev.n}: case ${ev.done} of ${ev.of}`; break;
         case 'tool_eval_done':
           log(`Tool calling on #${ev.n}: ${Math.round(ev.score * 100)}% (benchmark ${Math.round(ev.bfcl * 100)}%, Aero requests ${Math.round(ev.aero * 100)}%) at temperature ${ev.temperature}` +
             (ev.act_first ? ' · Aero will start actions for it' : ''), 'ok'); break;

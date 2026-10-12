@@ -75,7 +75,9 @@ _TAGGED = [
     ("python_tag", re.compile(r"<\|python_tag\|>")),
     ("granite", re.compile(r"<\|tool_call\|>")),
     ("deepseek", re.compile(r"<｜tool▁calls?▁begin｜>")),
-    ("tool_code", re.compile(r"```tool_code\s*\n")),
+    # Gemma: ```tool_code, or ```python when the call goes through default_api (measured: Gemma-3-27B wrote
+    # print(default_api.list_dir(path=...)))
+    ("tool_code", re.compile(r"```tool_code\s*\n|```(?:python|py)\s*\n(?=\s*(?:print\(\s*)?default_api\.)")),
 ]
 
 
@@ -148,10 +150,16 @@ def _tool_code(text, m):
         return [], stop
     for node in tree.body:
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            f = node.value.func
+            call = node.value
+            while isinstance(call.func, ast.Name) and call.func.id == "print" and len(call.args) == 1 \
+                    and isinstance(call.args[0], ast.Call):
+                call = call.args[0]                      # print(default_api.tool(...)) -> tool(...)
+            f = call.func
             name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+            if name == "print":
+                continue
             try:
-                args = {kw.arg: ast.literal_eval(kw.value) for kw in node.value.keywords if kw.arg}
+                args = {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords if kw.arg}
             except ValueError:
                 continue
             if name:

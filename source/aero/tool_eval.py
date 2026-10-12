@@ -130,7 +130,7 @@ def ask(url, messages, tools, temperature=0.2, think=False, timeout=300):
     """One request the way the agent sends it. Returns (calls, structured?, ms)."""
     t0 = time.time()
     body = {"messages": messages, "tools": tools, "tool_choice": "auto", "temperature": temperature,
-            "max_tokens": 400, "stream": False, "parallel_tool_calls": True,
+            "max_tokens": 256, "stream": False, "parallel_tool_calls": True,
             "chat_template_kwargs": {"enable_thinking": bool(think)}}
     r = httpx.post(url.rstrip("/") + "/v1/chat/completions", json=body, timeout=timeout)
     ms = round((time.time() - t0) * 1000)
@@ -165,6 +165,7 @@ def run(url, aero_tools, temperature=0.2, think=False, limit=None, cancel=None, 
               "when the request needs one; answer directly when it doesn't."}
     res = {"bfcl_ok": 0, "bfcl_n": 0, "aero_ok": 0, "aero_n": 0, "by_category": {}, "structured": 0, "text_calls": 0,
            "ms": [], "failures": []}
+    total = len(bfcl) + len(AERO_CASES)
 
     def tally(cat, ok, structured, calls, ms, ident):
         b = res["by_category"].setdefault(cat, [0, 0])
@@ -176,7 +177,7 @@ def run(url, aero_tools, temperature=0.2, think=False, limit=None, cancel=None, 
         if not ok and len(res["failures"]) < 12:
             res["failures"].append({"case": ident, "got": [n for n, _ in calls][:3]})
         if emit:
-            emit({"type": "tool_eval_case", "case": ident, "ok": ok, "ms": ms})
+            emit({"type": "tool_eval_case", "case": ident, "ok": ok, "ms": ms, "done": len(res["ms"]), "of": total})
 
     for c in bfcl:
         if cancel is not None and cancel.is_set():

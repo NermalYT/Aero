@@ -35,6 +35,39 @@ class QuantPick(unittest.TestCase):
         self.assertEqual(q, quantize.LADDER[-1][0])
         self.assertIn("AirLLM", why)
 
+    def test_converter_files_checked_by_git_hash(self):
+        self.assertEqual(quantize._blob_sha(b"hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a")   # git hash-object
+        tree = {"tree": [{"type": "blob", "path": "convert_hf_to_gguf.py", "sha": quantize._blob_sha(b"main\n")},
+                         {"type": "blob", "path": "conversion/llama.py", "sha": quantize._blob_sha(b"x\n")},
+                         {"type": "blob", "path": "gguf-py/gguf/gguf.py", "sha": quantize._blob_sha(b"g\n")},
+                         {"type": "blob", "path": "gguf-py/gguf/scripts/dump.py", "sha": "0"},
+                         {"type": "blob", "path": "ggml/src/big.c", "sha": "0"}]}
+        files = {"convert_hf_to_gguf.py": b"main\n", "conversion/llama.py": b"x\n", "gguf-py/gguf/gguf.py": b"g\n"}
+        got = []
+
+        class C:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+            def get(self, url, params=None):
+                if "api.github.com" in url:
+                    return mock.Mock(json=lambda: tree, raise_for_status=lambda: None)
+                path = url.split("/b1/", 1)[1]
+                got.append(path)
+                return mock.Mock(content=files[path])
+        d = Path(tempfile.mkdtemp())
+        with mock.patch.object(quantize.httpx, "Client", C):
+            quantize.fetch_converter("b1", d)
+        self.assertEqual(sorted(got), sorted(files))                 # no scripts/, no C sources
+        self.assertEqual((d / "conversion" / "llama.py").read_bytes(), b"x\n")
+        self.assertTrue((d / ".complete").exists())
+
     def test_cpu_only(self):
         self.assertEqual(quantize.pick(8e9, 0, 64 * 1024, gpu=False)[0], "Q8_0")
 

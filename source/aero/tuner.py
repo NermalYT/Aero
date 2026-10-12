@@ -725,8 +725,10 @@ class Tuner:
                 if not ok:
                     self.log(f"#{cand['n']} didn't start for the exam ({why}).")
                     continue
-                runs = [tool_eval.run(self.server.url, schemas, temperature=t, limit=limit, cancel=self.cancel)
-                        for t in (temps if self.depth != "short" else temps[:1])]
+                def progress(e, n=cand["n"]):
+                    self.emit({"type": "tool_eval_progress", "n": n, "done": e["done"], "of": e["of"]})
+                runs = [tool_eval.run(self.server.url, schemas, temperature=t, limit=limit, cancel=self.cancel,
+                                      emit=progress) for t in (temps if self.depth != "short" else temps[:1])]
                 aero_cases = [c for c in tool_eval.AERO_CASES if c[1]][:6 if slow else None]
                 top = max(runs, key=lambda r: (r["score"], -r["ms_per_case"]))
                 forced_ok = 0

@@ -362,17 +362,23 @@ projects whose functions are built into Aero (sources, licences and what is not 
 | Memory+ | Hindsight memory banks per project |
 | Big models | plans and loads models bigger than your GPU (below), and AirLLM |
 
-You don't have to pick one: ask for the work and the matching workspace opens with its tools. When something isn't
-installed yet, its Install button (or the model, through `integration_install`) asks you first and shows the size.
+You don't have to pick one: ask for the work and the matching workspace opens with its tools. Everything they need
+is set up with Aero: the installer installs it (`--lean` skips that) and Aero finishes anything missing in the
+background (`integrations/bundle.py`; a line under the workspaces shows the progress). xtool is the exception: it
+changes WSL, so it installs from its card when you ask.
 
 ### Big models
 
-**Big models** → choose a GGUF → **Plan**: Aero reads where every tensor of the model would go for the VRAM you give
+Big models are part of normal loading: search any model, Aero recommends the quant that fits (or lists the GGUF
+versions of a repo with original weights, or makes one with **Make a GGUF here**: llama.cpp's converter, an
+importance matrix for low-bit quants, `llama-quantize`), and the tuner measures whole-layer offload against the
+feed-forward split for dense models bigger than the GPU. For manual control, **Big models** → *Manual offload plan*
+→ choose a GGUF → **Plan**: Aero reads where every tensor of the model would go for the VRAM you give
 it (whole layers, feed-forward weights in RAM with attention on the GPU, or MoE experts in RAM) and estimates the
 speed. When a small model of the same family exists, it adds it as a draft for speculative decoding and offers to
 download it: on the test PC, Llama-3.3-70B Q6_K went from 1.0 to 4.85 tokens a second on a 16 GB card with
 Llama-3.2-1B as the draft. **Load** starts the plan. For a full-precision Hugging Face checkpoint that fits nowhere,
-install **AirLLM** in the pack and use **Run with AirLLM**: it streams one layer at a time through the GPU, so it runs
+use **Run with AirLLM** (installed with Aero): it streams one layer at a time through the GPU, so it runs
 in a few GB of VRAM, but every token reads the whole model from disk: Qwen2.5-32B in bf16 took 30 s per token in
 1.9 GB of VRAM, 18 s with 8-bit layers (4-bit is faster again but answered wrongly on a 7B). Measurements:
 [docs/V1.2_BIG_MODELS.md](docs/V1.2_BIG_MODELS.md).
@@ -400,8 +406,8 @@ off. Export any report as Markdown or JSON. Only measured numbers are shown; any
 
 ### Memory and compaction
 
-- **Compact** (top bar) summarizes the chat into long-term memory and continues in a fresh `· part N` chat. It
-  happens on its own at 75% context (Settings → Memory).
+- **Automatic compaction** summarizes the chat into long-term memory and continues in a fresh `· part N` chat when
+  the context reaches 75% (Settings → Memory sets the point; 1.2 removed the Compact button).
 - The newest message also gets a recall block: pinned facts, lessons and the memories most relevant to it, plus
   related past chats. The model can `remember` and `recall`. **Memory** in the sidebar lists everything; passwords,
   keys and tokens are filtered out.

@@ -3,16 +3,19 @@ llama.cpp's own converter (convert_hf_to_gguf.py, MIT) and shrink them with llam
 this PC best. Low-bit quants (IQ1-IQ3, Q2_K) get an importance matrix (llama-imatrix) first, so the bits go where
 they matter most.
 
-Converter: the convert_hf_to_gguf.py and gguf-py of the same llama.cpp build Aero runs (fetched once from the tagged
-source archive), in a Python environment with PyTorch: AirLLM's when it is installed (integrations/models.py), else
+Converter: the convert_hf_to_gguf.py, conversion/ and gguf-py of the same llama.cpp build Aero runs (fetched once,
+file by file, checked against their git hashes), in a Python environment with PyTorch: AirLLM's when it is installed (integrations/models.py), else
 a small CPU-only one of its own (data/toolchains/convert).
 """
+import hashlib
 import re
 import shutil
 import subprocess
 import sys
-import zipfile
+import time
 from pathlib import Path
+
+import httpx
 
 from . import fit, hardware, hf, models
 from .config import IS_WIN, LLAMA_DIR, load_settings, models_dir
@@ -102,56 +105,93 @@ def ensure_converter(emit=None, cancel=None):
         raise RuntimeError("llama.cpp isn't installed, so there is nothing to convert with.")
     src = HOME / tag
     script = src / "convert_hf_to_gguf.py"
-    if not script.exists():
+    if not (src / ".complete").exists():
         tc.require_online("download llama.cpp's converter")
         if emit:
-            emit({"type": "log", "text": f"Fetching llama.cpp's converter for build {tag}…"})
-        z = tc.download(f"https://codeload.github.com/ggml-org/llama.cpp/zip/refs/tags/{tag}", HOME / f"{tag}.zip",
-                        emit, cancel, label=f"llama.cpp {tag} source")
-        with zipfile.ZipFile(z) as zf:
-            for info in zf.infolist():
-                rel = Path(*Path(info.filename).parts[1:]) if len(Path(info.filename).parts) > 1 else None
-                if rel is None or info.is_dir():
-                    continue
-                if rel.name == "convert_hf_to_gguf.py" and len(rel.parts) == 1 or rel.parts[0] == "gguf-py":
-                    out = (src / rel).resolve()
-                    if src.resolve() not in out.parents:
-                        continue
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    with zf.open(info) as a, open(out, "wb") as b:
-                        shutil.copyfileobj(a, b)
-        z.unlink(missing_ok=True)
+            emit({"type": "log", "text": f"Fetching llama.cpp's converter for build {tag} (about 2 MB)…"})
+        fetch_converter(tag, src, cancel)
     py = _airllm_py()
-    if py:
-        need = PACKAGES
-    else:
+    own = py is None
+    if own:
         py = _py()
         if not py.exists():
-            tc.require_online("set up the converter's Python packages")
+            subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True, creationflags=tc.NO_WINDOW)
+    marker = HOME / ("pkgs-own.ok" if own else "pkgs-airllm.ok")
+    if not marker.exists():
+        tc.require_online("set up the converter's Python packages")
+        if own:
             if emit:
                 emit({"type": "log", "text": "Setting up the converter's own Python (PyTorch for the CPU, about 250 MB)…"})
-            subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True, creationflags=tc.NO_WINDOW)
-            r = tc.run([str(py), "-m", "pip", "install", "--disable-pip-version-check", "-q", "torch", "--index-url",
-                        "https://download.pytorch.org/whl/cpu"], timeout=3600, cancel=cancel, network=True)
-            if r["rc"] != 0:
-                raise RuntimeError("PyTorch install failed: " + (r["err"] or r["out"])[-600:])
-        need = PACKAGES
-    marker = HOME / f"pkgs-{Path(py).parent.parent.name}.ok"
-    if not marker.exists():
-        r = tc.run([str(py), "-m", "pip", "install", "--disable-pip-version-check", "-q", *need], timeout=3600,
-                   cancel=cancel, network=True)
-        if r["rc"] != 0:
-            raise RuntimeError("Converter packages failed to install: " + (r["err"] or r["out"])[-600:])
+            tc.pip_install(py, ["torch"], "PyTorch (CPU)", cancel, index_url="https://download.pytorch.org/whl/cpu")
+        tc.pip_install(py, PACKAGES, "the converter's packages", cancel)
         marker.write_text("ok", encoding="utf-8")
     return Path(py), script
+
+
+def _blob_sha(data):
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def fetch_converter(tag, dest, cancel=None):
+    """convert_hf_to_gguf.py, conversion/ and gguf-py/gguf/ of that tag, file by file (about 2 MB), each checked
+    against its git blob hash. A whole source archive is ~50x bigger and was cut off mid-download in testing."""
+    with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(30, read=60),
+                      headers={"Accept": "application/vnd.github+json", "User-Agent": "Aero"}) as c:
+        r = c.get(f"https://api.github.com/repos/ggml-org/llama.cpp/git/trees/{tag}", params={"recursive": "1"})
+        r.raise_for_status()
+        want = [x for x in r.json()["tree"] if x["type"] == "blob" and (
+            x["path"] == "convert_hf_to_gguf.py" or x["path"].startswith("conversion/")
+            or (x["path"].startswith("gguf-py/gguf/") and "/scripts/" not in x["path"]) or x["path"] == "gguf-py/LICENSE")]
+        if not any(x["path"] == "convert_hf_to_gguf.py" for x in want):
+            raise RuntimeError(f"llama.cpp {tag} has no convert_hf_to_gguf.py")
+        root = dest.resolve()
+        for x in want:
+            out = (dest / x["path"]).resolve()
+            if root not in out.parents:
+                continue
+            if out.exists() and _blob_sha(out.read_bytes()) == x["sha"]:
+                continue
+            for attempt in range(5):
+                if cancel is not None and cancel.is_set():
+                    raise RuntimeError("Cancelled")
+                try:
+                    data = c.get(f"https://raw.githubusercontent.com/ggml-org/llama.cpp/{tag}/{x['path']}").content
+                    if _blob_sha(data) == x["sha"]:
+                        break
+                except httpx.HTTPError:
+                    pass
+                time.sleep(2 * (attempt + 1))
+            else:
+                raise RuntimeError(f"Couldn't download {x['path']} from llama.cpp {tag}")
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(data)
+    (dest / ".complete").write_text(tag, encoding="utf-8")
 
 
 # ---- the whole job ----------------------------------------------------------------------------------------------
 
 def _calibration():
-    """Mixed text for llama-imatrix: prose, code, lists and numbers (no network, no user data)."""
+    """Real text for llama-imatrix, shipped with Aero: its docs and skills (prose, tables, lists) and its own source
+    (code), about 400 KB, in a fixed order (no network, no user data). Synthetic word lists gave a 0.6B IQ3_M that
+    answered "Bordez" for the capital of France."""
+    from .config import PKG_DIR
     from .tuner import bench_prompt
-    parts = [bench_prompt(900, s) for s in range(0, 40, 3)]
+    root = PKG_DIR.parent
+    files = sorted((root / "docs").glob("*.md")) + [root / "README.md", root / "CHANGELOG.md"] + \
+        sorted((PKG_DIR / "skills_builtin").rglob("SKILL.md")) + sorted(PKG_DIR.glob("*.py"))
+    parts, size = [], 0
+    for f in files:
+        try:
+            t = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        t = t[:40000]
+        parts.append(t)
+        size += len(t)
+        if size > 400_000:
+            break
+    if size < 50_000:
+        parts += [bench_prompt(900, s) for s in range(0, 40, 3)]
     parts.append("def merge(a, b):\n    out = []\n    while a and b:\n        out.append(a.pop(0) if a[0] < b[0] else "
                  "b.pop(0))\n    return out + a + b\n")
     parts.append("Step 1: open the browser. Step 2: read the inbox. Step 3: list every meeting with its time and "
@@ -198,7 +238,8 @@ def run(repo, quant=None, emit=None, cancel=None, keep_source=None):
     if not f16.exists():
         emit({"type": "stage", "stage": "convert", "text": "Converting to GGUF (16-bit)…"})
         outtype = "bf16" if "BF16" in (info["dtypes"] or {}) else "f16"
-        r = tc.run([str(py), "-I", str(script), str(src), "--outfile", str(f16), "--outtype", outtype],
+        # -E -s, not -I: the script imports its own conversion/ package from its folder, which -I leaves off sys.path
+        r = tc.run([str(py), "-E", "-s", str(script), str(src), "--outfile", str(f16), "--outtype", outtype],
                    timeout=6 * 3600, cancel=cancel)         # the script puts its own gguf-py first on the path
         if r["rc"] != 0 or not f16.exists():
             tail = (r["err"] or r["out"])[-900:]

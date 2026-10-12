@@ -63,6 +63,14 @@ class Formats(unittest.TestCase):
     def test_gemma_tool_code(self):
         t = "```tool_code\nweb_search(query='rain tomorrow', max_results=3)\n```"
         self.assertEqual(tct.parse(t)[0], [("web_search", {"query": "rain tomorrow", "max_results": 3})])
+        # what Gemma-3-27B actually wrote in the tuner's exam: print() around a default_api call
+        t = "```tool_code\nprint(default_api.list_dir(path='C:/Downloads'))\n```"
+        self.assertEqual(tct.parse(t)[0], [("list_dir", {"path": "C:/Downloads"})])
+        t = "Sure.\n```python\nprint(default_api.web_search(query='Paris weather'))\n```"
+        calls, cleaned = tct.parse(t)
+        self.assertEqual(calls, [("web_search", {"query": "Paris weather"})])
+        self.assertEqual(cleaned, "Sure.")
+        self.assertEqual(tct.parse("```python\nprint('hi')\n```")[0], [])          # ordinary code stays code
 
     def test_bare_json_only_at_the_end_and_enabled(self):
         t = 'Checking. {"name": "list_dir", "parameters": {"path": "."}}'

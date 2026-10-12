@@ -154,17 +154,29 @@ def stop():
 
 def main():
     """The installer's step: every integration, with a line per item."""
+    line = {"open": False}
+
+    def end_line():
+        if line["open"]:
+            print(flush=True)
+            line["open"] = False
+
     def emit(e):
         t = e.get("type")
         if t == "bundle_item":
+            end_line()
             size = f"{e['size_mb'] / 1024:.1f} GB" if e["size_mb"] >= 1024 else f"{e['size_mb']} MB"
             print(f"  [{e['n']}/{e['of']}] {e['label']} ({size})...", flush=True)
-        elif t == "bundle_done" and not e["ok"]:
-            print(f"        not installed: {e['error']}. Aero retries it in the background.", flush=True)
+        elif t == "bundle_done":
+            end_line()
+            if not e["ok"]:
+                print(f"        not installed: {e['error']}. Aero retries it in the background.", flush=True)
         elif t == "progress" and e.get("total"):
             print(f"\r        {e['done'] / 2**20:8.1f} / {e['total'] / 2**20:.1f} MB", end="", flush=True)
-            if e["done"] >= e["total"]:
-                print(flush=True)
+            line["open"] = True
+        elif t == "log" and (e.get("text") or e.get("message")):
+            end_line()
+            print("        " + str(e.get("text") or e.get("message"))[:200], flush=True)
     s = status()
     left = [x for x in s["items"] if x["state"] != "done"]
     print(f"  {len(left)} integrations to set up, about {sum(x['size_mb'] for x in left) / 1024:.1f} GB.", flush=True)

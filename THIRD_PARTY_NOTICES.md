@@ -32,6 +32,12 @@ unchanged.
 | `awesome-python.json` | vinta/awesome-python, converted to JSON (entries unchanged) | `ab40553` | CC BY 4.0 |
 | `secret-knowledge.json` | trimstray/the-book-of-secret-knowledge, converted to JSON (entries unchanged) | `7d37069` | MIT |
 
+## Bundled in `source/aero/tool_eval/`
+
+| File | Project | Commit | Licence |
+|---|---|---|---|
+| `bfcl_sample.json` | ShishirPatil/gorilla, Berkeley Function Calling Leaderboard v4: a fixed 40-case sample of its live and simple categories (function names with dots use `__`) | `6ea5797` | Apache-2.0 |
+
 awesome-selfhosted (awesome-selfhosted/awesome-selfhosted-data, **CC BY-SA 3.0**) is not bundled: Aero downloads it
 into your data folder when you ask, and it stays under its own licence there.
 
@@ -54,7 +60,7 @@ into your data folder when you ask, and it stays under its own licence there.
 | playwright | Apache-2.0 | optional |
 | claude-agent-sdk | MIT | optional |
 
-## Downloaded when you choose (new in 1.2: integrations, each into `data/toolchains` or its own environment)
+## Downloaded with Aero (1.2: integrations, each into `data/toolchains` or its own environment; set up by the installer and in the background, `--lean` to skip)
 
 | What | Project | Licence |
 |---|---|---|
@@ -78,6 +84,7 @@ into your data folder when you ask, and it stays under its own licence there.
 | Qwen3-4B-Instruct-2507 (authority model, image text encoder) | Qwen (GGUF by unsloth) | Apache-2.0 |
 | AirLLM, PyTorch, transformers, accelerate | lyogavin/airllm; pytorch; huggingface | Apache-2.0; BSD-3-Clause; Apache-2.0 (in AirLLM's own environment) |
 | bitsandbytes (AirLLM's 4-bit / 8-bit layers, NVIDIA only) | bitsandbytes-foundation/bitsandbytes | MIT (in AirLLM's own environment) |
+| llama.cpp's converter (`convert_hf_to_gguf.py`, `gguf-py`), from the source archive of the installed build | ggml-org/llama.cpp | MIT (run in its own Python environment with numpy, sentencepiece, safetensors, transformers, protobuf, tiktoken, PyTorch for the CPU) |
 | Draft models for big models | Llama-3.2-1B (Llama 3.2 Community Licence), Gemma-3-1B (Gemma Terms), Qwen2.5-0.5B / Qwen3-0.6B (Apache-2.0) | as listed; downloaded only when you ask |
 
 llama.cpp (MIT) binaries come from its GitHub releases, or are built from source where no build fits. Model files

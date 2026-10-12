@@ -57,10 +57,7 @@ def install(emit=None, cancel=None):
         subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True, creationflags=tc.NO_WINDOW)
     if emit:
         emit({"type": "log", "text": "pip install hindsight-api-slim[embedded-db,local-onnx] (a few hundred MB)…"})
-    r = tc.run([str(_py()), "-m", "pip", "install", "--disable-pip-version-check", "-q",
-                "hindsight-api-slim[embedded-db,local-onnx]"], timeout=3600, cancel=cancel, network=True)
-    if r["rc"] != 0:
-        raise RuntimeError("pip install failed: " + (r["err"] or r["out"])[-800:])
+    tc.pip_install(_py(), ["hindsight-api-slim[embedded-db,local-onnx]"], "Hindsight", cancel)
     tc.mark("hindsight", version=_version())
     return f"Hindsight {_version()}"
 

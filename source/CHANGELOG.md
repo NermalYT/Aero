@@ -36,8 +36,9 @@ Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MO
   to their base model), or Aero makes its own: download, llama.cpp's converter, an importance matrix for low-bit
   quants, `llama-quantize` to the quant that fits this PC (`quantize.py`). The tuner now also tries the
   feed-forward split for dense models bigger than the GPU (attention and KV on the GPU, feed-forward of some layers
-  in RAM) against whole-layer offload and keeps the faster: Gemma-3-27B Q8_0 under a 15 GB limit ran 98k context at
-  2.7 tok/s that way, where whole layers ran out of memory past 8k. Downloads are checked against the SHA-256 the Hub
+  in RAM) against whole-layer offload and keeps the faster: Gemma-3-27B Q8_0 under a 15 GB limit ran out of memory
+  at 131k context with whole layers (26 of 62 on the GPU) but ran 131k with the split; the tuner picked 98k at
+  2.7 tok/s (Balanced). At 8k both ran at 3.4-3.7 tok/s. Downloads are checked against the SHA-256 the Hub
   publishes and show the time left.
 - **Every integration comes with Aero.** The installer sets them all up (Hindsight, AirLLM, image generation, code
   tools, Flutter…; `--lean` to skip), and Aero finishes any that are missing in the background, with one progress
@@ -51,8 +52,8 @@ Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MO
 ### Workspaces and integrations
 
 - **Workspaces** in the sidebar: Code, Mobile apps, Create, Diagrams, Review & test, Debug & reverse, Finance, Library,
-  Memory+, Big models. Each is a panel beside the chat with what is installed (Install buttons that ask first and show
-  the size), the pack's live state and its results. A request that needs one opens it by itself: patterns per pack,
+  Memory+, Big models. Each is a panel beside the chat with what is installed (everything is set up with Aero; see
+  Quality of life above), the pack's live state and its results. A request that needs one opens it by itself: patterns per pack,
   no model call, a few milliseconds (`integrations.context`); the pack's tools are added for that turn and its
   skills named, while the router's own catalog stays at 53 tools.
 - **15 integration packs** (`aero/integrations/`), each with its source and licence in the workspace and in
@@ -83,8 +84,9 @@ Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MO
   - *Library*: awesome-python and the-book-of-secret-knowledge bundled as data, awesome-selfhosted downloaded on
     request; `library_search` with tags (e.g. "Communication - IRC"); risky one-liners tagged and never run.
   - *Memory+*: Hindsight in its own environment on 127.0.0.1 with Aero's model; Aero starts its PostgreSQL itself,
-    loopback only, with the data in Aero's folder; reflect's forced tool calls go through a loopback adapter
-    (`integrations/llm_adapter.py`), because llama-server reads a named `tool_choice` as "auto".
+    loopback only, with the data in Aero's folder; reflect's forced tool calls are answered by a loopback adapter
+    with a grammar-forced call (`integrations/llm_adapter.py`), because llama-server reads a named `tool_choice` as
+    "auto" and doesn't enforce "required".
   - *Big models*: see below.
 - `integration_install` lets the model install what a pack needs (permission *setup*, ask by default).
 - Processes a pack started (Hindsight and its database, a Flutter preview, a debugging session) stop when Aero quits.
