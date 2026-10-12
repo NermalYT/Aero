@@ -51,6 +51,11 @@ CATEGORIES = {
     "skills": "Skills (task instructions loaded on demand)",
     "agents": "Subagents (the local model hands part of a task to a fresh copy of itself)",
     "ask": "Questions to you while the rest of the task keeps going",
+    "integrations": "Integrations: lookups, status and previews (library search, project info, diagrams gallery)",
+    "dev": "Integrations that build, test, check, review or run code and apps (Flutter, toolchains, code review, e2e, "
+           "debugger)",
+    "setup": "Installing an integration's SDK, toolchain or model into Aero's own folder",
+    "create": "Making images and diagrams in Aero's own folders",
 }
 
 
@@ -162,5 +167,7 @@ def _run(name, args, ctx):
 
 def load_all():
     from . import files, shell, desktop, apps, app_tools, web, browser, memory_tools, skill_tools, agent_tools, ask_tools, mod_tools, doc_tools  # noqa: F401,E501  (registration side effects)
+    from .. import integrations
+    integrations.load_all()                  # v1.2 integration packs register their tools here
     from . import mcp_client
     mcp_client.start_all_async()

@@ -1,0 +1,28 @@
+{
+ "install": "xtool 1.21.0 in WSL. Next steps are yours: download Xcode.xip from developer.apple.com, run `xtool setup` and `xtool auth` in a WSL terminal, and attach your iPhone with usbipd.",
+ "install_s": 2.2,
+ "check": [
+  true,
+  "xtool 1.21.0 in WSL"
+ ],
+ "--version": {
+  "rc": 0,
+  "out": "xtool 1.21.0\n"
+ },
+ "--help": {
+  "rc": 0,
+  "out": "OVERVIEW: Cross-platform Xcode replacement\n\nUSAGE: xtool <subcommand>\n\nOPTIONS:\n  --version               Show the version.\n  -h, --help              Show help information.\n\nCONFIGURATION SUBCOMMANDS:\n  setup                   Set up xtool for iOS development\n  auth                    Manage Apple Developer Services authentication\n  sdk                     Manage the Darwin Swift SDK\n\nDEVELOPMENT SUBCOMMANDS:\n  new                     Create a new xtool SwiftPM project\n  dev                     Build and run an xtool SwiftPM project\n  ds                      Interact with Apple Developer Services\n\nDEVICE SUBCOMMANDS:\n  devices                 List devices\n  install                 Install an"
+ },
+ "new --help": {
+  "rc": 0,
+  "out": "OVERVIEW: Create a new xtool SwiftPM project\n\nUSAGE: xtool new [<name>] [--skip-setup]\n\nARGUMENTS:\n  <name>\n\nOPTIONS:\n  --skip-setup            Skip setup steps. (default: false)\n        By default, this command first invokes `xtool setup` to complete any\n        missing setup steps, like authenticating and installing the SDK. Use\n        this flag to always skip setup.\n  --version               Show the version.\n  -h, --help              Show help information.\n\n"
+ },
+ "new": {
+  "rc": 0,
+  "out": "Creating package: Hello\nCreating Package.swift\nCreating xtool.yml\nCreating .gitignore\nCreating Sources/Hello/HelloApp.swift\nCreating Sources/Hello/ContentView.swift\nwarning: failed to validate LSP configuration: Failed to obtain Swift version\n\nFinished generating project Hello. Next steps:\n- Enter the directory with `cd Hello`\n- Build and run with `xtool dev`\n/tmp/p/Hello:\nPackage.swift\nSources\nxtool.yml\n\n/tmp/p/Hello/Sources:\nHello\n\n/tmp/p/Hello/Sources/Hello:\nContentView.swift\nHelloApp.swift\n"
+ },
+ "dev_build_without_sdk": {
+  "rc": 0,
+  "out": "Now generating the Darwin SDK.\n\nError: Could not read file or directory at path ''.\n  See 'xtool help sdk' for usage.\n"
+ }
+}

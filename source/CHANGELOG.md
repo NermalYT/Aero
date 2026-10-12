@@ -1,5 +1,128 @@
 # Changelog
 
+## Aero 1.2.0 (2026-10-12)
+
+Aero becomes an all-in-one workstation: other projects' functions built into Aero in workspaces, autonomy modes for
+chats and forever-loops, models bigger than your GPU, a faster router, and an installer that can be tested anywhere.
+Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MODELS.md`,
+`docs/V1.2_PERFORMANCE_REPORT.md`, `docs/V1.2_TEST_MATRIX.md`.
+
+### Workspaces and integrations
+
+- **Workspaces** in the sidebar: Code, Mobile apps, Create, Diagrams, Review & test, Debug & reverse, Finance, Library,
+  Memory+, Big models. Each is a panel beside the chat with what is installed (Install buttons that ask first and show
+  the size), the pack's live state and its results. A request that needs one opens it by itself: patterns per pack,
+  no model call, a few milliseconds (`integrations.context`); the pack's tools are added for that turn and its
+  skills named, while the router's own catalog stays at 53 tools.
+- **15 integration packs** (`aero/integrations/`), each with its source and licence in the workspace and in
+  `docs/V1.2_INTEGRATIONS.md`, each installed and run on the test PC (`docs/V1.2_TEST_MATRIX.md`):
+  - *Code*: uv, ruff, pyright, Node.js, Biome, TypeScript, Go and Rust installed into `data/toolchains` with their
+    published checksums; `project_check` runs lint, types and tests with machine-readable output (ruff JSON, pyright
+    JSON, pytest JUnit, Biome JSON, tsc, cargo clippy JSON, go vet, go test JSON, including build failures) into one
+    diagnostics list; `web_compat` answers browser-support questions from MDN's browser-compat-data.
+  - *Mobile apps*: Flutter (SDK with its published SHA-256, analytics off): create, pub, analyze (machine output),
+    test (JSON reporter), build, devices, doctor, and `flutter_preview`: the app served as web and shown live inside
+    the workspace, with hot reload (measured: the change on screen 3.5 s after the edit) and hot restart over
+    Flutter's JSON-RPC. xtool for SwiftPM iOS apps from WSL (install, `xtool new`, `xtool dev` once the user has added
+    Apple's SDK and signed in themselves).
+  - *Create*: `image_generate` with stable-diffusion.cpp (Vulkan build) and Z-Image-Turbo (Apache-2.0), 8 steps,
+    1024 × 1024 in 14 s on the test PC; weights stay in RAM and Aero gives the engine a VRAM budget from free memory (`--max-vram`, 2-6 GiB): 4.5 GB on a 16 GB card, 3.2 GB at the floor; a gallery. ArtCraft is the layout reference; its cloud
+    generators are not used.
+  - *Diagrams*: diagram-design's skill vendored; `diagram_save` runs its self-check and shows the diagram in a
+    sandboxed frame, `diagram_import` reads Mermaid / draw.io / Excalidraw, `diagram_export` makes SVG and PNG.
+  - *Review & test*: open-code-review's `ocr` on Aero's own model (its rule documents vendored for delegate mode);
+    e2e's explorer and runner on Aero's model with telemetry forced off.
+  - *Debug & reverse*: RAD Debugger's converter (`debuginfo_dump`, `debuginfo_convert`, `symbolize`) and debugging
+    sessions driven over its IPC socket; rea registered as an MCP server. RAD Debugger's IPC socket has no
+    authentication and listens on every network interface, so a session runs only while Windows Firewall keeps the
+    network away from `raddbg.exe` (checked before every command; Aero never edits firewall rules).
+  - *Finance*: 48 skills from anthropics/financial-services, `xlsx_audit` (errors, hard-coded numbers in formulas,
+    broken row patterns, empty references, circular references), `xlsx_recalc` (LibreOffice), `dcf_validate`,
+    `deck_numbers` (numbers of the same category and unit that disagree across slides).
+  - *Library*: awesome-python and the-book-of-secret-knowledge bundled as data, awesome-selfhosted downloaded on
+    request; `library_search` with tags (e.g. "Communication - IRC"); risky one-liners tagged and never run.
+  - *Memory+*: Hindsight in its own environment on 127.0.0.1 with Aero's model; Aero starts its PostgreSQL itself,
+    loopback only, with the data in Aero's folder; reflect's forced tool calls go through a loopback adapter
+    (`integrations/llm_adapter.py`), because llama-server reads a named `tool_choice` as "auto".
+  - *Big models*: see below.
+- `integration_install` lets the model install what a pack needs (permission *setup*, ask by default).
+- Processes a pack started (Hindsight and its database, a Flutter preview, a debugging session) stop when Aero quits.
+- Vendored material keeps its licence files and an `UPSTREAM.md` with the commit (`skills_builtin/packs/`); pack
+  skills load with `use_skill` but stay out of the router's catalog.
+
+### Autonomy
+
+- Settings → **Autonomy**, for chats and forever-loops separately: *Ask me each time*, *Collect them and keep
+  working* (queued actions don't run; the agent continues; one card to approve or deny the list; approved actions run
+  in the same turn or at the start of the next), or *Full auto* (an authority model on the CPU allows or denies each
+  action with a reason; never allows when it can't answer; logged in `data/autonomy/decisions.jsonl`).
+- The authority model was chosen by measurement: Qwen3-4B-Instruct-2507 answered all 32 exam decisions right
+  (14 traps: injected instructions, money, passwords, mass deletion, security changes), 2.9 s median on the CPU;
+  LFM2.5 models allowed 7-8 traps and are not offered (`validation/bench_authority.py`).
+- The model is told when an action was queued or decided by the authority; queued actions are "NOT run" until they
+  are approved.
+
+### Big models
+
+- `bigmodel.py` plans any GGUF for the VRAM you give it from its real tensor sizes: whole layers, feed-forward
+  weights in RAM with attention and KV on the GPU (`--override-tensor`, now passed through `cfg["ot"]`), MoE experts
+  in RAM, or all on the GPU; tied output embeddings counted (Gemma). It adds a same-family draft model for
+  speculative decoding and reserves its VRAM. Measured on an RTX 5080 + DDR5: Llama-3.3-70B Q6_K at **4.85 tok/s
+  with Llama-3.2-1B as the draft** (1.0 without) on 16 GB; Gemma-3-27B Q8_0 in 2.8 GB of VRAM at 1.9 tok/s, 2.6 with
+  Gemma-3-1B as the draft in 3.1 GB.
+- **AirLLM** (lyogavin/airllm) built in for full-precision Hugging Face checkpoints: its own environment (PyTorch
+  CUDA, bitsandbytes for its 4-bit and 8-bit layer compression), an OpenAI-compatible shim on Aero's model port so
+  the whole agent works with it, one folder of layer files per model, loaded from the Big models workspace. Measured:
+  Qwen2.5-32B-Instruct in bf16 at 30 s per token in 1.9 GB of VRAM, 18 s in 8-bit, 12 s in 4-bit; Qwen2.5-7B bf16 7.3 s, 8-bit 5.1 s,
+  4-bit 4.3 s (the 4-bit 7B answered wrongly: use 8-bit or full precision when the answer matters).
+- `validation/bench_bigmodel.py` measures plans (VRAM, prompt and generation speed, load time).
+
+### Router (faster)
+
+- A shorter decision form: a short intent first, a plan only for long multi-step requests, the preference field only
+  when the message sounds like one, no router call for greetings and thanks. CPU decisions p50 2.8 → 1.6 s (50
+  requests) and 2.4 → 1.8 s (held-out), same accuracy (50/50) and one more held-out request right (23/25).
+- Settings → Router → *Runs on*: GPU for decisions in 0.39 s (p50, 50 requests; held-out 0.45 s); it moves back to
+  the CPU while Remote Mode is active. The `router_plan` setting now does what it says.
+
+### Installer and updater (tested anywhere)
+
+- `Update-Aero.bat` / `Install-Aero.bat`: `--dest FOLDER` (or `AERO_INSTALL_DIR`), `--skip-llama`, `--no-shortcuts`,
+  `--no-register`, `--skip-models`, `--headless`; installs outside `C:\Aero` need no administrator rights; a failed
+  or unanswerable elevation stops with an error.
+- `validation/check_windows_update.py` and the CI job `windows-update`: a published release installed into a
+  throwaway folder, updated in place with the new build, then through Aero's own updater from a fake release (a
+  tampered download is refused), plus a fresh install; from the newest release and from 1.0.0.
+
+### Security
+
+- Aero's API refuses state-changing requests that don't come from Aero's own window (Origin / Sec-Fetch-Site) and
+  requests with an unknown Host header. Before, a web page open in a browser could send a "simple" cross-site POST
+  to 127.0.0.1 and start turns or change settings.
+- Integration installs show their size, go through the *setup* permission, verify published checksums and honour
+  strict offline; the file endpoint serves only Aero's diagrams and images (sandboxed); the workspace run endpoint
+  only runs integration tools.
+
+### Fixed while testing every integration live
+
+- MCP tool schemas that use `$ref` into `$defs` (rea's) were passed on without their definitions, and llama-server
+  refused every request; references are now resolved in place.
+- With no router decision every tool went to the model: one MCP server with 170 tools made a 230,000-token request.
+  Tool definitions now take at most 35 % of the context, Aero's own tools and the request's hinted tools first, the
+  rest through `load_tools` (which refuses what can't fit); a pack's MCP server stays out of the router.
+- A model that calls a tool it wasn't offered got an empty reply (llama-server drops the call): the step is asked
+  once more for an answer, and a JSON call printed as text runs as a real call when the tool exists and is enabled.
+- Draft, image and router models are no longer listed as chat models (`_drafts`, `_create` were missing).
+- Big models panel: split GGUF sizes summed; a draft model already in the models folder is used.
+- The release archives now include the Library's bundled lists: the build skipped every folder named `data`,
+  not only the runtime one.
+
+### Other
+
+- The built-in prompt mentions integrations and queued/authority-decided actions; an unedited 1.1 prompt is replaced.
+- `ruff.toml` excludes vendored upstream files from Aero's lint; the older modules' remaining lint findings are fixed.
+- New tests: autonomy (22), integrations (51); 291 in total.
+
 ## Aero 1.1.0 (2026-10-09)
 
 Real app work: Aero knows which apps you have, acts in other apps without taking your input or focus (and says so

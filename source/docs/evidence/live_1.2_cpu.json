@@ -1,0 +1,214 @@
+{
+ "library_update_selfhosted": {
+  "ok": true,
+  "s": 1.3,
+  "result": {
+   "count": {
+    "awesome-selfhosted": 1353
+   },
+   "irc": [
+    "Robust IRC",
+    "Kiwi IRC",
+    "Quassel IRC",
+    "ZNC",
+    "The Lounge",
+    "InspIRCd",
+    "UnrealIRCd",
+    "Glowing Bear",
+    "Weechat",
+    "ngircd",
+    "Ergo"
+   ]
+  }
+ },
+ "toolchains_install": {
+  "ok": true,
+  "s": 1107.1,
+  "result": {
+   "uv": "uv 0.13.0",
+   "uv_found": [
+    true,
+    "<test folder>\\home_live12\\data\\toolchains\\uv\\uv.EXE"
+   ],
+   "ruff": "ruff 0.17.0",
+   "ruff_found": [
+    true,
+    "<test folder>\\home_live12\\data\\toolchains\\ruff\\ruff.EXE"
+   ],
+   "biome": "biome @biomejs/biome@2.5.15",
+   "biome_found": [
+    true,
+    "<test folder>\\home_live12\\data\\toolchains\\biome\\biome.EXE"
+   ]
+  }
+ },
+ "project_check_python": {
+  "ok": true,
+  "s": 0.1,
+  "result": {
+   "ran": [
+    {
+     "step": "lint",
+     "tool": "ruff",
+     "rc": 1,
+     "ms": 92,
+     "found": 4,
+     "note": ""
+    },
+    {
+     "step": "test",
+     "tool": "pytest",
+     "rc": 1,
+     "ms": 29,
+     "found": 0,
+     "note": ""
+    }
+   ],
+   "diagnostics": [
+    {
+     "tool": "ruff",
+     "file": "demo.py",
+     "line": 1,
+     "col": 1,
+     "severity": "warning",
+     "code": "I001",
+     "message": "Import block is un-sorted or un-formatted"
+    },
+    {
+     "tool": "ruff",
+     "file": "demo.py",
+     "line": 1,
+     "col": 8,
+     "severity": "warning",
+     "code": "F401",
+     "message": "`os` imported but unused"
+    },
+    {
+     "tool": "ruff",
+     "file": "tests\\test_demo.py",
+     "line": 1,
+     "col": 1,
+     "severity": "warning",
+     "code": "I001",
+     "message": "Import block is un-sorted or un-formatted"
+    },
+    {
+     "tool": "ruff",
+     "file": "tests\\test_demo.py",
+     "line": 3,
+     "col": 1,
+     "severity": "warning",
+     "code": "I001",
+     "message": "Import block is un-sorted or un-formatted"
+    }
+   ]
+  }
+ },
+ "project_check_ts": {
+  "ok": true,
+  "s": 0.6,
+  "result": {
+   "ran": [
+    {
+     "step": "lint",
+     "tool": "biome",
+     "rc": 1,
+     "ms": 610,
+     "found": 2,
+     "note": ""
+    }
+   ],
+   "diagnostics": [
+    {
+     "tool": "biome",
+     "file": "app.js",
+     "line": 2,
+     "col": 7,
+     "severity": "error",
+     "code": "lint/suspicious/noDoubleEquals",
+     "message": "Using == may be unsafe if you are relying on type coercion."
+    },
+    {
+     "tool": "biome",
+     "file": "app.js",
+     "line": 2,
+     "col": 15,
+     "severity": "error",
+     "code": "lint/suspicious/noDebugger",
+     "message": "This is an unexpected use of the debugger statement."
+    }
+   ]
+  }
+ },
+ "diagram_save_check_export": {
+  "ok": true,
+  "s": 1.8,
+  "result": {
+   "save": "Saved <test folder>\\home_live12\\data\\diagrams\\live-checkout.html (shown in the Diagrams workspace).\nSelf-check: passed\nOK <test folder>\\home_live12\\data\\diagrams\\live-checkout.html",
+   "svg": "{'text': 'Exported <home>\\\\AeroTest\\\\home_live12\\\\data\\\\diagrams\\\\live-checkout.svg', 'envelope': {'backend': 'file', 'attempted': True, 'success': True, 'verified': True, 'verification_method': 'live-checkout.svg exists, 983 bytes', 'error': None, 'changed_state': {'path': '<home>\\\\",
+   "png": "{'text': 'Exported <home>\\\\AeroTest\\\\home_live12\\\\data\\\\diagrams\\\\live-checkout.png', 'envelope': {'backend': 'file', 'attempted': True, 'success': True, 'verified': True, 'verification_method': 'live-checkout.png exists, 24,635 bytes', 'error': None, 'changed_state': {'path': 'C:\\\\Users\\\\Do"
+  }
+ },
+ "diagram_import_mermaid": {
+  "ok": true,
+  "s": 0.1,
+  "result": {
+   "text": "# Mermaid IR — f.mmd\n\n1 diagram(s): [0] flowchart (4n/3e)\n\n## Diagram 0 — flowchart\n\n- source layout: none (Mermaid is layout-free); direction: LR\n- nodes: 4 total / 4 drawable / 0 containers, depth 0\n- edges: 3 (1 labeled, 0 dangling), cycle: False\n- shapes: {'rect': 3, 'rhombus': 1}\n- type candidates: flowchart, architecture\n- budget: nodes ok (max 9), edges ok (max 12)\n- hubs (focal candidates): Paid?(2), Payment(2), Confirm(1), Cart(1)\n- entry points: Cart\n- terminals: Confirm\n\n### Nodes\n\n| id | label | shape | depth | parent | deg | fields |\n|---|---|---|---|---|---|---|\n| A | Cart | rect | 0 | - | 0/1 | - |\n| B | Payment | rect | 0 | - | 1/1 | - |\n| C | Paid? | rhombus | 0 | - | 1/1 | - |\n| D | Confirm | rect | 0 | - | 1/0 | - |\n\n### Edges\n\n| source | target | label | style |\n|---|---|---|---|\n| Cart | Payment | - | solid arrow |\n| Payment | Paid? | - | solid arrow |\n| Paid? | Confirm | yes | solid arrow |\n",
+   "error": false
+  }
+ },
+ "ocr_install": {
+  "ok": true,
+  "s": 151.8,
+  "result": {
+   "install": "open-code-review v1.12.13",
+   "bin": "<test folder>\\home_live12\\data\\toolchains\\ocr\\ocr.exe",
+   "version": "open-code-review v1.12.13 (fabbdb29) windows/amd64\nbuilt at: 2026-10-08T11:52:18Z\nhttps://github.com/alibaba/open-code-review\n"
+  }
+ },
+ "raddbg_install_and_dump": {
+  "ok": true,
+  "s": 1.0,
+  "result": {
+   "install": "RAD Debugger v0.9.29-alpha",
+   "dump_head": "// <test folder>\\llama\\llama-server.exe (PE)\n\n",
+   "dump_error": false
+  }
+ },
+ "raddbg_ipc_loopback": {
+  "ok": false,
+  "s": 5.9,
+  "error": "RuntimeError: RAD Debugger listened on 0.0.0.0:43913 (reachable from the network, no authentication); Aero closed it.",
+  "trace": "Traceback (most recent call last):\n  File \"<test folder>\\live12\\live_cpu.py\", line 26, in deco\n    r = fn()\n        ^^^^\n  File \"<test folder>\\live12\\live_cpu.py\", line 119, in _\n    port = debug.start(target, [\"/c\", \"exit\"])\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<checkout>\\f16b2223-c80d-4492-a861-19d4b516a938\\88b44bdc-9fbc-4e6a-ae8f-6e775361460c\\scratch-2026-10-09-6fd3fd\\Aero\\source\\aero\\integrations\\debug.py\", line 158, in start\n    raise RuntimeError(f\"RAD Debugger listened on {addr}:{port} (reachable from the network, no \"\nRuntimeError: RAD Debugger listened on 0.0.0.0:43913 (reachable from the network, no authentication); Aero closed it.\n"
+ },
+ "rea_install": {
+  "ok": true,
+  "s": 14.5,
+  "result": {
+   "install": "rea-agents, registered as the MCP server 'rea'",
+   "status": "{'rea': {'state': 'running', 'kind': 'stdio', 'tools': ['annotate_native_function', 'inspect_native_load_image', 'inspect_native_data_type', 'inspect_native_instruction', 'resolve_native_call_targets', 'address_name', 'comment', 'current_address', 'current_procedure', 'current_document', 'goto_address', 'inline_comment', 'list_bookmarks', 'list_documents', 'list_names', 'list_procedures', 'list_se",
+   "tools": 170,
+   "some": [
+    "mcp_rea_annotate_native_function",
+    "mcp_rea_inspect_native_load_image",
+    "mcp_rea_inspect_native_data_type",
+    "mcp_rea_inspect_native_instruction",
+    "mcp_rea_resolve_native_call_targets",
+    "mcp_rea_address_name",
+    "mcp_rea_comment",
+    "mcp_rea_current_address"
+   ]
+  }
+ },
+ "hindsight_install": {
+  "ok": true,
+  "s": 99.9,
+  "result": "Hindsight 0.10.3"
+ },
+ "hindsight_start_retain_recall": {
+  "ok": false,
+  "s": 86.8,
+  "error": "RuntimeError: Hindsight didn't start:\n\", line 5816, in initialize\n      |     await asyncio.wait_for(asyncio.gather(*init_tasks), timeout=init_timeout)\n      |   File \"<home>\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\tasks.py\", line 520, in wait_for\n      |     return await fut\n      |            ^^^^^^^^^\n      |   File \"<test folder>\\home_live12\\data\\toolchains\\hindsight\\venv\\Lib\\site-packages\\hindsight_api\\engine\\memory_engine.py\", line 5708, in start_pg0\n      |     self.db_url = await pg0.ensure_running()\n      |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^\n      |   File \"<test folder>\\home_live12\\data\\toolchains\\hindsight\\venv\\Lib\\site-packages\\hindsight_api\\pg0.py\", line 135, in ensure_running\n      |     return await self.start()\n      |            ^^^^^^^^^^^^^^^^^^\n      |   File \"<test folder>\\home_live12\\data\\toolchains\\hindsight\\venv\\Lib\\site-packages\\hindsight_api\\pg0.py\", line 96, in start\n      |     raise RuntimeError(\n      | RuntimeError: Failed to start embedded PostgreSQL after 5 attempts. Last error: Error: Failed to start PostgreSQL: Command error: stdout=; stderr=\n      +------------------------------------\n\nERROR:    Application startup failed. Exiting.\n",
+  "trace": ")\n          ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<checkout>\\f16b2223-c80d-4492-a861-19d4b516a938\\88b44bdc-9fbc-4e6a-ae8f-6e775361460c\\scratch-2026-10-09-6fd3fd\\Aero\\source\\aero\\integrations\\memory.py\", line 99, in start\nRuntimeError: Hindsight didn't start:\n\", line 5816, in initialize\n      |     await asyncio.wait_for(asyncio.gather(*init_tasks), timeout=init_timeout)\n      |   File \"<home>\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\asyncio\\tasks.py\", line 520, in wait_for\n      |     return await fut\n      |            ^^^^^^^^^\n      |   File \"<test folder>\\home_live12\\data\\toolchains\\hindsight\\venv\\Lib\\site-packages\\hindsight_api\\engine\\memory_engine.py\", line 5708, in start_pg0\n      |     self.db_url = await pg0.ensure_running()\n      |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^\n      |   File \"<test folder>\\home_live12\\data\\toolchains\\hindsight\\venv\\Lib\\site-packages\\hindsight_api\\pg0.py\", line 135, in ensure_running\n      |     return await self.start()\n      |            ^^^^^^^^^^^^^^^^^^\n      |   File \"<test folder>\\home_live12\\data\\toolchains\\hindsight\\venv\\Lib\\site-packages\\hindsight_api\\pg0.py\", line 96, in start\n      |     raise RuntimeError(\n      | RuntimeError: Failed to start embedded PostgreSQL after 5 attempts. Last error: Error: Failed to start PostgreSQL: Command error: stdout=; stderr=\n      +------------------------------------\n\nERROR:    Application startup failed. Exiting.\n\n"
+ }
+}

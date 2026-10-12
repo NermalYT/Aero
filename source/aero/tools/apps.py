@@ -363,12 +363,12 @@ def windows():
             ex = user32.GetWindowLongW(hwnd, -20)
             if ex & 0x80 and not ex & 0x40000:                      # tool windows without APPWINDOW
                 return True
-            l, tp, r, b = _rect(hwnd)
+            left, tp, r, b = _rect(hwnd)
             pid, _ = _pid(hwnd)
-            if r - l < 60 or b - tp < 40 or _class(hwnd) in ("Progman", "WorkerW", "Shell_TrayWnd"):
+            if r - left < 60 or b - tp < 40 or _class(hwnd) in ("Progman", "WorkerW", "Shell_TrayWnd"):
                 return True
             out.append({"id": int(hwnd), "title": t, "app": _proc_name(pid), "pid": pid, "mine": pid == me,
-                        "rect": [l, tp, r - l, b - tp], "minimized": bool(user32.IsIconic(hwnd))})
+                        "rect": [left, tp, r - left, b - tp], "minimized": bool(user32.IsIconic(hwnd))})
         except Exception:
             pass
         return True
@@ -421,11 +421,11 @@ def _capture(hwnd):
     """(image or None, (left, top), info). The picture is only of this window; when no honest picture can be taken
     (minimized, or GPU-drawn and covered) image is None and info says why."""
     from PIL import Image
-    l, t, r, b = _rect(hwnd)
+    left, t, r, b = _rect(hwnd)
     if user32.IsIconic(hwnd):
-        return None, (l, t), {"valid": False, "why": "the window is minimized, and Windows doesn't draw minimized "
-                                                     "windows (app_view(restore=true) shows it without taking focus)"}
-    w, h = max(1, r - l), max(1, b - t)
+        return None, (left, t), {"valid": False, "why": "the window is minimized, and Windows doesn't draw minimized "
+                                                        "windows (app_view(restore=true) shows it without focus)"}
+    w, h = max(1, r - left), max(1, b - t)
     wdc = user32.GetWindowDC(hwnd)
     mdc = gdi32.CreateCompatibleDC(wdc)
     bmp = gdi32.CreateCompatibleBitmap(wdc, w, h)
@@ -443,16 +443,16 @@ def _capture(hwnd):
         gdi32.DeleteDC(mdc)
         user32.ReleaseDC(hwnd, wdc)
     if ok and not _uniform(im):
-        return im, (l, t), {"valid": True, "method": "PrintWindow"}
+        return im, (left, t), {"valid": True, "method": "PrintWindow"}
     if unoccluded(hwnd):                                     # GPU-drawn but in plain view: the screen shows it
         import mss
         with mss.mss() as s:
-            raw = s.grab({"left": l, "top": t, "width": w, "height": h})
+            raw = s.grab({"left": left, "top": t, "width": w, "height": h})
         im = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
         if not _uniform(im):
-            return im, (l, t), {"valid": True, "method": "screen (the window is in front and not covered)"}
-    return None, (l, t), {"valid": False, "why": "the app draws with the GPU and other windows cover it, so no picture "
-                                                 "of it can be taken without bringing it forward"}
+            return im, (left, t), {"valid": True, "method": "screen (the window is in front and not covered)"}
+    return None, (left, t), {"valid": False, "why": "the app draws with the GPU and other windows cover it, so no "
+                                                    "picture of it can be taken without bringing it forward"}
 
 
 def _thumb(im):
@@ -628,7 +628,7 @@ def _observe(ctx, hwnd, elements=True, find="", zoom=None, marks=True, restore=F
     with _lock:
         if restore:
             _restore_quietly(hwnd)
-        full, (l, t), cap = _capture(hwnd)
+        full, (left, t), cap = _capture(hwnd)
         minimized = bool(user32.IsIconic(hwnd))
         max_side = int(ctx.settings.get("screenshot_max_side") or 1568)
         if full is not None:
@@ -643,7 +643,7 @@ def _observe(ctx, hwnd, elements=True, find="", zoom=None, marks=True, restore=F
         same = hwnd == sess["hwnd"]
         keep = sess["elements"] if (not elements and same) else {}
         pid, _ = _pid(hwnd)
-        sess.update(hwnd=hwnd, title=_title(hwnd), left=l, top=t, scale=scale, w=round(w / scale),
+        sess.update(hwnd=hwnd, title=_title(hwnd), left=left, top=t, scale=scale, w=round(w / scale),
                     h=round(h / scale), elements=keep, pid=pid, picture=im is not None)
         if elements or not same:
             sess["gen"] += 1
@@ -849,9 +849,9 @@ def _focus_hwnd(hwnd):
     def cb(ch, _):
         try:
             if user32.IsWindowVisible(ch) and any(k in _class(ch).lower() for k in EDITISH):
-                l, t, r, b = _rect(ch)
-                if (r - l) * (b - t) > best["a"]:
-                    best.update(h=ch, a=(r - l) * (b - t))
+                left, t, r, b = _rect(ch)
+                if (r - left) * (b - t) > best["a"]:
+                    best.update(h=ch, a=(r - left) * (b - t))
         except Exception:
             pass
         return True
@@ -1288,8 +1288,8 @@ def _keys(ctx, keys, input):
     chords = str(keys).split()
     needs_real = input == "real" or has_chord(keys)
     with _lock:
-        l, t, r, b = _rect(hwnd)
-        _show_cursor((l + r) // 2, (t + b) // 2, "type", keys[:30])
+        left, t, r, b = _rect(hwnd)
+        _show_cursor((left + r) // 2, (t + b) // 2, "type", keys[:30])
         if needs_real:
             if (n := _need_physical(ctx, f"The shortcut '{keys}'")):
                 return n
@@ -1359,8 +1359,8 @@ def _scroll(ctx, amount, element, x, y):
         elif x is not None and y is not None:
             sx, sy = _to_screen(sess, x, y)
         else:
-            l, t, r, b = _rect(hwnd)
-            sx, sy = (l + r) // 2, (t + b) // 2
+            left, t, r, b = _rect(hwnd)
+            sx, sy = (left + r) // 2, (t + b) // 2
         _show_cursor(sx, sy, "move")
         tgt, _, _ = _deepest_child(hwnd, sx, sy)
         for _ in range(abs(amount)):

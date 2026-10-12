@@ -1,0 +1,71 @@
+{
+ "model": "Llama-3.3-70B-Instruct-Q6_K-00001-of-00002.gguf",
+ "size_gb": 53.91,
+ "budget_mb": 13000,
+ "ctx": 8192,
+ "ram_free_mb": 45691,
+ "at": "2026-10-11 20:45:26",
+ "results": [
+  {
+   "strategy": "ffn",
+   "ok": true,
+   "cfg": {
+    "ngl": 999,
+    "ot": [
+     "blk\\.(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|50|51|52|53|54|55|56|57|58|59|60|61|62|63|64|65|66|67|68|69|70|71|72|73|74|75|76|77|78|79)\\.ffn_(up|down|gate)\\.weight=CPU"
+    ],
+    "no_mmap": false
+   },
+   "planned_gpu_mb": 12659,
+   "planned_cpu_mb": 44922,
+   "vram_mb": 12304,
+   "load_s": 38.5,
+   "runs": [
+    {
+     "pp": 102.68,
+     "tg": 1.09,
+     "prompt_n": 2177,
+     "gen_n": 128
+    },
+    {
+     "pp": 96.27,
+     "tg": 1.06,
+     "prompt_n": 2177,
+     "gen_n": 128
+    }
+   ],
+   "pp": 96.27,
+   "tg": 1.06,
+   "note": "attention and KV of all 80 layers on the GPU, feed-forward of 80 layers in RAM; 44,922 MB in RAM is more than is free, so part streams from disk (mmap): slow"
+  },
+  {
+   "strategy": "layers",
+   "ok": true,
+   "cfg": {
+    "ngl": 17,
+    "no_mmap": false
+   },
+   "planned_gpu_mb": 12827,
+   "planned_cpu_mb": 43666,
+   "vram_mb": 12432,
+   "load_s": 29.5,
+   "runs": [
+    {
+     "pp": 96.42,
+     "tg": 1.05,
+     "prompt_n": 2177,
+     "gen_n": 128
+    },
+    {
+     "pp": 105.11,
+     "tg": 1.01,
+     "prompt_n": 2177,
+     "gen_n": 128
+    }
+   ],
+   "pp": 105.11,
+   "tg": 1.01,
+   "note": "16 of 80 layers and the output layer on the GPU; 43,666 MB in RAM is more than is free, so part streams from disk (mmap): slow"
+  }
+ ]
+}

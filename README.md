@@ -56,7 +56,21 @@ everything in it.
   recommends the largest-quality model that fits: fully on the GPU, MoE experts in system RAM, or CPU only.
 - **Tunes for real.** Measures llama.cpp settings on your PC within a VRAM limit you choose. HAPO turns the measured
   trials into profiles (Maximum Speed, Balanced, Maximum Context, Maximum Quality, Agent Optimized, Efficiency).
-- **A tiny router on the CPU** reads each request first and gives the main model only the tools it needs.
+- **A tiny router on the CPU** reads each request first and gives the main model only the tools it needs (1.2: in
+  about 1.6 s on the CPU, or under half a second when you put it on the GPU).
+- **Workspaces with the tools built in.** Code (Python, JS/TS, Rust, Go, CSS toolchains and one diagnostics view),
+  Mobile apps (Flutter with a live preview and hot reload inside Aero; iOS through xtool), Create (images made on your
+  GPU), Diagrams (diagram-design's 44 diagram types), Review & test (open-code-review, e2e), Debug & reverse (RAD
+  Debugger, rea), Finance (Anthropic's financial-services skills), Library (awesome-python, awesome-selfhosted,
+  the-book-of-secret-knowledge), Memory+ (Hindsight) and Big models. Ask for the work ("build me a mobile app for my
+  bakery") and the right workspace opens with its tools; anything it needs installs into Aero's own folder after you
+  say yes.
+- **Ask, collect, or full auto.** Per chat and per forever-loop: a card for every action that needs your OK, or one
+  list you approve while the agent keeps working, or full automation where a small authority model on the CPU
+  allows or denies each action with a reason (it allowed none of the 14 traps in its 32-decision exam).
+- **Big models on small GPUs.** Aero plans where every tensor of a GGUF goes for the VRAM you have, adds a small
+  draft model of the same family, and loads it: Llama-3.3-70B at Q6_K generated 4.85 tokens a second on a 16 GB card
+  (1.0 without the draft). AirLLM is built in for full-precision checkpoints that fit nowhere else.
 - **Agents and subagents.** Each chat's task gets an agent named for what it does ("Photo Renamer", "Crash
   Investigator"). An agent can hand a self-contained part of the job to a subagent (a fresh copy of the local model
   with its own context) and gets back its report. The dashboard lists models, agents and subagents in one scrolling
@@ -125,6 +139,9 @@ everything in it.
   tools, troubleshooting.
 - [Changelog](source/CHANGELOG.md)
 - [Validation report](source/docs/VALIDATION_REPORT.md): what has been tested, and what still needs a Windows PC.
+- 1.2: [integrations and workspaces](source/docs/V1.2_INTEGRATIONS.md), [autonomy](source/docs/V1.2_AUTONOMY.md),
+  [big models](source/docs/V1.2_BIG_MODELS.md), [performance](source/docs/V1.2_PERFORMANCE_REPORT.md),
+  [test matrix](source/docs/V1.2_TEST_MATRIX.md).
 - 1.1: [architecture](source/docs/V1.1_ARCHITECTURE.md), [test matrix](source/docs/V1.1_TEST_MATRIX.md),
   [performance](source/docs/V1.1_PERFORMANCE_REPORT.md), [limits](source/docs/V1.1_LIMITATIONS.md),
   [baseline](source/docs/V1.1_BASELINE.md), [open-source research](source/docs/V1.1_OPEN_SOURCE_RESEARCH.md),
@@ -135,8 +152,23 @@ everything in it.
 
 ## Status
 
-1.1.0 adds app discovery, honest background control, questions during a task, whole-page reading and Remote Mode.
-What has passed for 1.1:
+1.2.0 adds workspaces with other projects built in, autonomy modes, models bigger than the GPU and a faster router.
+What has passed for 1.2:
+
+- 291 automated tests on Windows 11, and in CI on Windows, Ubuntu and macOS; CI also updates real 1.0.0 and 1.1.0
+  installs in place with the new build.
+- Every integration installed and run on a Windows 11 PC with an RTX 5080: toolchains and project checks for Python,
+  TypeScript, Go and Rust; a Flutter app previewed and hot-reloaded inside Aero; images, diagrams, code review and
+  app exploration on a local model; Hindsight; the finance checks; xtool in WSL; AirLLM on 7B and 32B checkpoints;
+  Llama-3.3-70B loaded and answering in Aero's chat on the 16 GB card.
+- 1.0 and 1.1 data folders opened by 1.2: settings, chats and memory kept.
+
+Not tested for 1.2: a RAD Debugger debugging session (Windows Firewall asks first, and Aero never answers that for
+you), Flutter builds for Android, iOS and desktop, xtool builds (Apple's SDK and account), recalculation with
+LibreOffice, AMD and Intel GPUs, the integrations on macOS and Linux
+([test matrix](source/docs/V1.2_TEST_MATRIX.md)).
+
+From 1.1.0 (app discovery, honest background control, questions during a task, whole-page reading, Remote Mode):
 
 - 218 automated tests on Windows 11, and in CI on Windows, Ubuntu and macOS.
 - Live on Windows 11: background typing and button presses verified with the window in front, the cursor and the

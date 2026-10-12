@@ -1,0 +1,775 @@
+{
+ "at": "2026-10-11 21:15:02",
+ "tree": "<checkout>\\f16b2223-c80d-4492-a861-19d4b516a938\\88b44bdc-9fbc-4e6a-ae8f-6e775361460c\\scratch-2026-10-09-6fd3fd\\Aero\\source",
+ "model": "MiniCPM5-2B-Q4_K_M.gguf",
+ "threads": 10,
+ "device": "gpu",
+ "sizes": {
+  "catalog_tools": 53,
+  "rules_chars": 2588,
+  "catalog_chars": 4687,
+  "schema_chars": 1220
+ },
+ "rows": [
+  {
+   "text": "Open Notepad and write a shopping list: eggs, milk, bread.",
+   "need": [
+    [
+     "app.launch"
+    ],
+    [
+     "app.interact",
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 443,
+   "router_ms": 443,
+   "prompt_n": 24,
+   "cached_n": 1777,
+   "gen_n": 56,
+   "tg": 189.6,
+   "skipped": null,
+   "tools": [
+    "app_list",
+    "app_click",
+    "app_type",
+    "write_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "open_app",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Notepad (installed; best via file/accessibility; app_launch \"notepad\")"
+  },
+  {
+   "text": "Look up the weather in State College tomorrow.",
+   "need": [
+    [
+     "browser.search"
+    ]
+   ],
+   "ms": 375,
+   "router_ms": 374,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 43,
+   "tg": 179.4,
+   "skipped": null,
+   "tools": [
+    "web_search",
+    "fetch_url"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "web_search",
+    "fetch_url"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Save a note that my dentist appointment is on Friday.",
+   "need": [
+    [
+     "memory.learn",
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 376,
+   "router_ms": 376,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 42,
+   "tg": 163.9,
+   "skipped": null,
+   "tools": [
+    "write_file",
+    "recall"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "remember",
+    "recall"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Show me the files in my Pictures folder.",
+   "need": [
+    [
+     "filesystem.search"
+    ]
+   ],
+   "ms": 378,
+   "router_ms": 378,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 45,
+   "tg": 178.1,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "read_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Go to github.com and open my notifications.",
+   "need": [
+    [
+     "browser.navigate"
+    ]
+   ],
+   "ms": 414,
+   "router_ms": 413,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 179.1,
+   "skipped": null,
+   "tools": [
+    "browser_open"
+   ],
+   "exposed": [
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_read"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Launch OBS.",
+   "need": [
+    [
+     "app.launch"
+    ]
+   ],
+   "ms": 464,
+   "router_ms": 464,
+   "prompt_n": 12,
+   "cached_n": 1777,
+   "gen_n": 44,
+   "tg": 155.6,
+   "skipped": null,
+   "tools": [
+    "app_launch",
+    "app_list"
+   ],
+   "exposed": [
+    "open_app",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: OBS Studio (not found on this computer; best via accessibility)"
+  },
+  {
+   "text": "Close the dialog in the app I selected.",
+   "need": [
+    [
+     "app.interact"
+    ]
+   ],
+   "ms": 379,
+   "router_ms": 379,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 37,
+   "tg": 182.2,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "What's the capital of Australia?",
+   "need": [],
+   "ms": 837,
+   "router_ms": 836,
+   "prompt_n": 16,
+   "cached_n": 1777,
+   "gen_n": 37,
+   "tg": 73.7,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Copy all .txt files from Downloads into a new folder called Text.",
+   "need": [
+    [
+     "filesystem.modify",
+     "terminal.execute"
+    ]
+   ],
+   "ms": 1228,
+   "router_ms": 1227,
+   "prompt_n": 24,
+   "cached_n": 1777,
+   "gen_n": 59,
+   "tg": 68.4,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "find_files",
+    "write_file",
+    "move_path"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "move_path",
+    "find_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Find a good pizza place near me.",
+   "need": [
+    [
+     "browser.search"
+    ]
+   ],
+   "ms": 960,
+   "router_ms": 958,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 48,
+   "tg": 77.8,
+   "skipped": null,
+   "tools": [
+    "search_files",
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "search_files",
+    "run_command",
+    "web_search",
+    "fetch_url"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Read my latest emails and tell me what's urgent.",
+   "need": [
+    [
+     "email.read",
+     "browser.navigate",
+     "mcp.call"
+    ]
+   ],
+   "ms": 855,
+   "router_ms": 855,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 49,
+   "tg": 89.9,
+   "skipped": null,
+   "tools": [
+    "read_file",
+    "search_files",
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files",
+    "run_command",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_back",
+    "browser_read"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "In the open browser tab, click the Accept button.",
+   "need": [
+    [
+     "browser.interact"
+    ]
+   ],
+   "ms": 782,
+   "router_ms": 781,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 36,
+   "tg": 74.7,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Run git status in my project folder.",
+   "need": [
+    [
+     "terminal.execute"
+    ]
+   ],
+   "ms": 926,
+   "router_ms": 926,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 77.2,
+   "skipped": null,
+   "tools": [
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "run_command",
+    "open_app",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Open Word and start a new document.",
+   "need": [
+    [
+     "app.launch"
+    ]
+   ],
+   "ms": 868,
+   "router_ms": 867,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 47,
+   "tg": 83.1,
+   "skipped": null,
+   "tools": [
+    "open_app",
+    "app_list"
+   ],
+   "exposed": [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "open_app",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Word (installed; best via file/accessibility; app_launch \"winword\")"
+  },
+  {
+   "text": "Write a haiku about frogs.",
+   "need": [],
+   "ms": 736,
+   "router_ms": 735,
+   "prompt_n": 16,
+   "cached_n": 1777,
+   "gen_n": 39,
+   "tg": 95.7,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Check the CPU temperature.",
+   "need": [
+    [
+     "terminal.execute",
+     "screen.observe"
+    ]
+   ],
+   "ms": 401,
+   "router_ms": 401,
+   "prompt_n": 14,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 158.9,
+   "skipped": null,
+   "tools": [
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "run_command"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Search my documents for the word invoice.",
+   "need": [
+    [
+     "filesystem.search"
+    ]
+   ],
+   "ms": 454,
+   "router_ms": 453,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 47,
+   "tg": 177.2,
+   "skipped": null,
+   "tools": [
+    "search_files",
+    "read_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Turn the volume down.",
+   "need": [
+    [
+     "app.interact",
+     "terminal.execute",
+     "screen.physical_input"
+    ]
+   ],
+   "ms": 407,
+   "router_ms": 407,
+   "prompt_n": 14,
+   "cached_n": 1777,
+   "gen_n": 36,
+   "tg": 146.8,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "What did I tell you about my GPU last week?",
+   "need": [
+    [
+     "memory.recall"
+    ]
+   ],
+   "ms": 343,
+   "router_ms": 343,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 210.9,
+   "skipped": null,
+   "tools": [
+    "recall"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "recall"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Open YouTube and play lo-fi music.",
+   "need": [
+    [
+     "browser.navigate",
+     "app.launch"
+    ]
+   ],
+   "ms": 490,
+   "router_ms": 489,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 50,
+   "tg": 153.9,
+   "skipped": null,
+   "tools": [
+    "browser_open",
+    "browser_wait_for"
+   ],
+   "exposed": [
+    "open_app",
+    "app_find",
+    "app_launch",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_read",
+    "browser_read_sections",
+    "browser_wait_for"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: YouTube (web service; best via browser)"
+  },
+  {
+   "text": "Put my meetings from my inbox into a document.",
+   "need": [
+    [
+     "email.read",
+     "browser.navigate",
+     "mcp.call"
+    ],
+    [
+     "document.create"
+    ]
+   ],
+   "ms": 560,
+   "router_ms": 559,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 44,
+   "tg": 157.5,
+   "skipped": null,
+   "tools": [
+    "meeting_doc"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_back",
+    "browser_read",
+    "meeting_doc"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Make a folder on my desktop called Projects.",
+   "need": [
+    [
+     "filesystem.modify",
+     "terminal.execute"
+    ]
+   ],
+   "ms": 448,
+   "router_ms": 448,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 43,
+   "tg": 170.0,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "write_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "find_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Open Telegram and read the latest message from Mom.",
+   "need": [
+    [
+     "app.launch",
+     "app.inspect"
+    ],
+    [
+     "app.read"
+    ]
+   ],
+   "ms": 456,
+   "router_ms": 454,
+   "prompt_n": 19,
+   "cached_n": 1777,
+   "gen_n": 57,
+   "tg": 184.2,
+   "skipped": null,
+   "tools": [
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_read"
+   ],
+   "exposed": [
+    "open_app",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Telegram (not found on this computer; best via accessibility)"
+  },
+  {
+   "text": "Fill out the contact form on example.org with my name.",
+   "need": [
+    [
+     "browser.interact"
+    ]
+   ],
+   "ms": 403,
+   "router_ms": 401,
+   "prompt_n": 21,
+   "cached_n": 1777,
+   "gen_n": 38,
+   "tg": 177.0,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Start Epic Games and launch Fortnite.",
+   "need": [
+    [
+     "app.launch"
+    ]
+   ],
+   "ms": 404,
+   "router_ms": 403,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 36,
+   "tg": 160.4,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "open_app",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Epic Games Launcher (installed; best via protocol; app_launch \"epicgameslauncher\")"
+  }
+ ]
+}

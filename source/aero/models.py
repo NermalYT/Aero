@@ -19,6 +19,18 @@ def _is_main_gguf(p: Path):
     return not m or m.group(2) == "00001"
 
 
+# Aero's own helper models (router, advisor, authority, draft models for speculative decoding, the image model) live
+# in these folders of the models folder; they are never offered as chat models.
+HELPER_DIRS = {"_advisor", "_router", "_draft", "_drafts", "_create"}
+
+
+def _helper(p, root):
+    try:
+        return bool(HELPER_DIRS & set(Path(p).relative_to(root).parts))
+    except ValueError:
+        return False
+
+
 def _find_mmproj(model: Path):
     for p in sorted(model.parent.glob("*.gguf")):
         if "mmproj" in p.name.lower():
@@ -32,7 +44,7 @@ def all_models():
     # auto-register GGUFs dropped into the models folder by hand
     root = models_dir()
     for p in root.rglob("*.gguf"):
-        if _is_main_gguf(p) and not {"_advisor", "_router", "_draft"} & set(p.relative_to(root).parts):
+        if _is_main_gguf(p) and not _helper(p, root):
             mid = _id(p)
             if mid not in reg:
                 reg[mid] = {"id": mid, "name": p.stem, "path": str(p), "repo": None,
@@ -45,7 +57,8 @@ def all_models():
             m["size"] = sum(x.stat().st_size for x in _parts(p) if x.exists())
     if changed:
         write_store("models.json", reg)
-    return sorted([m for m in reg.values() if not m.get("hidden")], key=lambda m: (-(m.get("last_used") or 0), -(m.get("added") or 0)))
+    return sorted([m for m in reg.values() if not m.get("hidden") and not _helper(m["path"], root)],
+                  key=lambda m: (-(m.get("last_used") or 0), -(m.get("added") or 0)))
 
 
 def _parts(p: Path):

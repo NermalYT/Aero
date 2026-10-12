@@ -21,8 +21,8 @@ from pathlib import Path
 
 import httpx
 
-from . import (action_results, agents, attachments, capabilities, clarifications, control, input_guard, memory,
-               osinfo, resources, stats, task_graph, tools)
+from . import (action_results, agents, attachments, autonomy, capabilities, clarifications, control, input_guard,
+               memory, osinfo, resources, stats, task_graph, tools)
 
 _approvals = {}        # call_id -> Future
 _approval_chat = {}    # call_id -> chat id it belongs to (Stop in one chat must not answer another chat's cards)
@@ -66,6 +66,7 @@ def stop(chat_id):
     for cid, fut in list(_approvals.items()):
         if _approval_chat.get(cid) in (chat_id, None) and not fut.done():
             fut.set_result("deny")
+    autonomy.cancel_chat(chat_id)
     release(chat_id, close_browser=True)
 
 
@@ -90,6 +91,7 @@ def stop_all():
         if not fut.done():
             fut.set_result("deny")
     for cid in list(_cancel):
+        autonomy.cancel_chat(cid)
         release(cid, close_browser=True)
     return len(_cancel)
 
@@ -286,7 +288,8 @@ def build_messages(history, settings, vision, ctx_size, extra="", trim=True, cal
         return [sys_msg] + out
     # keep within ~85% of the context window: shrink old tool outputs first, then drop old turns
     budget = int(ctx_size * 0.85 / calib) - _est_tokens(sys_msg["content"]) - 600
-    total = lambda: sum(_est_tokens(x.get("content")) for x in out)
+    def total():
+        return sum(_est_tokens(x.get("content")) for x in out)
     if total() > budget:
         for x in out[:-6]:
             if x["role"] == "tool" and isinstance(x["content"], str) and len(x["content"]) > 1500:
@@ -400,8 +403,12 @@ class Turn:
         self.controlling = None      # {"by", "target"} once a model has driven an app in this turn
         self.blocked = set()         # tools this turn may not use
         self.sandbox = None          # Mod Aero chat: the only folder writes may touch (mods.prepare_turn)
+        self.approval_mode = "ask"   # autonomy.py: ask | batch | auto (pipeline sets it for chats and loop rounds)
+        self.loop_round = False
+        self.untrusted = []          # web pages, mail and other internet content read this turn (for the authority)
 
     def rebind(self, new_id):
+        autonomy.rebind(self.chat_id, new_id)
         self.chat_id = new_id
         _cancel[new_id] = self.cancel
         self.tctx.chat_id = new_id
@@ -662,13 +669,40 @@ async def _handoff(turn, lane):
     turn.handoff = False
 
 
-async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=None, out=None):
+def _recent(turn, n=6):
+    """One line per recent tool call of this turn, for the authority model."""
+    out = []
+    for m in turn.history[getattr(turn, "start_index", 0):]:          # a subagent's own history from its start
+        if m.get("role") == "tool":
+            out.append(f"{m.get('name')} {m.get('label') or ''}: {(m.get('content') or '')[:120]}".replace("\n", " "))
+    return out[-n:]
+
+
+async def _authority(turn, name, args, label, category, physical):
+    """Full automation: the authority model decides. Never allows when it can't answer."""
+    root = _root(turn)
+    task = getattr(root, "loop_task", "") or _last_user_text(root.history)
+    action = {"name": name, "category": category, "side_effect": capabilities.caps_of(name, category).side_effect,
+              "label": label, "args": args, "physical": physical}
+    try:
+        v = await asyncio.to_thread(autonomy.judge, task, action, _recent(turn), root.untrusted)
+    except Exception as e:  # noqa: BLE001
+        v = {"decision": "deny", "reason": f"The authority model could not decide ({type(e).__name__}: {e})"[:200],
+             "ms": None, "model": None, "error": True}
+    autonomy.log({"ts": time.time(), "chat_id": root.chat_id, "tool": name, "label": label, "category": category,
+                  "physical": physical, **v})
+    return v
+
+
+async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=None, out=None, preapproved=False,
+                    prefix=""):
     """Run one tool call with the user's approval policy. Yields UI events; the result lands in out['res'].
 
     On the way: Strict Background Only and the foreground-control grant for anything that would use the user's real
     mouse or keyboard (input_guard.py), the exclusive locks for that input and for the agent's app window
     (resources.py), the verify-before-repeat check for consequential calls, a task-graph node, and the evidence
-    note the model sees (action_results.py)."""
+    note the model sees (action_results.py). What needs an OK is asked, queued or judged by the authority model
+    depending on the turn's approval mode (autonomy.py); preapproved: the user already approved it in a batch."""
     t = tools.REGISTRY.get(name)
     category = t.category if t else None
     pol = tools.policy(name, turn.settings)
@@ -679,15 +713,21 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
     owner = _root(turn).chat_id
     physical = bool(t) and isinstance(args, dict) and capabilities.is_physical(name, args)
     strict = physical and input_guard.strict(turn.settings)
-    fg_needed = physical and not strict and pol == "ask" and not input_guard.has_grant(owner)
-    needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set()) and not physical
+    fg_needed = physical and not strict and pol == "ask" and not input_guard.has_grant(owner) and not preapproved
+    needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set()) and not physical and not preapproved
+    approval = getattr(_root(turn), "approval_mode", "ask")
+    gate = approval if (needs or fg_needed) and args is not None and approval in ("batch", "auto") else None
+    if gate:
+        needs = fg_needed = False           # queued or judged instead of a card
     label = tools.label(name, args or {})
     node = _graph_node(turn, name, label, lane, category) if t else None
     ask_fut = None
     if needs and args is not None:          # registered before the card goes out, so an instant answer or Stop finds it
         ask_fut = _ask(call_id, _root(turn).chat_id)
     yield {"t": "tool_start", "call_id": call_id, "name": name, "args": args, "label": label, "category": category,
-           "needs_approval": needs and args is not None, "foreground": fg_needed and args is not None, "lane": lane}
+           "needs_approval": needs and args is not None, "foreground": fg_needed and args is not None, "lane": lane,
+           "gate": gate}
+    verdict = None
     if node is not None:
         turn.graph.set(node.id, "running")
         ev = _node_event(turn, node)
@@ -708,8 +748,22 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
                "error": True, "denied": True}
     elif (guard := _repeat_guard(turn, name, args)) is not None:
         res = guard
+    elif gate == "batch":
+        it, created = autonomy.enqueue(owner, call_id, name, args, label, category, physical,
+                                       by=control.actor(turn, lane), lane=lane)
+        if created:
+            yield {"t": "queued", "item": autonomy.public(it), "lane": lane}
+        res = {"text": autonomy.queued_text(it, created), "queued": True}
     else:
         decision = "allow"
+        if gate == "auto":
+            verdict = await _authority(turn, name, args, label, category, physical)
+            yield {"t": "authority", "call_id": call_id, "name": name, "label": label, "lane": lane, **verdict}
+            decision = "allow" if verdict["decision"] == "allow" and not turn.cancel.is_set() else "deny"
+            if decision == "allow" and physical:
+                input_guard.grant(owner, "once")
+        elif preapproved and physical:
+            input_guard.grant(owner, "once")
         if ask_fut is not None:
             decision = "deny" if turn.cancel.is_set() else await ask_fut
         if fg_needed and decision != "deny" and not turn.cancel.is_set():
@@ -720,7 +774,11 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
             decision = "deny" if turn.cancel.is_set() else await fut
             if decision in ("allow", "allow_task"):
                 input_guard.grant(owner, "task" if decision == "allow_task" else "once")
-        if decision == "deny" or turn.cancel.is_set():
+        if verdict and decision == "deny" and not turn.cancel.is_set():
+            res = {"text": f"Aero's authority model denied this action: {verdict['reason']} Stay within what the user "
+                           "asked for and find another way, or say in your reply what would need the user.",
+                   "error": True, "denied": True}
+        elif decision == "deny" or turn.cancel.is_set():
             res = {"text": "The user denied this action. Ask what they want instead, or try another approach.",
                    "error": True, "denied": True}
         else:
@@ -772,8 +830,13 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
         ask_fut.cancel()
     if t:
         _note_outcome(turn, name, args, res)
+        caps = capabilities.caps_of(name, category)
+        if caps.network == "internet" and capabilities.read_only(name, args) and not res.get("error"):
+            u = _root(turn).untrusted
+            if label not in u:
+                u.append(label or name)
     evidence = action_results.evidence(res.get("envelope"))
-    content = res.get("text", "") + (("\n" + evidence) if evidence else "")
+    content = prefix + res.get("text", "") + (("\n" + evidence) if evidence else "")
     tmsg = {"role": "tool", "tool_call_id": call_id, "name": name, "content": content,
             "error": bool(res.get("error")), "image": res.get("image"), "label": label, "lane": lane}
     env = res.get("envelope") or {}
@@ -783,8 +846,17 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
             tmsg["mode"] = env["control_mode"]
     if res.get("denied"):
         tmsg["denied"] = True
+    if res.get("queued"):
+        tmsg["queued"] = True
+    if isinstance(res.get("preview"), dict):
+        tmsg["preview"] = res["preview"]           # an image, diagram or live web preview for the chat and workspace
+    if verdict:
+        tmsg["authority"] = {k: verdict.get(k) for k in ("decision", "reason", "model", "ms")}
+    if preapproved:
+        tmsg["approved_batch"] = True
     if node is not None:
-        st = "cancelled" if res.get("denied") or turn.cancel.is_set() else "failed" if res.get("error") else "completed"
+        st = ("waiting_for_user" if res.get("queued") else
+              "cancelled" if res.get("denied") or turn.cancel.is_set() else "failed" if res.get("error") else "completed")
         turn.graph.set(node.id, st, result=(res.get("text") or "")[:200] if st == "completed" else None,
                        error=(res.get("text") or "")[:200] if st != "completed" else None)
         ev = _node_event(turn, node)
@@ -808,7 +880,9 @@ def load_tools_schema(turn, all_schemas):
             rest.setdefault(cat, []).append(n)
     if not rest:
         return None
-    listing = "; ".join(f"{c}: {', '.join(ns)}" for c, ns in rest.items())
+    # names per category, a few for big ones (an MCP server can bring 170 tools); kept under ~300 tokens
+    listing = "; ".join(f"{c}: {', '.join(ns[:6])}" + (f" and {len(ns) - 6} more" if len(ns) > 6 else "")
+                        for c, ns in rest.items())[:1100]
     return {"type": "function", "function": {
         "name": "load_tools",
         "description": "Load more tools for this task when the ones you have are not enough. Not loaded yet: "
@@ -817,34 +891,106 @@ def load_tools_schema(turn, all_schemas):
                        "required": ["names"]}}}
 
 
+TOOL_SHARE = 0.35        # the most of the context window tool definitions may take
+# what a turn without a router decision keeps first when not every tool fits (with the request's capability hints)
+ESSENTIAL = {"web_search", "fetch_url", "read_file", "write_file", "edit_file", "find_files", "run_command"}
+
+
+def _schema_cost(s):
+    return len(json.dumps(s)) / 3.6
+
+
+def tool_budget(turn):
+    return int((getattr(turn, "ctx_size", 0) or 32768) * TOOL_SHARE)
+
+
+def fit_tools(turn, schemas):
+    """The tool definitions that fit tool_budget, in registry order (a stable prompt prefix), chosen in this order: the
+    request's hinted tools and ESSENTIAL, Aero's other tools, integration tools, MCP tools. Before, every tool went out
+    when no router decision existed, and one MCP server (rea: 170 tools) made a 230,000-token request for an
+    8,192-token context."""
+    from . import capabilities, pipeline
+    budget = tool_budget(turn) - 400                     # room for load_tools
+    if sum(_schema_cost(s) for s in schemas) <= budget + 400:
+        return schemas
+    names = [s["function"]["name"] for s in schemas]
+    first = set(capabilities.hint_tools(_last_user_text(getattr(turn, "history", None) or []), names)) | ESSENTIAL
+
+    def rank(i):
+        t = tools.REGISTRY.get(names[i])
+        cat = t.category if t else "other"
+        return (0 if names[i] in first else 3 if cat == "mcp" else 2 if cat in pipeline.INTEGRATION_CATEGORIES
+                else 1), i
+    keep, used = set(), 0.0
+    for i in sorted(range(len(schemas)), key=rank):
+        c = _schema_cost(schemas[i])
+        if used + c <= budget:
+            keep.add(i)
+            used += c
+    return [s for i, s in enumerate(schemas) if i in keep]
+
+
+def bare_tool_call(text, settings, blocked=()):
+    """(name, args, (start, end)) of a {"name": <an enabled tool>, "parameters"|"arguments": {...}} that ends the
+    text (only a code fence may follow), so a JSON example inside an explanation never runs."""
+    enabled = {s["function"]["name"] for s in tools.schemas(settings)} - set(blocked)
+    dec = json.JSONDecoder()
+    for m in re.finditer(r'\{\s*"name"\s*:', text):
+        try:
+            obj, end = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if not isinstance(obj, dict) or obj.get("name") not in enabled or text[end:].strip().strip("`").strip():
+            continue
+        args = obj.get("parameters", obj.get("arguments", {}))
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                continue
+        if isinstance(args, dict):
+            return obj["name"], args, (m.start(), end)
+    return None
+
+
 def current_schemas(turn):
     if not turn.settings.get("tools_enabled", True):
         return []
     blocked = getattr(turn, "blocked", None) or ()
     allv = [x for x in tools.schemas(turn.settings) if x["function"]["name"] not in blocked]
-    if turn.exposed is None:
+    sel = allv if turn.exposed is None else [s for s in allv if s["function"]["name"] in set(turn.exposed)]
+    fitted = fit_tools(turn, sel)
+    if turn.exposed is None and len(fitted) == len(allv):
         return allv
-    keep = set(turn.exposed)
-    sel = [s for s in allv if s["function"]["name"] in keep]
+    turn.exposed = [s["function"]["name"] for s in fitted]
     lt = load_tools_schema(turn, allv)
-    return sel + ([lt] if lt else [])
+    return fitted + ([lt] if lt else [])
 
 
 def _do_load_tools(turn, args):
     allv = {s["function"]["name"]: s for s in tools.schemas(turn.settings)}
     want = [str(x) for x in (args or {}).get("names") or []]
-    added = []
+    added, too_big = [], []
+    used = sum(_schema_cost(allv[n]) for n in turn.exposed or [] if n in allv)
+    budget = tool_budget(turn)
     for w in want:
         for n in allv:
             cat = tools.REGISTRY[n].category if n in tools.REGISTRY else ""
             if (n == w or cat == w) and n not in (turn.exposed or []):
+                c = _schema_cost(allv[n])
+                if used + c > budget:                    # would crowd the conversation out of the context window
+                    too_big.append(n)
+                    continue
                 turn.exposed.append(n)
                 added.append(n)
+                used += c
     known = set(turn.exposed or [])
     turn.exposed = [n for n in allv if n in known]          # keep registry order (stable prefix)
+    note = (f" Not loaded, too large for the room tools have in this context ({budget:,} tokens): "
+            + ", ".join(too_big[:20]) + ("..." if len(too_big) > 20 else "") + ".") if too_big else ""
     if not added:
-        return f"Nothing new loaded. Valid names: {', '.join(allv)}"
-    return "Loaded: " + ", ".join(added) + ". They are available from your next step."
+        return (f"Nothing new loaded.{note} Valid names: {', '.join(allv)}")[:6000]
+    return "Loaded: " + ", ".join(added) + ". They are available from your next step." + note
 
 
 # ------------------------------------------------------------------------------------------------ local loop
@@ -858,6 +1004,11 @@ async def run_local(turn, lane="local", max_steps=None):
     compact_at = 0 if getattr(turn, "is_sub", False) else float(settings.get("auto_compact_at") or 0)
     overflow = 0
     tools_rejected = False
+    force_text = False           # after an empty reply: ask once more with tool_choice "none" (that request only)
+    empty_retried = False
+    if not getattr(turn, "is_sub", False):
+        async for ev in run_decided(turn, lane):      # actions approved after the last turn ended run first
+            yield ev
     for step in range(max_steps):
         if turn.cancel.is_set():
             return
@@ -880,6 +1031,9 @@ async def run_local(turn, lane="local", max_steps=None):
         if schemas:
             body["tools"] = schemas
             body["parallel_tool_calls"] = True
+            if force_text:
+                body["tool_choice"] = "none"
+                force_text = False
 
         msg = {"role": "assistant", "content": "", "reasoning": "", "id": uuid.uuid4().hex[:10], "lane": lane,
                "model": turn.model_name}
@@ -963,6 +1117,18 @@ async def run_local(turn, lane="local", max_steps=None):
             if calls:
                 msg["content"] = TOOL_CALL_RE.sub("", msg["content"]).strip()
 
+        # fallback: a bare JSON call ({"name": ..., "parameters" or "arguments": {...}}), which Llama 3.x prints when
+        # the tool it wants wasn't offered (llama-server drops such a structured call, hence force_text above). A
+        # real, enabled Aero tool runs as a normal call (its permission applies as always) and stays loaded.
+        if not calls and schemas and '"name"' in msg["content"]:
+            found = bare_tool_call(msg["content"], turn.settings, getattr(turn, "blocked", None) or ())
+            if found:
+                name, args, (a, b) = found
+                calls[0] = {"id": None, "name": name, "args": json.dumps(args)}
+                msg["content"] = re.sub(r"```\w*\s*```", "", msg["content"][:a] + msg["content"][b:]).strip()
+                if turn.exposed is not None and name not in turn.exposed:
+                    turn.exposed.append(name)
+
         if msg["reasoning"] == "" and "<think>" in msg["content"]:
             m = re.search(r"<think>(.*?)(</think>|$)", msg["content"], re.S)
             msg["reasoning"] = m.group(1).strip()
@@ -975,6 +1141,14 @@ async def run_local(turn, lane="local", max_steps=None):
                                "function": {"name": c["name"], "arguments": c["args"] or "{}"}})
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        if not tool_calls and not msg["content"].strip() and not msg["reasoning"].strip() and schemas \
+                and not empty_retried and not turn.cancel.is_set():
+            # Nothing came back: llama-server drops a tool call it can't match to an offered tool (seen live: Llama
+            # 3.3 called web_search while it wasn't offered, and the reply was empty). Ask once more for an answer.
+            force_text = empty_retried = True
+            yield {"t": "notice", "text": "The model's reply came back empty (a tool call that matched none of the "
+                                          "offered tools); asking it to answer directly."}
+            continue
         dt = time.time() - t0
         msg["stats"] = {
             "tg": round(timings.get("predicted_per_second") or 0, 1),
@@ -994,6 +1168,13 @@ async def run_local(turn, lane="local", max_steps=None):
         turn.history.append(msg)
         yield {"t": "assistant_done", "message": msg}
 
+        if not tool_calls and not turn.cancel.is_set() and not getattr(turn, "is_sub", False) \
+                and autonomy.pending(turn.chat_id):
+            ran = {}
+            async for ev in _batch_end(turn, lane, ran):
+                yield ev
+            if ran.get("n"):
+                continue                              # the model sees the results and finishes its reply
         if turn.cancel.is_set() or not tool_calls:
             return
 
@@ -1086,6 +1267,69 @@ async def _run_parallel(turn, batch, lane):
         msg = boxes[k].get("msg") or {"role": "tool", "tool_call_id": tc["id"], "name": name, "content": "Not run.",
                                       "error": True, "label": "", "lane": lane}
         turn.history.append(msg)
+
+
+# ------------------------------------------------------------------------------------------------ batch approvals
+
+async def run_decided(turn, lane="local"):
+    """Run the chat's queued actions the user approved (and report the denied ones) as one assistant step, so the
+    model sees their results like any tool call."""
+    its = autonomy.take_decided(turn.chat_id)
+    if not its:
+        return
+    calls = [{"id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
+              "function": {"name": it["name"], "arguments": json.dumps(it["args"], ensure_ascii=False)}} for it in its]
+    msg = {"role": "assistant", "content": "", "id": uuid.uuid4().hex[:10], "lane": lane, "model": turn.model_name,
+           "tool_calls": calls, "batch": [it["n"] for it in its]}
+    turn.history.append(msg)
+    yield {"t": "assistant_start", "id": msg["id"], "lane": lane, "model": turn.model_name}
+    yield {"t": "assistant_done", "message": msg}
+    for it, tc in zip(its, calls):
+        if turn.cancel.is_set():
+            autonomy.finish(it["id"], "cancelled")
+            break
+        if it["status"] == "denied":
+            tmsg = {"role": "tool", "tool_call_id": tc["id"], "name": it["name"], "label": it["label"], "lane": lane,
+                    "content": f"Queued action #{it['n']} was denied by the user. Don't do it another way.",
+                    "error": True, "denied": True}
+            yield {"t": "tool_start", "call_id": tc["id"], "name": it["name"], "args": it["args"], "label": it["label"],
+                   "category": it["category"], "needs_approval": False, "lane": lane}
+            turn.history.append(tmsg)
+            yield {"t": "tool_result", "message": tmsg}
+            autonomy.finish(it["id"], "denied", "denied")
+            continue
+        box = {}
+        async for ev in exec_tool(turn, tc["id"], it["name"], it["args"], lane, out=box, preapproved=True,
+                                  prefix=f"Queued action #{it['n']}, approved by the user and run now:\n"):
+            yield ev
+        m = box.get("msg") or {"role": "tool", "tool_call_id": tc["id"], "name": it["name"], "content": "Not run.",
+                               "error": True, "label": it["label"], "lane": lane}
+        turn.history.append(m)
+        autonomy.finish(it["id"], "failed" if m.get("error") else "done", (m.get("content") or "")[:300])
+    yield {"t": "queue", "items": [autonomy.public(x) for x in autonomy.items(turn.chat_id)]}
+
+
+async def _batch_end(turn, lane, ran):
+    """End of a reply with actions still queued: wait for the user's decision (not in forever-loop rounds), then run
+    what they approved. ran['n'] = how many were handed back to the model."""
+    n = len(autonomy.pending(turn.chat_id))
+    wait_s = 0 if turn.loop_round else float(turn.settings.get("batch_wait_s") or 600)
+    if wait_s > 0:
+        yield {"t": "batch_wait", "count": n, "lane": lane, "timeout": wait_s,
+               "items": [autonomy.public(x) for x in autonomy.items(turn.chat_id, ("pending",))]}
+        await autonomy.wait(turn.chat_id, turn.cancel, wait_s)
+    if turn.cancel.is_set():
+        return
+    decided = [x for x in autonomy.items(turn.chat_id, ("approved", "denied")) if not x.get("taken")]
+    if decided:
+        async for ev in run_decided(turn, lane):
+            yield ev
+        ran["n"] = len(decided)
+    left = len(autonomy.pending(turn.chat_id))
+    if left:
+        yield {"t": "notice", "lane": lane, "text": f"{left} action{'s' if left != 1 else ''} still wait{'s' if left == 1 else ''} "
+                                                    "for your OK. Approve them whenever you like: they run then and this chat "
+                                                    "continues from their results."}
 
 
 # ------------------------------------------------------------------------------------------------ questions
@@ -1199,7 +1443,8 @@ async def run_subagent(turn, call_id, args, lane="local"):
     name = agents.clean_name(args.get("name")) or agents.name_from_text(task)
     label = f"{name}: {task}"[:160]
     pol = tools.policy("run_subagent", turn.settings)
-    needs = pol == "ask" and "agents" not in _chat_allow.get(turn.chat_id, set())
+    needs = pol == "ask" and "agents" not in _chat_allow.get(turn.chat_id, set()) and \
+        getattr(_root(turn), "approval_mode", "ask") == "ask"
     yield {"t": "tool_start", "call_id": call_id, "name": "run_subagent", "args": args, "label": label,
            "category": "agents", "needs_approval": needs and bool(task), "lane": lane}
     err = None

@@ -84,7 +84,7 @@ def read_file(ctx, path, start_line=1, max_lines=600):
     s = max(1, int(start_line or 1))
     n = max(1, int(max_lines or 600))
     chunk = lines[s - 1:s - 1 + n]
-    body = "\n".join(f"{i:>5}  {l}" for i, l in enumerate(chunk, s))
+    body = "\n".join(f"{i:>5}  {line}" for i, line in enumerate(chunk, s))
     more = len(lines) - (s - 1 + len(chunk))
     tail = f"\n... {more} more lines (use start_line={s + len(chunk)})" if more > 0 else ""
     return f"{p} ({len(lines)} lines){(' ' + note) if note else ''}\n{body}{tail}"

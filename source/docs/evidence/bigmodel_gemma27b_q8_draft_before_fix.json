@@ -1,0 +1,48 @@
+{
+ "model": "gemma-3-27b-it-Q8_0.gguf",
+ "size_gb": 26.73,
+ "budget_mb": 2600,
+ "ctx": 8192,
+ "ram_free_mb": 49251,
+ "at": "2026-10-11 21:00:00",
+ "results": [
+  {
+   "strategy": "layers+draft-simple",
+   "ok": true,
+   "cfg": {
+    "ngl": 4
+   },
+   "spec": [
+    "--spec-type",
+    "draft-simple",
+    "-md",
+    "<test folder>\\models\\big\\unsloth__gemma-3-1b-it-GGUF\\gemma-3-1b-it-Q8_0.gguf",
+    "-ngld",
+    "99",
+    "--spec-draft-n-max",
+    "8"
+   ],
+   "planned_gpu_mb": 2187,
+   "planned_cpu_mb": 26116,
+   "vram_mb": 4404,
+   "load_s": 6.8,
+   "runs": [
+    {
+     "pp": 170.75,
+     "tg": 3.34,
+     "prompt_n": 2289,
+     "gen_n": 128
+    },
+    {
+     "pp": 239.78,
+     "tg": 2.83,
+     "prompt_n": 2289,
+     "gen_n": 128
+    }
+   ],
+   "pp": 239.78,
+   "tg": 2.83,
+   "note": "3 of 62 layers and the output layer on the GPU"
+  }
+ ]
+}

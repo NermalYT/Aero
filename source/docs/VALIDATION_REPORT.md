@@ -1,5 +1,37 @@
 # Validation report
 
+## Aero 1.2.0 (2026-10-12)
+
+Ran on the same Windows 11 Pro PC (Ryzen 9 9950X3D2, 62 GB RAM, RTX 5080 16 GB) in throwaway folders, and in GitHub
+Actions on Windows Server 2025, Ubuntu 24.04 and macOS 15. Per-check detail with every NOT RUN item:
+[V1.2_TEST_MATRIX.md](V1.2_TEST_MATRIX.md). Measurements: [V1.2_PERFORMANCE_REPORT.md](V1.2_PERFORMANCE_REPORT.md),
+[V1.2_BIG_MODELS.md](V1.2_BIG_MODELS.md). Raw results: `docs/evidence/live_1.2_*.json`.
+
+| Check | Where | Result |
+|---|---|---|
+| Unit and mocked tests (`python -m unittest discover -s tests`) | Windows 11 PC | 291 tests, OK (8 opt-in live checks skipped) |
+| Same | CI: Windows, Ubuntu, macOS | passed on all three (Windows Server 2025, Ubuntu 24.04, macOS 15) |
+| An installed release updated in place by this build (`validation/check_windows_update.py`, CI `windows-update`) | CI: Windows, from 1.0.0 and from the newest release | passed from 1.0.0 and from 1.1.0 (the newest release) |
+| Same, on the test PC (from the published 1.1.0 zip) | Windows 11 PC, throwaway folder | 38 / 38 |
+| Every integration pack installed and used through Aero's code | Windows 11 PC, real downloads, Qwen3-4B on the GPU where a model is needed | IN-8 to IN-25 in the test matrix: passed, with the defects below fixed on the way; NOT RUN items listed there |
+| Models bigger than the GPU | RTX 5080: Llama-3.3-70B Q6_K, Gemma-3-27B Q8_0 (llama.cpp plans); Qwen2.5-7B and 32B (AirLLM) | 70B 4.85 tok/s with a draft; 27B in 3.1 GB at 2.6 tok/s; AirLLM 32B bf16 30 s per token in 1.9 GB |
+| The 70B in the real UI: plan, load, chat with router and tools | Windows 11 PC, browser pane | answered at 3.1 tok/s after three fixes (below) |
+| Authority model exam (`validation/bench_authority.py`) | CPU | Qwen3-4B 32/32, no trap allowed |
+| Router (`validation/bench_router_intents.py`) | MiniCPM5-2B, CPU and GPU | 50/50 both; p50 1.64 s CPU, 0.39 s GPU |
+| 1.0.0 and 1.1.0 data folders opened by 1.2 (`validation/check_upgrade.py`) | Windows 11 PC, throwaway folders | 24 / 24 each |
+| Lint (ruff E4/E7/E9/F) | Windows 11 PC | no findings (the 15 left from 1.0 fixed) |
+
+Defects found by the live runs and fixed before release: AirLLM models sharing one folder of layer files;
+bitsandbytes missing for AirLLM's 4-bit/8-bit options; RAD Debugger's control port open on every interface (now gated
+on Windows Firewall); Hindsight's database URL and its forced tool calls; Aero's rustup environment; `go test` build
+failures not reported; xtool's installer on a fresh WSL account; Flutter's shared telemetry file left on; the deck
+check mixing units; image generation using 8.8 GB of VRAM; helper models listed as chat models; MCP schemas with
+`$ref` breaking every request; tool definitions overflowing the context; empty replies when a model calls a tool it
+wasn't offered; the release build leaving out the Library's bundled lists (every folder named `data` was
+skipped).
+
+---
+
 ## Aero 1.1.0 (2026-10-09)
 
 Ran on a real Windows 11 Pro PC (build 26200; Ryzen 9 9950X3D2, 62 GB RAM, RTX 5080 16 GB, driver 616.92; Python

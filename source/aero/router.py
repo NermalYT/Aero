@@ -9,6 +9,12 @@ forced into a JSON grammar so every decision is valid.
 
 The router's own prompt (rules + tool catalog) is fixed, so llama-server keeps it in its prompt cache
 and each decision only reads the new request (a few hundred tokens).
+
+What a decision costs is the JSON it writes: on the test PC's CPU the router model generates about 40 tokens a
+second, so every field counts. 1.2 asks only for what Aero uses: a short intent first (measured: without it the router model called
+real requests "trivial" and picked no tools, 45/50 instead of 50/50), a plan only for long multi-step requests when
+the setting allows it, the preference field only when the message sounds like a standing preference (the same check
+that decides whether one is kept), and no router call at all for greetings and thanks.
 """
 import json
 import os
@@ -41,13 +47,13 @@ COMPANIONS = {
 
 RULES = """You are the decision router of Aero, a local AI agent on the user's computer. You never answer the user. You read the request and decide how the main model should handle it, by filling in the JSON form.
 
-Fields
-- intent: what the user wants, in under 15 words.
+Fields (fill in the ones the form asks for)
+- intent: what the user wants, in under 10 words. Write it first; it decides everything else.
 - complexity: trivial (greeting, one-line fact, small talk), simple (one or two steps), moderate (several steps or tools), complex (long multi-step work, code changes across files, research, debugging).
 - tools: the tools the main model needs for THIS request, from the catalog only. Pick everything the task plausibly needs (reading before writing, looking before clicking, searching before fetching); a missing tool costs much more than an extra one. Use [] for chat that needs no tools.
 - think: true when careful reasoning helps (math, code, planning, debugging, comparisons, tricky questions); false for chat, lookups and simple actions.
 - vision: true only when images, screenshots or looking at app windows matter.
-- plan: up to 5 short imperative steps for the main model; [] for trivial requests.
+- plan (only on some forms): up to 4 short imperative steps for the main model.
 - review: true when a second opinion from a stronger cloud model would clearly help (substantial code changes, important documents, risky system changes, long research); false otherwise.
 - preference: when the new request states a LASTING preference about how the assistant should work or write (tone, length, format, level of detail, things to avoid, what to call the user), restate it as one short sentence about the user, e.g. "Prefers short answers without headers." or "Wants code fully commented.". An instruction for this one task only ("make this one shorter") is not a preference. Otherwise "".
 
@@ -60,6 +66,24 @@ Rules
 - Earlier chats or personal facts: recall (and remember to save new lasting facts).
 - Big jobs with separate parts or a lot of reading (many files, long logs, several searches, checking work): add run_subagent.
 - If the user continues an earlier task ("do it again", "now fix that", "continue"), choose the same kind of tools as the context shows."""
+
+# A standing preference ("from now on…", "I prefer…"): only then is the router asked for one, and only then is it kept.
+PREF_CUE = re.compile(
+    r"\b(i (really |much |would )?(prefer|like|love|hate|dislike|can'?t stand|want you|need you|don'?t want|do not want)"
+    r"|(don'?t|do not|never|always|stop|quit) (use|using|add|adding|write|writing|give|giving|say|saying|call|ask|asking|be)"
+    r"|from now on|going forward|in (the )?future|every time|next time|too (long|short|wordy|verbose|formal|casual|basic|technical)"
+    r"|call me|my name is|keep (it|them|answers|responses|replies) (short|brief|simple|detailed)"
+    r"|(no|less|fewer|more) (fluff|filler|emojis?|detail|bullets?|headers?|jargon|explanation|comments)"
+    r"|my (writing )?style|the way i like)", re.I)
+
+# Messages that need no tools and no decision: answered by the main model straight away.
+TRIVIAL = re.compile(
+    r"^\s*(hi|hey|hello|hiya|yo|sup|good (morning|afternoon|evening|night)|thanks?( you)?( so much| a lot)?|thx|ty|"
+    r"ok(ay)?|k|cool|nice|great|awesome|perfect|got it|sounds good|lol|haha|bye|goodbye|see ya|gn|"
+    r"how are you( doing)?|what'?s up|who are you)[\s!.?,:)]*$", re.I)
+
+# A request worth a plan: long, or several steps joined together.
+MULTI_STEP = re.compile(r"\b(and then|then|after that|afterwards|next|finally|first)\b|;|\n\s*[-*\d]", re.I)
 
 _state = {"server": None, "ready": False, "error": None, "model": None, "threads": None, "warm": False,
           "loading": False, "last": None, "prefix_key": None}
@@ -110,13 +134,29 @@ def default_threads():
     return max(2, min(8, physical_cores() // 2))
 
 
-def server_args(path, threads, batch_threads=None):
-    cfg = {"ctx": CTX, "ngl": 0, "kv": "f16", "fa": True, "threads": threads, "ub": 512}
+def on_gpu(settings=None):
+    """The router runs on the GPU only when the user chose it (Settings > Router) and Remote Mode isn't freeing VRAM."""
+    s = settings or load_settings()
+    return s.get("router_device") == "gpu" and not _state.get("remote")
+
+
+def set_remote(on):
+    """Remote Mode switched the main model (server._engine_reload): a GPU router moves to the CPU while it's on."""
+    on = bool(on)
+    if _state.get("remote") == on:
+        return
+    _state["remote"] = on
+    if load_settings().get("router_device") == "gpu" and (_state.get("server") or _state.get("ready")):
+        start()
+
+
+def server_args(path, threads, batch_threads=None, gpu=False):
+    cfg = {"ctx": CTX, "ngl": 999 if gpu else 0, "kv": "f16", "fa": True, "threads": threads, "ub": 512}
     a = build_args(path, cfg, ROUTER_PORT)
     a += ["--jinja"]
     if batch_threads and supports("--threads-batch"):
         a += ["--threads-batch", str(batch_threads)]
-    if supports("--device"):
+    if supports("--device") and not gpu:
         a += ["--device", "none"]
     if supports("--reasoning-budget"):
         a += ["--reasoning-budget", "0"]
@@ -133,6 +173,7 @@ def status():
     s = _state
     srv = s["server"]
     return {"enabled": bool(load_settings().get("router_enabled", True)), "ready": s["ready"] and bool(srv and srv.running()),
+            "device": s.get("device") or "cpu",
             "loading": s["loading"], "error": s["error"], "model": s["model"], "threads": s["threads"],
             "last": s["last"], "pid": srv.proc.pid if srv and srv.running() else None,
             "configured": bool(model_path()), "bench": config().get("bench")}
@@ -157,9 +198,12 @@ def _start_blocking(emit=None):
     threads = int(s.get("router_threads") or cfg.get("threads") or default_threads())
     tb = int(cfg.get("batch_threads") or physical_cores())
     srv = _state["server"] or LlamaServer(ROUTER_PORT, "router")
-    _state.update(server=srv, loading=True, ready=False, error=None, model=Path(path).stem, threads=threads, warm=False)
+    gpu = on_gpu(s)
+    _state.update(server=srv, loading=True, ready=False, error=None, model=Path(path).stem, threads=threads, warm=False,
+                  device="gpu" if gpu else "cpu")
     try:
-        srv.start(server_args(path, threads, tb), {"CUDA_VISIBLE_DEVICES": "-1", "GGML_VK_VISIBLE_DEVICES": ""})
+        env = {} if gpu else {"CUDA_VISIBLE_DEVICES": "-1", "GGML_VK_VISIBLE_DEVICES": ""}
+        srv.start(server_args(path, threads, tb, gpu=gpu), env)
         ok, why = srv.wait_ready(180)
         if not ok:
             raise RuntimeError(f"router server {why}: " + srv.log_tail(8)[-600:])
@@ -205,23 +249,51 @@ def catalog(tool_list, skills=None):
     return "\n".join(lines)
 
 
-def schema(tool_names, skill_names=None):
+def schema(tool_names, skill_names=None, plan=False, preference=False):
+    """The JSON form the router fills in. Only the fields this request needs: each one costs generation time."""
     props = {
-        "intent": {"type": "string", "maxLength": 120},
+        "intent": {"type": "string", "maxLength": 60},
         "complexity": {"type": "string", "enum": ["trivial", "simple", "moderate", "complex"]},
         "tools": {"type": "array", "items": {"type": "string", "enum": list(tool_names) or ["none"]}, "maxItems": 14},
         "think": {"type": "boolean"},
         "vision": {"type": "boolean"},
-        "plan": {"type": "array", "items": {"type": "string", "maxLength": 140}, "maxItems": 5},
         "review": {"type": "boolean"},
     }
-    order = ["intent", "complexity", "tools", "think", "vision", "plan", "review"]
+    order = ["intent", "complexity", "tools", "think", "vision", "review"]
     if skill_names:
         props["skills"] = {"type": "array", "items": {"type": "string", "enum": list(skill_names)}, "maxItems": 3}
         order.append("skills")
-    props["preference"] = {"type": "string", "maxLength": 200}
-    order.append("preference")
+    if plan:
+        props["plan"] = {"type": "array", "items": {"type": "string", "maxLength": 90}, "maxItems": 4}
+        order.append("plan")
+    if preference:
+        props["preference"] = {"type": "string", "maxLength": 160}
+        order.append("preference")
     return {"type": "object", "additionalProperties": False, "required": order, "properties": props}
+
+
+def wants_plan(text, settings=None):
+    s = settings or load_settings()
+    return bool(s.get("router_plan", True)) and (len(text) > 160 or len(MULTI_STEP.findall(text)) >= 2)
+
+
+def trivial(history):
+    """A greeting or thanks with nothing attached: no decision needed."""
+    users = [m for m in history if m.get("role") == "user"]
+    if not users:
+        return False
+    last = users[-1]
+    if last.get("attachments") or last.get("pastes") or last.get("target_app"):
+        return False
+    return bool(TRIVIAL.match(last.get("content") or ""))
+
+
+def trivial_decision(history):
+    users = [m for m in history if m.get("role") == "user"]
+    text = (users[-1].get("content") or "") if users else ""
+    return ({"intent": _first_sentence(text, 80), "complexity": "trivial", "tools": [], "think": False,
+             "vision": False, "review": False, "skills": [], "plan": [], "preference": ""},
+            {"ms": 0, "skipped": "greeting or thanks", "model": _state["model"]})
 
 
 def _context_text(history, max_chars=1800):
@@ -265,12 +337,16 @@ def decide(history, tool_list, skills=None, timeout=45):
     names = [t[0] for t in tool_list]
     skill_names = [s["name"] for s in (skills or [])]
     sys_text = RULES + "\n\n" + catalog(tool_list, skills)
+    users = [m for m in history if m.get("role") == "user"]
+    text = (users[-1].get("content") or "") if users else ""
+    plan, pref = wants_plan(text), bool(PREF_CUE.search(text))
     body = {"messages": [{"role": "system", "content": sys_text},
                          {"role": "user", "content": _context_text(history)}],
-            "temperature": 0, "top_k": 1, "max_tokens": 420, "cache_prompt": True,
+            "temperature": 0, "top_k": 1, "max_tokens": 320, "cache_prompt": True,
             "chat_template_kwargs": {"enable_thinking": False},
             "response_format": {"type": "json_schema",
-                                "json_schema": {"name": "route", "schema": schema(names, skill_names)}}}
+                                "json_schema": {"name": "route",
+                                                "schema": schema(names, skill_names, plan=plan, preference=pref)}}}
     t0 = time.time()
     r = httpx.post(srv.url + "/v1/chat/completions", json=body, timeout=timeout)
     r.raise_for_status()
@@ -282,9 +358,13 @@ def decide(history, tool_list, skills=None, timeout=45):
     tm = j.get("timings") or {}
     d["tools"] = [n for n in dict.fromkeys(d.get("tools") or []) if n in names]
     d["skills"] = [n for n in dict.fromkeys(d.get("skills") or []) if n in skill_names]
+    d.setdefault("intent", _first_sentence(text, 80))
+    d.setdefault("plan", [])
+    d.setdefault("preference", "")
     info = {"ms": round(ms), "prompt_n": tm.get("prompt_n"), "cached_n": tm.get("cache_n"),
             "pp": round(tm.get("prompt_per_second") or 0, 1), "tg": round(tm.get("predicted_per_second") or 0, 1),
-            "gen_n": tm.get("predicted_n"), "model": _state["model"], "threads": _state["threads"]}
+            "gen_n": tm.get("predicted_n"), "model": _state["model"], "threads": _state["threads"],
+            "device": _state.get("device") or "cpu"}
     _state["last"] = {"at": time.time(), "ms": info["ms"], "intent": d.get("intent"), "tools": d["tools"]}
     return d, info
 

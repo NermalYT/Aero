@@ -12,17 +12,57 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import (advisor, agent, agents, app_registry, attachments, bench, claude_code, clarifications, cloud, experience, fit,
+from . import (advisor, agent, agents, app_registry, attachments, autonomy, bench, claude_code, clarifications, cloud, experience, fit,
                gguf, github, hapo, hardware, hf, input_guard, localonly, looplog, memory, migrate, models, mods, osinfo,
                pipeline, remote_sessions, resources, router, skills, stats, task_graph, tools, tuner, updater, vault,
                vram_policy)
-from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, VERSION, load_settings, save_settings)
+from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, UI_PORT, VERSION, load_settings,
+                     save_settings)
 from .engine import LlamaServer, build_args, server_binary, server_version, spec_args
 from .tools import mcp_client, mcp_import
 
 localonly.install()          # every outbound request from this process is checked (strict offline) and audited
 app = FastAPI(title=APP_NAME)
-ENGINE = LlamaServer(LLAMA_PORT, "main")
+
+
+# Only Aero's own window may change anything. Without this, any web page open in a browser on this PC could POST to
+# 127.0.0.1 (a text/plain body is a "simple" request: no CORS preflight) and start turns, approve queued actions or
+# install integrations; and a DNS-rebinding page could even read the answers. Programs on this PC (the overlay, the
+# updater, tests) send no Origin and are not affected.
+_OWN_HOSTS = {f"127.0.0.1:{UI_PORT}", f"localhost:{UI_PORT}", "127.0.0.1", "localhost", "testserver"}
+
+
+@app.middleware("http")
+async def _same_origin_only(request: Request, call_next):
+    host = (request.headers.get("host") or "").lower()
+    if host and host not in _OWN_HOSTS:
+        return JSONResponse({"detail": "Unknown host"}, status_code=421)
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = (request.headers.get("origin") or "").rstrip("/").lower()
+        if (origin and origin not in {f"http://{h}" for h in _OWN_HOSTS}) or                 request.headers.get("sec-fetch-site") == "cross-site":
+            return JSONResponse({"detail": "Cross-site request refused"}, status_code=403)
+    return await call_next(request)
+class _Engine:
+    """The model server Aero talks to on its model port: llama-server, or AirLLM's layer-streaming server for a
+    full-precision checkpoint (integrations/models.py). Same interface either way; use() switches."""
+
+    def __init__(self, impl):
+        self.llama = self.impl = impl
+
+    def __getattr__(self, k):
+        return getattr(self.impl, k)
+
+    def use(self, impl):
+        if self.impl is not impl:
+            self.impl.stop()
+            self.impl = impl
+
+    @property
+    def kind(self):
+        return "llama" if self.impl is self.llama else "airllm"
+
+
+ENGINE = _Engine(LlamaServer(LLAMA_PORT, "main"))
 STATE = {"status": "idle", "model": None, "ctx": 0, "vision": False, "desc": "", "error": None,
          "url": ENGINE.url, "tune": None, "warning": None, "cfg": None, "remote": False}
 _job = {"cancel": threading.Event(), "busy": False}
@@ -105,7 +145,7 @@ def get_hw():
     return hw(force=True)
 
 
-ROUTER_KEYS = {"router_enabled", "router_model", "router_threads"}
+ROUTER_KEYS = {"router_enabled", "router_model", "router_threads", "router_device"}
 GITHUB_KEYS = {"github_toolsets", "github_read_only"}
 
 
@@ -358,6 +398,7 @@ def cancel_job():
 
 def unload():
     ENGINE.stop()
+    ENGINE.use(ENGINE.llama)
     STATE.update(status="idle", model=None, ctx=0, vision=False, desc="", warning=None, cfg=None, remote=False)
 
 
@@ -448,7 +489,6 @@ async def load(req: Request):
         s = load_settings()
         unload()
         h = hw(force=True)
-        ver = server_version()
         spec = spec_args(m["path"], s)
         key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
         entry = None if retune else tuner.cached(key)
@@ -1154,6 +1194,8 @@ def shutdown():
     ENGINE.stop()
     router.stop()
     mcp_client.stop_all()
+    from . import integrations
+    integrations.stop_all()
     threading.Timer(0.3, lambda: os._exit(0)).start()
     return {"ok": True}
 
@@ -1694,6 +1736,298 @@ def cancel_question(qid: str):
     return {"ok": True}
 
 
+# ---- v1.2 integrations (integrations/*) -------------------------------------------------------------------------
+
+_ijobs = {}                 # pack id -> running install (installs don't block model loads)
+
+
+@app.get("/api/integrations")
+def integrations_overview():
+    from . import integrations
+    return {"workspaces": integrations.overview()}
+
+
+@app.get("/api/integrations/ws/{ws}")
+def integrations_panel(ws: str):
+    from . import integrations
+    if ws not in integrations.WS_IDS:
+        raise HTTPException(404, "Unknown workspace")
+    return integrations.panel(ws)
+
+
+@app.post("/api/integrations/install")
+async def integrations_install(req: Request):
+    from . import integrations
+    b = await req.json()
+    pack, rid = str(b.get("pack") or ""), b.get("requirement")
+    if pack not in integrations.PACKS:
+        raise HTTPException(404, "Unknown integration")
+    if _ijobs.get(pack):
+        raise HTTPException(409, "Already installing this integration.")
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+    cancel = threading.Event()
+    _ijobs[pack] = cancel
+
+    def emit(ev):
+        if isinstance(ev, dict) and ev.get("type") == "log" and "message" in ev and "text" not in ev:
+            ev = {**ev, "text": ev["message"]}
+        loop.call_soon_threadsafe(q.put_nowait, ev)
+
+    def runner():
+        try:
+            done = integrations.install(pack, rid, emit, cancel)
+            emit({"type": "result", "result": {"done": done, "pack": integrations.PACKS[pack].public()}})
+        except Exception as e:  # noqa: BLE001
+            emit({"type": "error", "error": str(e)})
+        finally:
+            _ijobs.pop(pack, None)
+            emit(None)
+    threading.Thread(target=runner, daemon=True).start()
+
+    async def gen():
+        while True:
+            ev = await q.get()
+            if ev is None:
+                break
+            yield sse(ev)
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/api/integrations/cancel")
+async def integrations_cancel(req: Request):
+    b = await req.json()
+    ev = _ijobs.get(str(b.get("pack") or ""))
+    if ev:
+        ev.set()
+    return {"ok": bool(ev)}
+
+
+_FILES = {"diagrams": DATA / "diagrams", "images": DATA / "images"}
+
+
+@app.get("/api/integrations/file/{kind}/{name}")
+def integrations_file(kind: str, name: str):
+    base = _FILES.get(kind)
+    if not base or "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(404)
+    p = (base / name).resolve()
+    if base.resolve() not in p.parents or not p.is_file():
+        raise HTTPException(404)
+    headers = {}
+    if p.suffix.lower() in (".html", ".htm", ".svg"):
+        # shown in a sandboxed frame; no network except the fonts diagram-design may use
+        headers["Content-Security-Policy"] = ("sandbox allow-scripts; default-src 'none'; img-src data: blob:; "
+                                              "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                                              "font-src https://fonts.gstatic.com data:; script-src 'unsafe-inline'")
+    return FileResponse(p, headers=headers)
+
+
+UI_TOOL_CATEGORIES = ("integrations", "dev", "setup", "create")
+
+
+@app.post("/api/integrations/run")
+async def integrations_run(req: Request):
+    """A workspace button runs one integration tool directly (the user pressed it: that is the approval). Only the
+    integration categories; file, shell, desktop and browser tools stay with the agent and their permissions."""
+    b = await req.json()
+    name, args = str(b.get("tool") or ""), b.get("args") or {}
+    t = tools.REGISTRY.get(name)
+    if not t or t.category not in UI_TOOL_CATEGORIES or not isinstance(args, dict):
+        raise HTTPException(400, "Not an integration tool")
+    s = load_settings()
+    ctx = tools.Ctx(s, False, "ui-" + name, threading.Event())
+    res = await asyncio.to_thread(tools.run, name, args, ctx)
+    return {"text": res.get("text"), "error": bool(res.get("error")), "image": res.get("image"),
+            "preview": res.get("preview")}
+
+
+@app.get("/api/library/search")
+def library_search_api(q: str = "", source: str = "", tag: str = "", limit: int = 40):
+    from .integrations import library
+    res = library.search(q, source or None, tag or None, max(1, min(200, limit)))
+    return {"results": res, "sources": library.SOURCES}
+
+
+@app.post("/api/bigmodel/plan")
+async def bigmodel_plan_api(req: Request):
+    from . import bigmodel
+    import psutil
+    b = await req.json()
+    p = Path(str(b.get("path") or ""))
+    if not p.exists():
+        raise HTTPException(404, "No such file")
+    h = hw()
+    budget = int(float(b.get("budget_gb") or 0) * 1024) or max(512, (h.get("vram_total_mb") or 0)
+                                                                 - (hardware.gpu_used_mb() or 0) - 300)
+    info = await asyncio.to_thread(bigmodel.inspect, p)
+    from .config import models_dir
+    dr = bigmodel.draft_for(info, models_dir())
+    use_draft = dr and dr[2] and b.get("draft", True)
+    plans = bigmodel.plan(info, budget, psutil.virtual_memory().available // 2**20, int(b.get("ctx") or 8192),
+                          draft_path=dr[2] if use_draft else None)
+    for x in plans:
+        x["est_tg"] = bigmodel.estimate_tg(x)
+    return {"model": p.name, "size_gb": round(info["total"] / 2**30, 2), "layers": len(info["layers"]),
+            "moe": info["moe"], "budget_mb": budget, "plans": plans,
+            "draft": {"repo": dr[0], "quant": dr[1], "path": dr[2]} if dr else None}
+
+
+@app.post("/api/bigmodel/draft")
+async def bigmodel_draft(req: Request):
+    """Download the draft model for a big GGUF's family (bigmodel.DRAFTS) into models/_drafts."""
+    from . import bigmodel
+    from .config import models_dir
+    b = await req.json()
+    p = Path(str(b.get("path") or ""))
+    if not p.exists():
+        raise HTTPException(404, "No such file")
+    info = await asyncio.to_thread(bigmodel.inspect, p)
+    dr = bigmodel.draft_for(info, models_dir())
+    if not dr:
+        raise HTTPException(409, "No known draft model for this model's family.")
+
+    def job(emit, cancel):
+        if dr[2]:
+            return {"path": dr[2]}
+        listing = hf.list_files(dr[0])
+        f = next(f for f in listing["files"] if f["name"].lower().endswith(dr[1].lower()))
+        root = models_dir() / bigmodel.DRAFT_DIR
+        hf.download(dr[0], f["parts"], emit, cancel, root)
+        return {"path": str(hf.local_path(dr[0], f["parts"][0], root))}
+    return stream_job(job)
+
+
+@app.post("/api/bigmodel/load")
+async def bigmodel_load(req: Request):
+    """Load a GGUF with a big-model plan (bigmodel.plan) instead of a tuned profile."""
+    b = await req.json()
+    path = Path(str(b.get("path") or ""))
+    cfg = b.get("cfg") or {}
+    if not path.exists() or not isinstance(cfg, dict):
+        raise HTTPException(400, "path and cfg are required")
+    allowed = {"ngl", "ncmoe", "ot", "no_mmap"}
+    cfg = {k: v for k, v in cfg.items() if k in allowed}
+    spec = b.get("spec") or None
+    if spec is not None:                  # only the shape bigmodel.spec_for makes, with an existing draft file
+        ok = (isinstance(spec, list) and len(spec) == 8 and spec[0] == "--spec-type" and spec[1] == "draft-simple"
+              and spec[2] == "-md" and Path(str(spec[3])).is_file() and spec[4] == "-ngld" and spec[6] == "--spec-draft-n-max")
+        if not ok:
+            raise HTTPException(400, "bad spec")
+        spec = [str(x) for x in spec]
+    cfg.update(ctx=int(b.get("ctx") or 8192), kv=b.get("kv") or "q8_0", fa=True,
+               threads=int(b.get("threads") or max(4, (os.cpu_count() or 8) // 2)), ub=512)
+
+    def job(emit, cancel):
+        s = load_settings()
+        unload()
+        m = {"id": "big:" + path.name, "name": path.stem, "path": str(path), "kind": "gguf-big"}
+        STATE.update(status="loading", model=m, error=None)
+        emit({"type": "log", "text": f"Loading {path.name} with the {b.get('strategy') or 'chosen'} plan…"})
+        ENGINE.start(build_args(str(path), cfg, LLAMA_PORT, final=True, settings=s, spec=spec))
+        ok, why = ENGINE.wait_ready(3600, cancel)
+        if not ok:
+            tail = ENGINE.log_tail(25)
+            ENGINE.stop()
+            STATE.update(status="error", error=tail)
+            raise RuntimeError(f"llama-server {why}:\n{tail}")
+        STATE.update(status="ready", model=m, ctx=cfg["ctx"], vision=False, cfg=dict(cfg), remote=False,
+                     desc=f"big-model plan: {b.get('strategy') or 'custom'}", tune=None, warning=None, error=None)
+        return {"ready": True, "desc": STATE["desc"], "ctx": cfg["ctx"]}
+    return stream_job(job)
+
+
+@app.post("/api/bigmodel/airllm/load")
+async def airllm_load(req: Request):
+    """Run a full-precision Hugging Face checkpoint with AirLLM's layer streaming (integrations/models.py)."""
+    from .integrations import models as bm
+    b = await req.json()
+    model = str(b.get("model") or "").strip()
+    if not model:
+        raise HTTPException(400, "model (a Hugging Face repo or a folder) is required")
+    if not bm._ok()[0]:
+        raise HTTPException(409, "AirLLM isn't installed (Big models workspace: Install AirLLM).")
+    comp = b.get("compression") if b.get("compression") in ("4bit", "8bit") else "none"
+    max_seq = int(b.get("max_seq") or 4096)
+
+    def job(emit, cancel):
+        unload()
+        srv = bm.AirServer(LLAMA_PORT)
+        ENGINE.use(srv)
+        m = {"id": "airllm:" + model, "name": model.rstrip("/\\").split("/")[-1] + " (AirLLM)", "path": model,
+             "kind": "airllm"}
+        STATE.update(status="loading", model=m, error=None)
+        emit({"type": "log", "text": "Starting AirLLM. The first run downloads the checkpoint and splits it into "
+                                     "per-layer files (tens of GB for a 70B model): this takes a while."})
+        srv.launch(model, comp, max_seq)
+        t0 = time.time()
+        last = ""
+        while time.time() - t0 < 6 * 3600:
+            if cancel.is_set():
+                unload()
+                raise tuner.Cancelled()
+            if bm.ready():
+                break
+            if srv.proc.poll() is not None:
+                break
+            tail = srv.log_tail(1).strip()
+            if tail and tail != last:
+                emit({"type": "log", "text": tail[-300:]})
+                last = tail
+            time.sleep(2)
+        if not bm.ready():
+            tail = srv.log_tail(30)
+            unload()
+            STATE.update(status="error", error=tail)
+            raise RuntimeError("AirLLM didn't start:\n" + tail[-2000:])
+        STATE.update(status="ready", model=m, ctx=max_seq, vision=False, cfg={"engine": "airllm", "compression": comp},
+                     remote=False, desc=f"AirLLM layer streaming ({comp})", tune=None, warning=None, error=None)
+        return {"ready": True, "desc": STATE["desc"], "ctx": max_seq}
+    return stream_job(job)
+
+
+@app.get("/api/autonomy")
+def autonomy_state(chat_id: str = ""):
+    s = load_settings()
+    return {"modes": {"chat": autonomy.mode_for(s), "loop": autonomy.mode_for(s, loop=True)},
+            "authority": autonomy.status(), "queue": [autonomy.public(x) for x in autonomy.items(chat_id)]
+            if chat_id else [], "log": autonomy.recent_log(40)[::-1],
+            "candidates": [r for r, _q in autonomy.CANDIDATES]}
+
+
+@app.post("/api/autonomy/decide")
+async def autonomy_decide(req: Request):
+    b = await req.json()
+    cid = str(b.get("chat_id") or "")
+    dec = b.get("decisions") or {}
+    if not cid or not isinstance(dec, dict):
+        raise HTTPException(400, "chat_id and decisions are required")
+    changed = autonomy.decide(cid, {str(k): str(v) for k, v in dec.items()})
+    return {"changed": [autonomy.public(x) for x in changed],
+            "queue": [autonomy.public(x) for x in autonomy.items(cid)], "running": cid in agent._cancel}
+
+
+@app.post("/api/autonomy/exam")
+async def autonomy_exam():
+    """Settings > Autonomy > Test: the authority exam on the current authority model."""
+    try:
+        r = await asyncio.to_thread(autonomy.exam)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
+    return r
+
+
+@app.post("/api/autonomy/install")
+async def autonomy_install():
+    try:
+        path = await asyncio.to_thread(autonomy.install, lambda ev: None)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"{type(e).__name__}: {e}")
+    save_settings({"authority_model": path})
+    autonomy.stop()
+    return {"path": path, "authority": autonomy.status()}
+
+
 @app.get("/api/tasks/{cid}")
 def chat_tasks(cid: str):
     return {"graphs": task_graph.latest_for_chat(cid), "questions": [clarifications.public(q) for q in
@@ -1790,6 +2124,7 @@ def _engine_reload(cfg):
         desc = re.sub(r" · Remote Mode.*$", "", STATE.get("desc") or "")
         STATE.update(status="ready", cfg=dict(cfg), ctx=cfg["ctx"], error=None, remote=remote,
                      desc=desc + (f" · Remote Mode ({cfg.get('ngl')} GPU layers)" if remote else ""))
+        router.set_remote(remote)
         return True, {"log": log, "load_s": round(time.time() - t0, 1)}
     finally:
         _job["busy"] = False
@@ -1798,6 +2133,8 @@ def _engine_reload(cfg):
 class _Hooks:
     def engine(self):
         h = hw()
+        if ENGINE.kind != "llama":          # AirLLM streams layers through ~4 GB already: Remote Mode leaves it alone
+            return {"ready": False, "model_id": None, "gpu": bool(h["gpus"]), "unified": bool(h.get("unified_memory"))}
         return {"ready": STATE["status"] == "ready" and ENGINE.running(), "model_id": (STATE.get("model") or {}).get("id"),
                 "gpu": bool(h["gpus"]), "unified": bool(h.get("unified_memory"))}
 

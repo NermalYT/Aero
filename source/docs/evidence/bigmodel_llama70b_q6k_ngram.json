@@ -1,0 +1,43 @@
+{
+ "model": "Llama-3.3-70B-Instruct-Q6_K-00001-of-00002.gguf",
+ "size_gb": 53.91,
+ "budget_mb": 13000,
+ "ctx": 8192,
+ "ram_free_mb": 47748,
+ "at": "2026-10-11 20:55:26",
+ "results": [
+  {
+   "strategy": "layers+ngram-mod",
+   "ok": true,
+   "cfg": {
+    "ngl": 17,
+    "no_mmap": false
+   },
+   "spec": [
+    "--spec-type",
+    "ngram-mod"
+   ],
+   "planned_gpu_mb": 12827,
+   "planned_cpu_mb": 43666,
+   "vram_mb": 12469,
+   "load_s": 37.8,
+   "runs": [
+    {
+     "pp": 84.53,
+     "tg": 1.21,
+     "prompt_n": 2177,
+     "gen_n": 128
+    },
+    {
+     "pp": 143.75,
+     "tg": 1.15,
+     "prompt_n": 2177,
+     "gen_n": 128
+    }
+   ],
+   "pp": 143.75,
+   "tg": 1.15,
+   "note": "16 of 80 layers and the output layer on the GPU; 43,666 MB in RAM is more than is free, so part streams from disk (mmap): slow"
+  }
+ ]
+}

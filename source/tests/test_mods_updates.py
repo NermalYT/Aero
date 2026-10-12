@@ -446,7 +446,8 @@ class Updates(unittest.TestCase):
             updater.handoff(root, headless=True)()
         args = popen.call_args[0][0]
         if osinfo.IS_WIN:
-            self.assertEqual(args[-1], "--auto")
+            self.assertEqual(args[2:], [str(root / "Update-Aero.bat"), "--auto", "--headless"])
+            self.assertEqual(popen.call_args[1]["env"]["AERO_INSTALL_DIR"], str(updater.ROOT))
         else:
             self.assertEqual(args[:3], ["sh", str(root / "install.sh"), "--update"])
             self.assertIn("--headless", args)

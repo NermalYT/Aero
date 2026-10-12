@@ -18,7 +18,7 @@ import uuid
 
 import httpx
 
-from . import (agent, agents, app_catalog, app_registry, chatgpt, cloud, control, experience, looplog, memory, router,
+from . import (agent, agents, app_catalog, app_registry, autonomy, chatgpt, cloud, control, experience, looplog, memory, router,
                stats, tools)
 from .config import DATA
 
@@ -63,12 +63,18 @@ async def compact_midturn(turn):
 
 # ------------------------------------------------------------------------------------------------ routing
 
-def tool_catalog(settings):
-    """[(name, category, description)] of every enabled tool, in registry order (stable prompt prefix)."""
+INTEGRATION_CATEGORIES = ("integrations", "dev", "setup", "create")
+
+
+def tool_catalog(settings, router=False):
+    """[(name, category, description)] of every enabled tool, in registry order (stable prompt prefix). router=True
+    leaves out the integration packs' tools: they come with their pack when a request matches it (integrations.context),
+    which keeps the router's catalog small; so do the tools of MCP servers a pack installed (rea has 170)."""
     from . import localonly
     pol = settings.get("tool_policy", {})
     return [(t.name, t.category, t.description) for t in tools.REGISTRY.values()
-            if pol.get(t.category, "ask") != "off" and localonly.tool_allowed(t.category, settings)]
+            if pol.get(t.category, "ask") != "off" and localonly.tool_allowed(t.category, settings)
+            and not (router and (t.category in INTEGRATION_CATEGORIES or getattr(t, "pack", None)))]
 
 
 def _schema_tokens(settings, names=None):
@@ -137,6 +143,10 @@ async def route(turn, opts):
         if last:
             rec = {**last, "id": uuid.uuid4().hex[:10], "ts": time.time(), "reused": True}
 
+    if use_router and rec is None and router.trivial(turn.history):
+        d, info = router.trivial_decision(turn.history)        # "hi", "thanks": no decision to make
+        rec = {"role": "router", "id": uuid.uuid4().hex[:10], "ts": time.time(), "decision": d, "info": info}
+
     if use_router and rec is None:
         if not router.ready() and router.status().get("loading"):
             for _ in range(40):                 # the router is still starting: wait a little
@@ -146,9 +156,9 @@ async def route(turn, opts):
         if router.ready():
             yield {"t": "router_start"}
             from . import skills
-            sk = skills.catalog()
+            sk = [x for x in skills.catalog() if x.get("source") != "pack"]   # pack skills come with their pack
             try:
-                d, info = await asyncio.to_thread(router.decide, turn.history, catalog, sk)
+                d, info = await asyncio.to_thread(router.decide, turn.history, tool_catalog(s, router=True), sk)
                 rec = {"role": "router", "id": uuid.uuid4().hex[:10], "ts": time.time(), "decision": d, "info": info}
                 stats.SESSION["router_calls"] += 1
                 stats.SESSION["router_ms_total"] += info.get("ms") or 0
@@ -184,6 +194,27 @@ async def route(turn, opts):
         yield {"t": "router", "message": rec}
     else:
         turn.exposed = None if prev is None else list(prev)      # no router: everything (or what this chat had)
+
+
+# ------------------------------------------------------------------------------------------------ integrations
+
+def integration_context(turn, task):
+    """Integration packs the request needs (integrations.context: patterns, no model call): their line goes into the
+    turn context, their tools into the exposed set, and the UI opens their workspace. Returns the UI event or None."""
+    from . import integrations
+    try:
+        available = [c[0] for c in tool_catalog(turn.settings)]
+        line, add, ws, packs = integrations.context(task, available)
+    except Exception:  # noqa: BLE001
+        return None
+    if not line:
+        return None
+    turn.memory_text = (line + "\n\n" + turn.memory_text).strip()
+    if turn.exposed is not None and add:
+        order = {n: i for i, n in enumerate(available)}
+        turn.exposed = sorted(set(turn.exposed) | {n for n in add if n in order}, key=lambda n: order.get(n, 1e9))
+    return {"t": "workspace", "id": ws, "packs": packs,
+            "exposed": list(turn.exposed) if turn.exposed is not None else None}
 
 
 # ------------------------------------------------------------------------------------------------ apps
@@ -226,13 +257,7 @@ def app_context(turn, task):
 
 # The router fills in "preference" when it reads one, but a 2B model also finds preferences in plain requests
 # ("make it blue"), so one is only kept when the message itself sounds like a standing preference.
-PREF_CUE = re.compile(
-    r"\b(i (really |much |would )?(prefer|like|love|hate|dislike|can'?t stand|want you|need you|don'?t want|do not want)"
-    r"|(don'?t|do not|never|always|stop|quit) (use|using|add|adding|write|writing|give|giving|say|saying|call|ask|asking|be)"
-    r"|from now on|going forward|in (the )?future|every time|next time|too (long|short|wordy|verbose|formal|casual|basic|technical)"
-    r"|call me|my name is|keep (it|them|answers|responses|replies) (short|brief|simple|detailed)"
-    r"|(no|less|fewer|more) (fluff|filler|emojis?|detail|bullets?|headers?|jargon|explanation|comments)"
-    r"|my (writing )?style|the way i like)", re.I)
+PREF_CUE = router.PREF_CUE
 
 
 def learn_preference(turn, d):
@@ -521,6 +546,10 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
             mod_events.append({"t": "mod_new", "mod": mods.public(mod)})
         settings = mods.chat_settings(settings, mod["id"])
     turn = agent.Turn(chat_id, history, settings, engine_state, carry, title)
+    turn.loop_round = bool(opts.get("loop"))
+    turn.approval_mode = autonomy.mode_for(settings, loop=turn.loop_round)
+    if turn.loop_round:
+        turn.loop_task = agent._last_user_text(history)
     if mod:
         mods.prepare_turn(turn, mod["id"])
     elif meta.get("kind") == "subagent":
@@ -562,6 +591,9 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
                 turn.memory_text = (apps_line + "\n\n" + turn.memory_text).strip()
                 if turn.exposed is not None:
                     yield out({"t": "exposure", "exposed": list(turn.exposed)})
+            ev = await asyncio.to_thread(integration_context, turn, task)
+            if ev:
+                yield out(ev)
         journal = bool(loop) and settings.get("loop_journal", True)
         if journal:
             turn.journal_text = looplog.block(task)

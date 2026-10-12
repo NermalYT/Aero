@@ -1,0 +1,23 @@
+{
+ "create": "Created <home>\\AppData\\Local\\Temp\\aero-flutter-_nnhothp\\bakery_app\nCreating project ..\\..\\AppData\\Local\\Temp\\aero-",
+ "preview_start_s": 17.5,
+ "url": "http://127.0.0.1:54700",
+ "before_has_demo_title": true,
+ "reload_s": 3.5,
+ "after_has_new_title": true,
+ "reload_log": [
+  "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"455d67da-1257-4ead-8be3-a30e2f3273c7\",\"id\":\"1\",\"progressId\":\"hot.reload\",\"message\":\"Performing hot reload...\",\"finished\":false}}]",
+  "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"455d67da-1257-4ead-8be3-a30e2f3273c7\",\"id\":\"2\",\"progressId\":null,\"message\":\"Waiting for connection from debug service on Web Server...\",\"finished\":false}}]",
+  "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"455d67da-1257-4ead-8be3-a30e2f3273c7\",\"id\":\"2\",\"progressId\":null,\"finished\":true}}]",
+  "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"455d67da-1257-4ead-8be3-a30e2f3273c7\",\"id\":\"1\",\"progressId\":\"hot.reload\",\"finished\":true}}]",
+  "Reloaded application in 324ms.",
+  "[{\"id\":1,\"result\":{\"code\":0,\"message\":\"\"}}]"
+ ],
+ "labels_after": [
+  "0",
+  "Aero Bakery",
+  "Aero BakeryYou have pushed the button this many times:0Increment",
+  "Increment",
+  "You have pushed the button this many times:"
+ ]
+}

@@ -355,7 +355,7 @@ def check(mod_id, tests=True, boot=True):
             return _done(mod_id, steps)
         if tests and (w / "tests").is_dir():
             rc, out = _run([_py(), "-m", "unittest", "discover", "-s", "tests", "-q"], w, env, 600)
-            summary = next((l for l in reversed(out.splitlines()) if l.startswith(("Ran ", "OK", "FAILED"))), "")
+            summary = next((ln for ln in reversed(out.splitlines()) if ln.startswith(("Ran ", "OK", "FAILED"))), "")
             ran = re.search(r"Ran (\d+) tests?", out)
             add("Unit tests pass" + (f" ({ran.group(1)})" if ran else ""), rc == 0, out[-3000:] if rc else summary)
         if boot:

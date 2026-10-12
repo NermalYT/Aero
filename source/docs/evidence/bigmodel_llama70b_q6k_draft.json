@@ -1,0 +1,49 @@
+{
+ "model": "Llama-3.3-70B-Instruct-Q6_K-00001-of-00002.gguf",
+ "size_gb": 53.91,
+ "budget_mb": 11500,
+ "ctx": 8192,
+ "ram_free_mb": 51555,
+ "at": "2026-10-11 20:50:23",
+ "results": [
+  {
+   "strategy": "layers+draft-simple",
+   "ok": true,
+   "cfg": {
+    "ngl": 15,
+    "no_mmap": false
+   },
+   "spec": [
+    "--spec-type",
+    "draft-simple",
+    "-md",
+    "<test folder>\\models\\big\\bartowski__Llama-3.2-1B-Instruct-GGUF\\Llama-3.2-1B-Instruct-Q8_0.gguf",
+    "-ngld",
+    "99",
+    "--spec-draft-n-max",
+    "8"
+   ],
+   "planned_gpu_mb": 11454,
+   "planned_cpu_mb": 45005,
+   "vram_mb": 12690,
+   "load_s": 44.7,
+   "runs": [
+    {
+     "pp": 85.77,
+     "tg": 4.52,
+     "prompt_n": 2177,
+     "gen_n": 128
+    },
+    {
+     "pp": 67.4,
+     "tg": 4.85,
+     "prompt_n": 2177,
+     "gen_n": 128
+    }
+   ],
+   "pp": 67.4,
+   "tg": 4.85,
+   "note": "14 of 80 layers and the output layer on the GPU; 45,005 MB in RAM is more than is free, so part streams from disk (mmap): slow"
+  }
+ ]
+}
