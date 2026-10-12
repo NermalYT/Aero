@@ -556,7 +556,8 @@ powershell -ExecutionPolicy Bypass -File C:\Aero\app\validation\Validate-Aero.ps
 - **The move from Halcyon or VRAMpire says Windows wouldn't move the folder:** close any Explorer window, terminal or
   editor open inside the old folder and run the updater again. Nothing is changed when the move fails.
 - **Router shows "off" or "error":** Settings → Router → pick a model (it downloads and benchmarks), or Re-benchmark /
-  Restart. Aero still works without it; your model then gets every tool.
+  Restart. Aero still works without it; your model then gets the tools that fit its context (the rest through
+  `load_tools`).
 - **ChatGPT button says ChatGPT isn't connected:** Settings → ChatGPT → install the Codex CLI and Sign in (plan), or
   add an API key. **Claude button says Claude isn't connected:** Settings → Claude → Sign in or add an API key.
 - **Every tuning trial fails "over your limit":** the model is bigger than the limit you typed. Re-tune with a higher
