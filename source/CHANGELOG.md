@@ -1,5 +1,42 @@
 # Changelog
 
+## Aero 1.2.3 (2026-10-12)
+
+Fixes from a day of hands-on testing of 1.2.1 on a real PC, and Aero now works in your own signed-in browser without
+any setup. (There was no 1.2.2 release.) Test report: `docs/V1.2.1_HANDS_ON_TESTS.md`.
+
+- **Your own browser, no switch needed.** When the browser's remote-debugging switch is off, Aero opens a new window
+  of your default browser (your everyday profile, so you're signed in; with several profiles, the one you used last)
+  and works in it by sight: a picture of the window with numbered controls, read through UI Automation
+  (`tools/browser_screen.py`, Windows). Links and buttons are pressed and fields are set and read back without your
+  mouse or keyboard. Typing goes only into fields of the page, never the browser's address bar, menus or a password
+  field. Aero sees only the window it opened, and closes it when the request is done unless you added tabs to it.
+  Tested on Chrome and Edge: open, search and Enter, links, Back, scrolling, whole-page reading and sign-in detection.
+  With the switch on, Aero still connects through it (faster, more precise). Background requests still use Aero's own
+  hidden profile.
+- **You can see what Aero is using.** The window of the app or browser a model is using gets a blue outline and a
+  banner on top, "<model> is using <app>" (plus "with your mouse and keyboard" when it has the real input), with a
+  Stop button that stops every running task. Outline and banner follow the window as it moves, onto any monitor,
+  and step away while it's minimized (tested on a three-monitor PC). Aero's cursor no longer gets stuck on a
+  monitor left of or above the main one: hidden pieces used to be parked at -500,-500, which is on such a monitor.
+  The overlay now also closes when the Aero that started it exits, and a new Aero replaces one left running by an
+  older version.
+- **Images no longer crawl next to a big model.** When an image needs more video memory than is free, the main model
+  is unloaded for the job and loaded again with the same settings; chat messages wait meanwhile (`gpu_lend.py`).
+  On the test PC with Qwen3.8-27B loaded: 8 minutes before, 16.7 s now.
+- **The tuning advisor behaves.** Candidates that failed to load are remembered per llama.cpp build and skipped before
+  downloading, and their files are deleted (17 GB of unusable Bonsai files on the test PC). No advisor over 4B
+  parameters or 3 GB runs on the CPU, one slower than 20 s per decision is dropped, and Cancel stops it at once.
+  The `--reasoning-format none` flag that broke its grammar is gone.
+- **No false "it's open".** An app Aero knows but that isn't installed (Calculator removed from Windows) says so;
+  1.2.1 started a windowless stub and said Calculator was open. After starting a program with a command, the model
+  checks for its window. Shared lessons only count effects that were verified.
+- **Hindsight starts on every PC.** Programs Aero starts get UTF-8 output (Hindsight crashed printing its banner in
+  cp1252), and its start error leads with the real exception.
+- **Smaller fixes.** Skills say where their files are. A sign-in that was skipped isn't asked again in the same
+  request, and the card names the site you asked for. One "tools are off" notice per request. The workspace panel
+  no longer redraws the wrong workspace. After an update the window loads the new interface instead of a cached one.
+
 ## Aero 1.2.1 (2026-10-12)
 
 A quality-of-life release for 1.2: requests that need doing get done (on screen, in your own signed-in browser),

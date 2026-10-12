@@ -804,7 +804,8 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
                         text = control.phrase(by, what, mode)
                         turn.controlling = {"by": by, "target": what, "mode": mode, "text": text}
                         if control.on_screen(name, mode):
-                            await asyncio.to_thread(control.banner_on, text, rect)
+                            hwnd = await asyncio.to_thread(control.window, name, owner)
+                            await asyncio.to_thread(control.banner_on, text, rect, hwnd)
                         else:
                             await asyncio.to_thread(control.banner_off)
                         yield {"t": "control", "by": by, "target": what, "tool": name, "lane": lane, "mode": mode,
@@ -822,6 +823,18 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
                         input_guard.consume(owner)
                     else:
                         res = await asyncio.to_thread(tools.run, name, args, cctx)
+                    if name in control.CONTROL_TOOLS and control.on_screen(name, mode):
+                        # the window may only exist now (an app launched, the browser window opened): put the
+                        # banner and the outline on it
+                        what2, rect2 = await asyncio.to_thread(control.target, name, args, owner)
+                        hwnd2 = await asyncio.to_thread(control.window, name, owner)
+                        if hwnd2 or what2 != what:
+                            text = control.phrase(by, what2, mode)
+                            turn.controlling = {"by": by, "target": what2, "mode": mode, "text": text}
+                            await asyncio.to_thread(control.banner_on, text, rect2, hwnd2)
+                            if what2 != what:
+                                yield {"t": "control", "by": by, "target": what2, "tool": name, "lane": lane,
+                                       "mode": mode, "text": text}
                     if name in WRITE_TOOLS:
                         _track(turn, name, args, before=False)
                     stats.note_tool(category)
@@ -916,12 +929,12 @@ async def signin_pause(turn, res, lane="local", asked=""):
     try:
         from . import osinfo
         ub = osinfo.user_browser()
-        if ub and browser.B.kind != "mine":       # the sign-ins the user already has could be used instead
+        if ub and not browser.in_users_browser(owner):   # the sign-ins the user already has could be used instead
             hint = (f" (Already signed in to {want or site} in your {ub['name']}? Let Aero work there instead: "
                     "Settings > Tools > Which browser Aero works in.)")
     except Exception:  # noqa: BLE001
         pass
-    q, created = clarifications.ask(root.chat_id, f"Please sign in to {shown} in the Aero browser window that just "
+    q, created = clarifications.ask(root.chat_id, f"Please sign in to {shown} in the browser window that just "
                                     "opened, then press \"I've signed in\". Aero never types your password." + hint,
                                     ["I've signed in", "Skip this site"], kind="choice", allow_free=False,
                                     owner=owner, context="sign-in")

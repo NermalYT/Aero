@@ -1810,7 +1810,7 @@ def browser_session():
         return {"supported": False, "default": osinfo.default_browser()}
     on = (Path(ub["user_data"]) / "DevToolsActivePort").exists()
     return {"supported": True, "name": ub["name"], "inspect_url": ub["inspect_url"], "switch_on": on,
-            "connected": browser.B.kind == "mine", "setting": load_settings().get("browser_session", "mine")}
+            "connected": browser.B.kind == "mine", "screen": osinfo.IS_WIN, "setting": load_settings().get("browser_session", "mine")}
 
 
 @app.get("/api/integrations/bundle")

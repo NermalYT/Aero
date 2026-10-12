@@ -1,8 +1,8 @@
-"""The "is controlling" signal: while a model drives the mouse, keyboard, an app or Aero's browser, Aero says so at the
-top of its own window, with a Stop button, and how: "in the background" (UI Automation, window messages, Aero's own
-browser), or "with your mouse and keyboard" (only after the user allowed foreground control). A banner with Stop also
-sits on top of an app window being controlled, and across the screen while the real input is in use; background
-browsing has no window, so it gets no on-screen banner.
+"""The "is using" signal: while a model drives the mouse, keyboard, an app or a browser, Aero says so at the top of its
+own window, with a Stop button: "<model> is using <app>", plus "with your mouse and keyboard" when the real input is
+in use (only after the user allowed foreground control). On screen, a banner with Stop sits on the window being used
+and a blue outline goes around it; both follow that window (overlay.py). Background browsing has no window, so it gets
+no on-screen banner.
 
 Which actions count: anything that sends input or navigates (clicks, typing, keys, scrolling, switching or opening
 windows, browser actions). Looking (screenshots, reading an app or a page) does not.
@@ -50,7 +50,11 @@ def target(name, args, owner=None):
     """(what is being controlled, its screen rectangle or None)."""
     args = args or {}
     if name.startswith("browser_"):
-        return "Aero's browser", None
+        try:
+            from .tools import browser
+            return browser.display_name(owner), None
+        except Exception:  # noqa: BLE001
+            return "Aero's browser", None
     if name == "app_launch":
         return short_app(str(args.get("app") or "")) or "an app", None
     if name.startswith("app_"):
@@ -76,6 +80,29 @@ def target(name, args, owner=None):
     return "your PC", None
 
 
+def window(name, owner=None):
+    """The window being used, for the outline and to keep the banner on it (overlay.py), or None."""
+    if not IS_WIN:
+        return None
+    try:
+        if name.startswith("browser_"):
+            from .tools import browser
+            return browser.window_of(owner)
+        if name.startswith("app_"):
+            from .tools import apps
+            return apps.selected_hwnd(owner)
+        if name in ("open_app", "focus_window"):
+            return None
+        import ctypes
+        u = ctypes.windll.user32
+        u.GetForegroundWindow.restype = ctypes.c_void_p
+        h = u.GetForegroundWindow()
+        title, _ = _foreground()
+        return h if h and title and not re.search(r"\bAero\b", title) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def mode_of(name, args, physical=False):
     """How a control tool acts: a capabilities.CONTROL_MODES key, or LAUNCH for starting an app."""
     if physical:
@@ -90,17 +117,16 @@ def mode_of(name, args, physical=False):
 
 
 def phrase(by, what, mode):
-    """'Qwen3.8 is controlling Notepad in the background' and the like: never 'background' for real input."""
+    """'Qwen3.8 is using Notepad' and the like (1.2.3: the owner asked for "MODEL is using APP"); real input always
+    says so, and a hidden browser says it is in the background."""
     by = by or "Aero"
     if mode == "FOREGROUND_CONSENT_REQUIRED":
-        return f"{by} is controlling {what} with your mouse and keyboard"
+        return f"{by} is using {what} with your mouse and keyboard"
     if mode == "BROWSER_ISOLATED":                # its own window, never your mouse or keyboard
-        return f"{by} is using {what} " + ("on screen" if _browser_shown() else "in the background")
+        return f"{by} is using {what}" + ("" if _browser_shown() else " in the background")
     if mode == "LAUNCH":
         return f"{by} is opening {what}"
-    if mode in ("ACCESSIBILITY_BACKGROUND", "WINDOW_MESSAGE_BACKGROUND"):
-        return f"{by} is controlling {what} in the background"
-    return f"{by} is controlling {what}"
+    return f"{by} is using {what}"
 
 
 def _browser_shown():
@@ -138,10 +164,10 @@ def actor(turn, lane):
     return getattr(turn, "model_name", "") or "Aero"
 
 
-def banner_on(text, rect=None):
+def banner_on(text, rect=None, hwnd=None):
     try:
         from . import overlay
-        overlay.banner(text, rect)
+        overlay.banner(text, rect, hwnd)
     except Exception:
         pass
 
