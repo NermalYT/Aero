@@ -136,6 +136,7 @@ if IS_WIN:
     _sig(user32.PrintWindow, wt.BOOL, H, H, wt.UINT)
     _sig(user32.ShowWindow, wt.BOOL, H, ctypes.c_int)
     _sig(user32.SetForegroundWindow, wt.BOOL, H)
+    _sig(user32.SetWindowPos, wt.BOOL, H, H, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.UINT)
     _sig(user32.GetForegroundWindow, H)
     _sig(user32.PostMessageW, wt.BOOL, H, wt.UINT, wt.WPARAM, wt.LPARAM)
     _sig(user32.SendMessageTimeoutW, wt.LPARAM, H, wt.UINT, wt.WPARAM, wt.LPARAM, wt.UINT, wt.UINT,
@@ -621,12 +622,36 @@ def _restore_quietly(hwnd):
         time.sleep(0.35)
 
 
+def on_screen(ctx):
+    """Apps the model uses are on display unless the request asked for the background (intents.py) or the user
+    turned it off (Settings > Tools > Show what Aero does)."""
+    v = getattr(ctx, "visible", None)
+    if v is not None:
+        return bool(v)
+    return (getattr(ctx, "settings", None) or {}).get("show_work", True)
+
+
+def display(hwnd):
+    """Bring a window to the top of the screen so the user sees it, without taking keyboard focus: restore it if
+    minimized, then raise it (top-most and straight back, which Windows allows without activating it)."""
+    try:
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 4)                          # SW_SHOWNOACTIVATE
+        flags = 0x0001 | 0x0002 | 0x0010 | 0x0040              # NOSIZE | NOMOVE | NOACTIVATE | SHOWWINDOW
+        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, flags)        # HWND_TOPMOST
+        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, flags)        # HWND_NOTOPMOST: stays on top of the others
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _observe(ctx, hwnd, elements=True, find="", zoom=None, marks=True, restore=False):
     """Capture the window, list its controls and return {'text', 'image'}; selects the window for this agent."""
     from PIL import Image
     sess = session(_owner(ctx))
     with _lock:
-        if restore:
+        if on_screen(ctx):
+            display(hwnd)
+        elif restore:
             _restore_quietly(hwnd)
         full, (left, t), cap = _capture(hwnd)
         minimized = bool(user32.IsIconic(hwnd))

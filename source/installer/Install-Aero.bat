@@ -12,7 +12,9 @@ title Aero Installer
 ::   - lists Aero under Settings > Apps > Installed apps, where it uninstalls like any other program
 ::   - lets you pick the CPU decision router and a main model, then opens Aero
 :: Update later with C:\Aero\Update-Aero.bat. Models, chats and settings are always kept.
-:: It takes the same --dest, --skip-llama, --no-shortcuts, --no-register, --skip-models and --headless options as
+::   - sets up every integration (Hindsight, AirLLM, image generation, code tools...); --lean leaves them to Aero,
+::     which finishes them in the background
+:: It takes the same --dest, --skip-llama, --no-shortcuts, --no-register, --skip-models, --lean and --headless options as
 :: Update-Aero.bat (and AERO_INSTALL_DIR / AERO_INSTALL_FLAGS), which passes them on.
 :: ---------------------------------------------------------------------------
 
@@ -25,6 +27,7 @@ set "SKIPLLAMA="
 set "NOSHORTCUTS="
 set "NOREGISTER="
 set "SKIPMODELS="
+set "LEAN="
 set "HEADLESS="
 for %%A in (%* %AERO_INSTALL_FLAGS%) do (
     if "!NEXT!"=="dest" (
@@ -47,6 +50,8 @@ for %%A in (%* %AERO_INSTALL_FLAGS%) do (
         set "NOREGISTER=1"
     ) else if /I "%%~A"=="--skip-models" (
         set "SKIPMODELS=1"
+    ) else if /I "%%~A"=="--lean" (
+        set "LEAN=1"
     ) else if /I "%%~A"=="--headless" (
         set "HEADLESS=1"
     ) else (
@@ -58,6 +63,7 @@ if defined SKIPLLAMA set "FLAGS=!FLAGS! --skip-llama"
 if defined NOSHORTCUTS set "FLAGS=!FLAGS! --no-shortcuts"
 if defined NOREGISTER set "FLAGS=!FLAGS! --no-register"
 if defined SKIPMODELS set "FLAGS=!FLAGS! --skip-models"
+if defined LEAN set "FLAGS=!FLAGS! --lean"
 if defined HEADLESS set "FLAGS=!FLAGS! --headless"
 set "SETUPFLAGS="
 if defined SKIPLLAMA set "SETUPFLAGS=!SETUPFLAGS! --skip-llama"
@@ -216,6 +222,12 @@ if defined SKIPMODELS (
     echo       Models: skipped ^(--skip-models^).
 ) else (
     "%VPY%" -m aero.setup_models
+)
+if defined LEAN (
+    echo       Integrations: Aero sets them up in the background ^(--lean^).
+) else (
+    echo       Integrations: Hindsight memory, AirLLM, image generation, code tools and the rest...
+    "%VPY%" -m aero.integrations.bundle
 )
 popd
 

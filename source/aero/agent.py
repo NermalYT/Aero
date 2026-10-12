@@ -22,14 +22,13 @@ from pathlib import Path
 import httpx
 
 from . import (action_results, agents, attachments, autonomy, capabilities, clarifications, control, input_guard,
-               memory, osinfo, resources, stats, task_graph, tools)
+               forced_call, made_files, memory, osinfo, resources, stats, task_graph, toolcall_text, tools)
 
 _approvals = {}        # call_id -> Future
 _approval_chat = {}    # call_id -> chat id it belongs to (Stop in one chat must not answer another chat's cards)
 _chat_allow = {}       # chat_id -> set(categories) allowed for the rest of the chat
 _cancel = {}           # chat_id -> asyncio.Event
 
-TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 WRITE_TOOLS = {"write_file", "edit_file", "move_path", "delete_path"}
 LOOP_TOOLS = {"run_subagent", "load_tools", "ask_user", "get_answer"}     # run by the loop itself, not tools.run
 PARALLEL_MAX = 4               # read-only tool calls from one step that may run at the same time
@@ -404,6 +403,9 @@ class Turn:
         self.blocked = set()         # tools this turn may not use
         self.sandbox = None          # Mod Aero chat: the only folder writes may touch (mods.prepare_turn)
         self.approval_mode = "ask"   # autonomy.py: ask | batch | auto (pipeline sets it for chats and loop rounds)
+        self.intent = None           # intents.Intent: what the request plainly means Aero should do (pipeline)
+        self.visible = None          # True: apps and the browser on screen; False: background; None: the setting
+        self.forced = False          # the first action was forced once (forced_call) after an "I can't" reply
         self.loop_round = False
         self.untrusted = []          # web pages, mail and other internet content read this turn (for the authority)
 
@@ -438,6 +440,7 @@ class SubTurn:
         self.tctx = parent.tctx
         self.exposed = None if parent.exposed is None else [n for n in parent.exposed if n != "run_subagent"]
         self.blocked = {"run_subagent"}             # one level deep: a subagent can't start subagents
+        self.intent, self.visible, self.forced = None, getattr(parent, "visible", None), True
         self.think = parent.think
         self.memory_text = ""
         self.changes = parent.changes
@@ -828,6 +831,10 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
     if ask_fut is not None and not ask_fut.done():
         _approvals.pop(call_id, None)
         ask_fut.cancel()
+    if t and name.startswith("browser_") and isinstance(res, dict) and not res.get("error") and \
+            SIGNIN_MARK in (res.get("text") or "") and not turn.cancel.is_set():
+        async for ev in signin_pause(turn, res, lane):
+            yield ev
     if t:
         _note_outcome(turn, name, args, res)
         caps = capabilities.caps_of(name, category)
@@ -850,6 +857,9 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
         tmsg["queued"] = True
     if isinstance(res.get("preview"), dict):
         tmsg["preview"] = res["preview"]           # an image, diagram or live web preview for the chat and workspace
+    made = made_files.from_envelope(env) if not res.get("error") else None
+    if made:
+        tmsg["file"] = made                        # a document Aero made: downloadable from the chat
     if verdict:
         tmsg["authority"] = {k: verdict.get(k) for k in ("decision", "reason", "model", "ms")}
     if preapproved:
@@ -866,6 +876,54 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
         out["res"] = res
         out["msg"] = tmsg
     yield {"t": "tool_result", "message": tmsg}
+
+
+# ------------------------------------------------------------------------------------------------ sign-in pause
+
+SIGNIN_MARK = "[This page asks for a sign-in."
+# "I can't access your GitHub" / "I don't have access to your email" / "I can't run commands": capability refusals
+# a forced call can fix (never a refusal on safety grounds, see UNSAFE)
+CANT = re.compile(r"\b(I (can(?:no|')?t|cannot|am unable to|'m unable to|am not able to|'m not able to|do(?:n'|no)t have "
+                  r"(?:direct |real-time )?access|have no (?:direct )?access)|I'm (just )?an AI|as an AI)\b.{0,80}\b("
+                  r"access|check|open|run|execute|browse|see|read|look|retrieve|view|connect|real-time|your)", re.I | re.S)
+UNSAFE = re.compile(r"\b(harm|illegal|unsafe|dangerous|unethical|not appropriate|against (my|the) (policy|guidelines)|"
+                    r"hack|malware|password)\b", re.I)
+
+
+async def signin_pause(turn, res, lane="local"):
+    """A page in Aero's browser wants a sign-in: put the window in front, ask the user to sign in themselves (a card
+    with "I've signed in" / "Skip this site"), wait, then hand the model the page as it is now. Aero never types a
+    password; the profile keeps the sign-in for next time."""
+    from urllib.parse import urlparse
+    from .tools import browser
+    root = _root(turn)
+    owner = turn.tctx.owner
+    try:
+        url = await asyncio.to_thread(browser.show_for_signin, owner)
+    except Exception:  # noqa: BLE001
+        url = browser.page_url(owner)
+    site = (urlparse(url).hostname or "this site").removeprefix("www.")
+    q, created = clarifications.ask(root.chat_id, f"Please sign in to {site} in the Aero browser window that just "
+                                    "opened, then press \"I've signed in\". Aero never types your password.",
+                                    ["I've signed in", "Skip this site"], kind="choice", allow_free=False,
+                                    owner=owner, context="sign-in")
+    if created:
+        yield {"t": "question", "question": clarifications.public(q), "lane": lane}
+    yield {"t": "waiting", "question_id": q["id"]}
+    ans = await clarifications.wait(q["id"], turn.cancel, timeout=1800)
+    value = str((ans or {}).get("value") or "")
+    if value.startswith("I've signed in"):
+        try:
+            snap = await asyncio.to_thread(browser.resnapshot, owner)
+        except Exception as e:  # noqa: BLE001
+            snap = f"(couldn't read the page again: {e})"
+        res["text"] = f"The user signed in to {site}. The page now:\n{snap}"
+        if SIGNIN_MARK in snap:
+            res["text"] += "\nIt still shows a sign-in page: tell the user, then go on without this site."
+    elif value:
+        res["text"] = f"The user skipped signing in to {site}: go on without it (say so in your answer)."
+    else:
+        res["text"] += "\nNobody signed in (no answer): go on without this site and say so."
 
 
 # ------------------------------------------------------------------------------------------------ exposure
@@ -933,24 +991,7 @@ def fit_tools(turn, schemas):
 def bare_tool_call(text, settings, blocked=()):
     """(name, args, (start, end)) of a {"name": <an enabled tool>, "parameters"|"arguments": {...}} that ends the
     text (only a code fence may follow), so a JSON example inside an explanation never runs."""
-    enabled = {s["function"]["name"] for s in tools.schemas(settings)} - set(blocked)
-    dec = json.JSONDecoder()
-    for m in re.finditer(r'\{\s*"name"\s*:', text):
-        try:
-            obj, end = dec.raw_decode(text, m.start())
-        except ValueError:
-            continue
-        if not isinstance(obj, dict) or obj.get("name") not in enabled or text[end:].strip().strip("`").strip():
-            continue
-        args = obj.get("parameters", obj.get("arguments", {}))
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except ValueError:
-                continue
-        if isinstance(args, dict):
-            return obj["name"], args, (m.start(), end)
-    return None
+    return toolcall_text.bare_call(text, {s["function"]["name"] for s in tools.schemas(settings)} - set(blocked))
 
 
 def current_schemas(turn):
@@ -1001,7 +1042,7 @@ async def run_local(turn, lane="local", max_steps=None):
     url = turn.engine["url"] + "/v1/chat/completions"
     settings = turn.settings
     max_steps = int(max_steps or settings.get("agent_max_steps") or 40)
-    compact_at = 0 if getattr(turn, "is_sub", False) else float(settings.get("auto_compact_at") or 0)
+    compact_at = 0 if getattr(turn, "is_sub", False) else float(settings.get("auto_compact_at") or 0.75)
     overflow = 0
     tools_rejected = False
     force_text = False           # after an empty reply: ask once more with tool_choice "none" (that request only)
@@ -1028,9 +1069,12 @@ async def run_local(turn, lane="local", max_steps=None):
                 "stream_options": {"include_usage": True}, "cache_prompt": True}
         if settings.get("max_tokens"):
             body["max_tokens"] = int(settings["max_tokens"])
+        tprof = (turn.engine.get("tune") or {}).get("tools") or {} if isinstance(turn.engine, dict) else {}
         if schemas:
             body["tools"] = schemas
             body["parallel_tool_calls"] = True
+            if tprof.get("temperature") is not None and settings.get("use_tuned_tool_temp", True):
+                body["temperature"] = tprof["temperature"]        # measured by the tuner's tool-calling exam
             if force_text:
                 body["tool_choice"] = "none"
                 force_text = False
@@ -1043,91 +1087,107 @@ async def run_local(turn, lane="local", max_steps=None):
         first_tok = None
         yield {"t": "assistant_start", "id": msg["id"], "lane": lane, "model": turn.model_name}
         retry = False
-        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
-            async with client.stream("POST", url, json=body) as resp:
-                if resp.status_code != 200:
-                    err = (await resp.aread()).decode("utf-8", "replace")
-                    n_prompt = 0
-                    try:
-                        ej = json.loads(err).get("error", {})
-                        err, n_prompt = ej.get("message", err), int(ej.get("n_prompt_tokens") or 0)
-                    except Exception:
-                        pass
-                    if n_prompt and overflow < 3:      # our estimate was low for this tokenizer: learn and retry
-                        overflow += 1
-                        turn.calib = max(turn.calib, n_prompt / max(1, est_tokens(sent)) * 1.05)
-                        retry = True
-                    elif schemas and step == 0 and "tool" in err.lower():
-                        yield {"t": "notice", "text": "This model's chat template rejected tools; continuing without tools."}
-                        tools_rejected = True
-                        retry = True
-                    else:
-                        raise RuntimeError(f"llama-server error {resp.status_code}: {err[:800]}")
-                else:
-                    async for line in resp.aiter_lines():
-                        if turn.cancel.is_set():
-                            break
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
-                            break
+        pre = None
+        if step == 0 and schemas and turn.intent is not None and turn.intent.must_act and tprof.get("act_first") \
+                and not turn.forced and not getattr(turn, "is_sub", False):
+            # the tuner measured that this model acts more reliably when the first call is forced: do that straight
+            # away instead of waiting for an "I can't" (forced_call.py)
+            turn.forced = True
+            want = set(turn.intent.first_tools)
+            pick = [x for x in schemas if x["function"]["name"] in want] or \
+                [x for x in schemas if x["function"]["name"] != "load_tools"]
+            pre = await asyncio.to_thread(forced_call.ask, turn.engine["url"], sent, pick, 0.2, turn.intent.first_hint)
+            if pre:
+                msg["forced"] = "intent"
+        if pre:
+            calls[0] = {"id": None, "name": pre[0], "args": json.dumps(pre[1])}
+            yield {"t": "tool_pending", "name": pre[0], "lane": lane}
+        else:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
+                async with client.stream("POST", url, json=body) as resp:
+                    if resp.status_code != 200:
+                        err = (await resp.aread()).decode("utf-8", "replace")
+                        n_prompt = 0
                         try:
-                            chunk = json.loads(data)
+                            ej = json.loads(err).get("error", {})
+                            err, n_prompt = ej.get("message", err), int(ej.get("n_prompt_tokens") or 0)
                         except Exception:
-                            continue
-                        if chunk.get("timings"):
-                            timings = chunk["timings"]
-                        if chunk.get("usage"):
-                            usage = chunk["usage"]
-                        for ch in chunk.get("choices") or []:
-                            d = ch.get("delta") or {}
-                            if ch.get("finish_reason"):
-                                finish = ch["finish_reason"]
-                            if d.get("reasoning_content"):
-                                first_tok = first_tok or time.time()
-                                msg["reasoning"] += d["reasoning_content"]
-                                yield {"t": "reasoning", "d": d["reasoning_content"], "lane": lane}
-                            if d.get("content"):
-                                first_tok = first_tok or time.time()
-                                msg["content"] += d["content"]
-                                yield {"t": "content", "d": d["content"], "lane": lane}
-                            for tc in d.get("tool_calls") or []:
-                                c = calls.setdefault(tc.get("index", 0), {"id": None, "name": "", "args": ""})
-                                if tc.get("id"):
-                                    c["id"] = tc["id"]
-                                f = tc.get("function") or {}
-                                if f.get("name"):
-                                    c["name"] += f["name"]
-                                    yield {"t": "tool_pending", "name": c["name"], "lane": lane}
-                                if f.get("arguments"):
-                                    c["args"] += f["arguments"]
+                            pass
+                        if n_prompt and overflow < 3:      # our estimate was low for this tokenizer: learn and retry
+                            overflow += 1
+                            turn.calib = max(turn.calib, n_prompt / max(1, est_tokens(sent)) * 1.05)
+                            retry = True
+                        elif schemas and step == 0 and "tool" in err.lower():
+                            yield {"t": "notice", "text": "This model's chat template rejected tools; continuing without tools."}
+                            tools_rejected = True
+                            retry = True
+                        else:
+                            raise RuntimeError(f"llama-server error {resp.status_code}: {err[:800]}")
+                    else:
+                        async for line in resp.aiter_lines():
+                            if turn.cancel.is_set():
+                                break
+                            if not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                            except Exception:
+                                continue
+                            if chunk.get("timings"):
+                                timings = chunk["timings"]
+                            if chunk.get("usage"):
+                                usage = chunk["usage"]
+                            for ch in chunk.get("choices") or []:
+                                d = ch.get("delta") or {}
+                                if ch.get("finish_reason"):
+                                    finish = ch["finish_reason"]
+                                if d.get("reasoning_content"):
+                                    first_tok = first_tok or time.time()
+                                    msg["reasoning"] += d["reasoning_content"]
+                                    yield {"t": "reasoning", "d": d["reasoning_content"], "lane": lane}
+                                if d.get("content"):
+                                    first_tok = first_tok or time.time()
+                                    msg["content"] += d["content"]
+                                    yield {"t": "content", "d": d["content"], "lane": lane}
+                                for tc in d.get("tool_calls") or []:
+                                    c = calls.setdefault(tc.get("index", 0), {"id": None, "name": "", "args": ""})
+                                    if tc.get("id"):
+                                        c["id"] = tc["id"]
+                                    f = tc.get("function") or {}
+                                    if f.get("name"):
+                                        c["name"] += f["name"]
+                                        yield {"t": "tool_pending", "name": c["name"], "lane": lane}
+                                    if f.get("arguments"):
+                                        c["args"] += f["arguments"]
         if retry:
             continue
 
-        # fallback: models that print <tool_call>{...}</tool_call> without the server parsing it
-        if not calls and schemas and "<tool_call>" in msg["content"]:
-            for i, mm in enumerate(TOOL_CALL_RE.finditer(msg["content"])):
-                try:
-                    j = json.loads(mm.group(1))
-                    calls[i] = {"id": None, "name": j.get("name", ""),
-                                "args": json.dumps(j.get("arguments") or j.get("parameters") or {})}
-                except Exception:
-                    pass
-            if calls:
-                msg["content"] = TOOL_CALL_RE.sub("", msg["content"]).strip()
-
-        # fallback: a bare JSON call ({"name": ..., "parameters" or "arguments": {...}}), which Llama 3.x prints when
-        # the tool it wants wasn't offered (llama-server drops such a structured call, hence force_text above). A
-        # real, enabled Aero tool runs as a normal call (its permission applies as always) and stays loaded.
-        if not calls and schemas and '"name"' in msg["content"]:
-            found = bare_tool_call(msg["content"], turn.settings, getattr(turn, "blocked", None) or ())
+        # fallback: calls the model printed as text (toolcall_text knows the formats local models use). They run as
+        # normal calls, with their permissions as always; a tool that wasn't offered gets loaded for the rest of the
+        # turn. The markup never stays in the reply.
+        if not calls and msg["content"] and schemas:
+            enabled = {s["function"]["name"] for s in tools.schemas(turn.settings)} - \
+                set(getattr(turn, "blocked", None) or ())
+            found, cleaned = toolcall_text.parse(msg["content"], enabled)
             if found:
-                name, args, (a, b) = found
-                calls[0] = {"id": None, "name": name, "args": json.dumps(args)}
-                msg["content"] = re.sub(r"```\w*\s*```", "", msg["content"][:a] + msg["content"][b:]).strip()
-                if turn.exposed is not None and name not in turn.exposed:
-                    turn.exposed.append(name)
+                msg["content"] = cleaned
+                for i, (name, args) in enumerate(found):
+                    calls[i] = {"id": None, "name": name, "args": json.dumps(args)}
+                    if turn.exposed is not None and name in enabled and name not in turn.exposed:
+                        turn.exposed.append(name)
+        elif not turn.settings.get("tools_enabled", True) and (
+                toolcall_text.has_markup(msg["content"]) or toolcall_text.bare_call(msg["content"], set(tools.REGISTRY))):
+            # tools are off, but the model tried to act: say so instead of finishing with nothing done
+            found, cleaned = toolcall_text.parse(msg["content"], set(tools.REGISTRY))
+            msg["content"] = cleaned
+            names = ", ".join(dict.fromkeys(n for n, _ in found)) or "a tool"
+            yield {"t": "notice", "lane": lane, "kind": "tools_off",
+                   "text": f"The model wanted to use {names}, but tools are off, so nothing was done. Turn on Tools "
+                           "(under the message box) and send the request again.",
+                   "action": {"label": "Turn on tools", "settings": {"tools_enabled": True}}}
 
         if msg["reasoning"] == "" and "<think>" in msg["content"]:
             m = re.search(r"<think>(.*?)(</think>|$)", msg["content"], re.S)
@@ -1139,6 +1199,27 @@ async def run_local(turn, lane="local", max_steps=None):
             c = calls[i]
             tool_calls.append({"id": c["id"] or f"call_{uuid.uuid4().hex[:12]}", "type": "function",
                                "function": {"name": c["name"], "arguments": c["args"] or "{}"}})
+        if not tool_calls and step == 0 and schemas and not turn.forced and not turn.cancel.is_set() and \
+                not getattr(turn, "is_sub", False):
+            # The request plainly needs an action (intents.py) or the model answered "I can't access ..." next to
+            # tools that can: ask once more, grammar-constrained so it has to pick a tool (forced_call.py). The
+            # refusal is dropped from the chat; the tool card shows what Aero does instead.
+            it = turn.intent
+            reason = "intent" if it is not None and it.must_act else \
+                "refusal" if CANT.search(msg["content"] or "") and not UNSAFE.search(msg["content"] or "") else None
+            if reason:
+                turn.forced = True
+                want = set(it.first_tools) if reason == "intent" else None
+                pick = [s for s in schemas if s["function"]["name"] != "load_tools" and
+                        (want is None or s["function"]["name"] in want)] or \
+                    [s for s in schemas if s["function"]["name"] != "load_tools"]
+                hint = it.first_hint if reason == "intent" else "You do have tools for this; use the right one."
+                got = await asyncio.to_thread(forced_call.ask, turn.engine["url"], sent, pick, 0.2, hint)
+                if got:
+                    tool_calls = [{"id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
+                                   "function": {"name": got[0], "arguments": json.dumps(got[1])}}]
+                    msg["content"] = ""
+                    msg["forced"] = reason
         if tool_calls:
             msg["tool_calls"] = tool_calls
         if not tool_calls and not msg["content"].strip() and not msg["reasoning"].strip() and schemas \

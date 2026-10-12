@@ -72,7 +72,7 @@ def settings(**kw):
     return s
 
 
-def run_turn(model, s, text="do it", chat_id="v11-chat", on_event=None, run_patch=None):
+def run_turn(model, s, text="do it", chat_id="v11-chat", on_event=None, run_patch=None, engine=None):
     """Run one turn; on_event(ev) may react (approve, answer, stop). Returns all events."""
     def client(*a, **k):
         return REAL_CLIENT(transport=httpx.MockTransport(model.handle), timeout=30)
@@ -81,7 +81,7 @@ def run_turn(model, s, text="do it", chat_id="v11-chat", on_event=None, run_patc
 
     async def go():
         async for chunk in pipeline.run_turn(chat_id, hist, s, {"url": "http://fake", "ctx": 32768,
-                                                                "model": {"name": "Qwen3.8-27B"}}):
+                                                                "model": {"name": "Qwen3.8-27B"}, **(engine or {})}):
             for line in chunk.splitlines():
                 if line.startswith("data: "):
                     ev = json.loads(line[6:])

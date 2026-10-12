@@ -61,6 +61,10 @@ _SIGNIN = re.compile(r"(^|[./])(accounts\.google\.com|login\.|signin\.|auth\.|ss
                      r"authorize|sso)\b", re.I)
 
 
+SIGNIN_NOTE = ("[This page asks for a sign-in. Never type the user's password: ask them to sign in themselves "
+               "(browser_open with show=true opens a window they can use).]")
+
+
 class StaleRef(RuntimeError):
     pass
 
@@ -109,15 +113,19 @@ class _Browser:
         return box["result"]
 
     # --- run on the worker thread ---
-    def _want_headed(self, show=False):
+    def _want_headed(self, show=False, hide=False):
         from .. import osinfo
         from ..config import load_settings
         if not osinfo.has_display() or os.environ.get("AERO_HEADLESS") == "1":
             return False
-        return bool(show) or load_settings().get("browser_mode") == "visible"
+        if show:
+            return True
+        if hide:
+            return False
+        return load_settings().get("browser_mode", "visible") != "background"
 
-    def _context(self, show=False):
-        want = self._want_headed(show)
+    def _context(self, show=False, hide=False):
+        want = self._want_headed(show, hide)
         if self.ctx is not None and (self.headed == want or (self.headed and not show)):
             return self.ctx
         if self.ctx is not None:                     # switch background <-> visible: same profile, new process
@@ -155,8 +163,8 @@ class _Browser:
         self.pages = {}
         self.gens = {}
 
-    def page(self, owner, show=False, new_tab=False):
-        ctx = self._context(show)
+    def page(self, owner, show=False, new_tab=False, hide=False):
+        ctx = self._context(show, hide)
         p = self.pages.get(owner)
         if p is None or p.is_closed() or new_tab:
             blank = [x for x in ctx.pages if not x.is_closed() and x.url in ("about:blank", "") and
@@ -191,8 +199,7 @@ class _Browser:
             txt += (f"\n[page text cut at {len(d['text']):,} of {d['total']:,} chars: use browser_read_sections "
                     "to read the rest]")
         if d.get("password") or _SIGNIN.search(d["url"] or ""):
-            txt += ("\n[This page asks for a sign-in. Never type the user's password: ask them to sign in "
-                    "themselves (browser_open with show=true opens a window they can use).]")
+            txt += ("\n" + SIGNIN_NOTE)
         return txt
 
     def locate(self, owner, ref):
@@ -251,9 +258,58 @@ def stop_owner(owner):
         B.q.put((lambda: B.close_owner(owner), {}, threading.Event()))
 
 
-@tool("browser_open", "Open a URL in Aero's own browser (in the background unless show=true, which opens a visible "
-      "window the user can watch or sign in with). Returns the page's interactive elements as [number] entries "
-      "plus the start of its text.", "browser",
+def finish_owner(owner):
+    """The task that opened a visible browser is done: close its tab, and the whole window when no other agent has a
+    tab in it (the profile and its sign-ins stay)."""
+    if not (B.thread and B.thread.is_alive()) or owner not in B.pages:
+        return False
+
+    def go():
+        B.close_owner(owner)
+        if B.ctx is not None and not B.pages:
+            try:
+                B.ctx.close()
+            except Exception:  # noqa: BLE001
+                pass
+            B._reset()
+        return True
+    B.q.put((go, {}, threading.Event()))
+    return True
+
+
+def page_url(owner):
+    p = B.pages.get(owner)
+    try:
+        return p.url if p is not None and not p.is_closed() else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def show_for_signin(owner, timeout=60):
+    """Make sure the user can see this agent's page to sign in: a background browser restarts visible (same profile)
+    on the same address, and the window comes to the front. Returns the address."""
+    url = page_url(owner)
+
+    def go():
+        p = B.page(owner, show=True)
+        if url and p.url in ("about:blank", ""):
+            p.goto(url, wait_until="domcontentloaded", timeout=45000)
+        return p.url
+    return B.call(go, timeout)
+
+
+def resnapshot(owner, timeout=60):
+    return B.call(lambda: B.snapshot(owner), timeout)
+
+
+def _visible(ctx):
+    v = getattr(ctx, "visible", None)
+    return v
+
+@tool("browser_open", "Open a URL in Aero's own browser, on screen so the user can watch (unless they asked for the "
+      "background). It is a separate profile where the user signs in once per site; on a sign-in page Aero asks them "
+      "to sign in and waits. Returns the page's interactive elements as [number] entries plus the start of its "
+      "text.", "browser",
       {"url": {"type": "string"}, "new_tab": {"type": "boolean"},
        "show": {"type": "boolean", "description": "Open a visible window (for signing in or when the user wants to "
                                                   "watch)"}}, ["url"], summary=lambda a: a.get("url", ""))
@@ -266,8 +322,10 @@ def browser_open(ctx, url, new_tab=False, show=False):
         return {"text": f"The browser only opens web pages (not {scheme}: links).", "error": True}
     owner = _owner(ctx)
 
+    vis = _visible(ctx)
+
     def go():
-        p = B.page(owner, show=show, new_tab=new_tab)
+        p = B.page(owner, show=bool(show) or vis is True, new_tab=new_tab, hide=vis is False and not show)
         p.goto(url, wait_until="domcontentloaded", timeout=45000)
         try:
             p.wait_for_load_state("networkidle", timeout=4000)

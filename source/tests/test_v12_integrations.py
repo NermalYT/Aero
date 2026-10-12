@@ -582,7 +582,7 @@ class ToolBudget(unittest.TestCase):
 
 
 class ForcedToolAdapter(unittest.TestCase):
-    """llama-server reads a named tool_choice as "auto"; the adapter turns it into "required" with that tool only."""
+    """llama-server reads a named tool_choice as "auto" and doesn't enforce "required": the adapter forces the call."""
 
     def test_rewrite(self):
         from aero.integrations import llm_adapter
@@ -623,11 +623,63 @@ class ForcedToolAdapter(unittest.TestCase):
             r = httpx.post(base + "/chat/completions", timeout=10, json={
                 "tools": [{"type": "function", "function": {"name": "done"}}],
                 "tool_choice": {"type": "function", "function": {"name": "done"}}})
-            self.assertEqual(r.json(), {"ok": True})
+            self.assertEqual(r.json(), {"ok": True})                    # the forced call failed: passed through
             self.assertEqual(seen["path"], "/v1/chat/completions")
             self.assertEqual(seen["body"]["tool_choice"], "required")
         finally:
             up.shutdown()
+            up.server_close()
+
+    def test_forced_call_answered_by_the_adapter(self):
+        """llama-server doesn't enforce named or "required" tool choices: the adapter makes one grammar-forced call
+        and answers with ordinary tool_calls, streamed or not."""
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        import httpx
+
+        from aero.integrations import llm_adapter
+        seen = []
+
+        class Upstream(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                msg = {"content": json.dumps({"tool": "done", "arguments": {"answer": "42"}})}
+                out = json.dumps({"choices": [{"message": msg}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+        up = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        threading.Thread(target=up.serve_forever, daemon=True).start()
+        tools_ = [{"type": "function", "function": {"name": n, "parameters": {"type": "object", "properties": {
+            "answer": {"type": "string"}}}}} for n in ("recall", "done")]
+        try:
+            base = llm_adapter.url(f"http://127.0.0.1:{up.server_address[1]}/v1")
+            r = httpx.post(base + "/chat/completions", timeout=10, json={
+                "messages": [{"role": "user", "content": "q"}], "tools": tools_,
+                "tool_choice": {"type": "function", "function": {"name": "done"}}})
+            call = r.json()["choices"][0]["message"]["tool_calls"][0]["function"]
+            self.assertEqual((call["name"], json.loads(call["arguments"])), ("done", {"answer": "42"}))
+            sch = seen[-1]["response_format"]["json_schema"]["schema"]
+            self.assertEqual(sch["properties"]["tool"]["const"], "done")                    # only the named one
+            r = httpx.post(base + "/chat/completions", timeout=10, json={
+                "messages": [{"role": "user", "content": "q"}], "tools": tools_, "tool_choice": "required",
+                "stream": True})
+            self.assertTrue(r.headers["content-type"].startswith("text/event-stream"))
+            events = [json.loads(x[6:]) for x in r.text.split("\n\n") if x.startswith("data: {")]
+            self.assertEqual(events[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"], "done")
+            self.assertEqual(events[-1]["choices"][0]["finish_reason"], "tool_calls")
+            self.assertTrue(r.text.rstrip().endswith("data: [DONE]"))
+            sch = seen[-1]["response_format"]["json_schema"]["schema"]
+            self.assertEqual(len(sch["anyOf"]), 2)                                          # "required": any tool
+        finally:
+            up.shutdown()
+            up.server_close()
 
 
 class HindsightDatabase(unittest.TestCase):

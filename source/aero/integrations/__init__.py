@@ -101,13 +101,34 @@ class Pack:
     def public(self, with_state=True):
         d = {"id": self.id, "name": self.name, "workspace": self.workspace, "summary": self.summary,
              "source": self.source, "license": self.license, "tools": list(self.tools), "skills": list(self.skills),
-             "notes": self.notes}
+             "notes": self.notes, "examples": EXAMPLES.get(self.id, [])}
         if with_state:
             d.update(self.state())
         return d
 
 
 PACKS = {}
+# What to ask for each pack: shown as one-click examples in its workspace card (and they open the workspace).
+EXAMPLES = {
+    "essentials": ["Check this project for errors and failing tests", "Does Safari support CSS :has()?",
+                   "Install Rust and run clippy on this crate"],
+    "flutter": ["Build me a Flutter app for my bakery with a menu and an order button",
+                "Run the app in the preview and fix any analyzer warnings"],
+    "xtool": ["Create an iOS SwiftUI app with xtool"],
+    "image": ["Make a Frutiger Aero wallpaper with bubbles over green hills", "Draw a logo idea for a coffee shop"],
+    "diagram-design": ["Draw the architecture of this project as a diagram", "Turn this Mermaid file into a diagram"],
+    "open-code-review": ["Review my uncommitted changes", "Scan this folder for security problems"],
+    "e2e": ["Explore http://localhost:3000 and find bugs in the sign-up flow", "Run this project's end-to-end tests"],
+    "raddebugger": ["Debug this program: break at main and step until it crashes", "Symbolize this crash address"],
+    "rea": ["Reverse engineer how this Electron app stores its settings", "Inspect this APK's network calls"],
+    "financial-services": ["Build a DCF model for this company's numbers", "Audit this spreadsheet's formulas",
+                           "Check this pitch deck for numbers that disagree"],
+    "awesome-python": ["Find a Python library for async HTTP"],
+    "awesome-selfhosted": ["Find a self-hosted IRC server"],
+    "secret-knowledge": ["Show one-liners for finding large files"],
+    "hindsight": ["Remember everything about this project in a memory bank", "What do you know about the release?"],
+    "bigmodels": ["Plan how Llama 3.3 70B runs on this PC", "Run Qwen2.5-32B in full precision with AirLLM"],
+}
 MODULES = ["code", "mobile", "diagrams", "review", "testing", "debug", "finance", "library", "memory", "create",
            "models"]
 _loaded = {"done": False}

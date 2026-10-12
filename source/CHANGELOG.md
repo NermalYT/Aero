@@ -5,7 +5,48 @@
 Aero becomes an all-in-one workstation: other projects' functions built into Aero in workspaces, autonomy modes for
 chats and forever-loops, models bigger than your GPU, a faster router, and an installer that can be tested anywhere.
 Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MODELS.md`,
-`docs/V1.2_PERFORMANCE_REPORT.md`, `docs/V1.2_TEST_MATRIX.md`.
+`docs/V1.2_PERFORMANCE_REPORT.md`, `docs/V1.2_TEST_MATRIX.md`, `docs/V1.2_TOOL_CALLING.md`.
+
+### Quality of life (1.2.0 re-release)
+
+- **Requests that need an action get one.** A request like "look at my GitHub notifications" or "check my emails and
+  look for any meetings this week" is recognised without a model call (`intents.py`): Aero shows the plan above the
+  work, offers the right tools, and when the model answers "I can't" (measured: Qwen3-4B refused about half the time
+  with every tool offered), the first action is made with a grammar-forced call instead (`forced_call.py`; llama-server
+  doesn't enforce `tool_choice: "required"`, measured on b11501). Email means every account: the ones listed in
+  Settings, mail sites in the browser bookmarks (read only) and Gmail / Outlook, with `/u/1/`, `/u/2/`… for extra
+  Gmail accounts; meetings become a Word schedule plus a table in the chat.
+- **Work happens on screen.** Aero's browser and the apps it uses are visible unless the request says "in the
+  background". When a page asks for a sign-in, Aero shows it and waits with a card ("I've signed in" / "Skip this
+  site"); it never types a password. The browser closes when the request is done.
+- **Tool calls look like tool calls.** Calls a model writes as text (Hermes `<tool_call>`, Qwen3-Coder XML, GLM,
+  functionary, Mistral, Llama, Granite, DeepSeek, Gemma) are parsed and run instead of printed
+  (`toolcall_text.py`); steps that only call tools show the tool cards, not their thinking. With tools switched off,
+  Aero says so with a one-click "Turn on tools".
+- **Tool calling is part of tuning.** Every tune ends with a tool-calling exam: 40 cases from the Berkeley
+  Function-Calling Leaderboard (BFCL v4, Apache-2.0: simple, multiple, parallel, irrelevance) and 12 Aero requests
+  (`tool_eval.py`). It picks the temperature for tool steps and whether Aero should start actions itself for that
+  model. Settings → Model & tuning shows the score.
+- **Full tuning is full.** q4_0 KV, finer context steps and thread counts are in the search; when the improving moves
+  run out, a sweep tries the untested neighbours of the best configs until 8 trials in a row change nothing
+  (Qwen3-4B: 22 trials, where 1.2.0 stopped at 8). A server that dies under load near the limit counts as out of
+  memory, so bigger configs aren't tried one by one.
+- **Big models are built into loading.** Search finds any model on Hugging Face, any size. A repo with the original
+  weights lists the GGUF versions others published (same model from known quantizers first; AWQ / FP8 repos fall back
+  to their base model), or Aero makes its own: download, llama.cpp's converter, an importance matrix for low-bit
+  quants, `llama-quantize` to the quant that fits this PC (`quantize.py`). The tuner now also tries the
+  feed-forward split for dense models bigger than the GPU (attention and KV on the GPU, feed-forward of some layers
+  in RAM) against whole-layer offload and keeps the faster: Gemma-3-27B Q8_0 under a 15 GB limit ran 98k context at
+  2.7 tok/s that way, where whole layers ran out of memory past 8k. Downloads are checked against the SHA-256 the Hub
+  publishes and show the time left.
+- **Every integration comes with Aero.** The installer sets them all up (Hindsight, AirLLM, image generation, code
+  tools, Flutter…; `--lean` to skip), and Aero finishes any that are missing in the background, with one progress
+  line under the workspaces (`integrations/bundle.py`). xtool stays opt-in because it changes WSL.
+- **Hindsight's forced tool calls** are answered by the loopback adapter with a grammar-forced call, streamed or not.
+- **Files Aero makes are downloadable** from the chat (Download / Open), served by id only (`made_files.py`).
+- **Tidier UI:** no Compact button (compaction is automatic at 75 %); themed text fields; workspace cards and the Big
+  models panel open with arrows (what it does, things to ask, its tools, what it needs); the Workspaces group in the
+  sidebar folds away; a plan chip shows what Aero understood; the tuning screen shows the tool-calling exam.
 
 ### Workspaces and integrations
 

@@ -11,6 +11,19 @@ Flow (runs once per model, result cached):
   5. The last part of the budget re-tests the top configs and averages them (measurement noise).
   6. The advisor names its final pick; the verifier checks it against the measurements and the goal.
   7. The winner gets a deep-context run (half the context filled) to prove it holds up under real load.
+  Dense models bigger than the GPU get a second way to split: instead of whole layers on the CPU, only the
+  feed-forward weights of some layers sit in RAM while attention and the KV cache of every layer stay on the GPU
+  (bigmodel.py, llama-server -ot). Both splits are seeded and measured; the "split" move swaps one for the other at
+  about the same VRAM, and the faster one wins.
+  8. Tool calling is baked in: the winner (and, on Long / Full, a runner-up of similar speed with a different KV
+     precision or context) takes Aero's tool-calling exam (tool_eval.py: BFCL cases + Aero requests), at two
+     temperatures; the result decides the temperature Aero uses for tool steps and whether, for requests that
+     plainly need an action, Aero forces the first call straight away (forced_call.py) instead of waiting for the
+     model to say "I can't".
+
+Full depth really is full: KV down to q4_0, finer context steps, threads even with every layer on the GPU, and when
+the improving moves run out, a sweep over the untested combinations next to the best ones until 8 trials in a row
+change nothing (or the 120-trial cap).
 """
 import hashlib
 import statistics
@@ -19,14 +32,15 @@ from pathlib import Path
 
 import httpx
 
-from . import gguf, hardware
+from . import bigmodel, gguf, hardware
 from .config import TRIAL_PORT, read_store, write_store
 from .engine import LlamaServer, build_args, classify_failure, server_version, spec_args
 
-LADDER = [4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072,
+LADDER = [4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 57344, 65536, 81920, 98304, 131072,
           196608, 262144, 393216, 524288, 1048576]
 DEPTHS = {"short": 10, "medium": 25, "long": 50, "full": None}
 FULL_CAP = 120
+PATIENCE = 8                 # Full: stop sweeping after this many trials in a row that don't change the best
 MODE_TEXT = {
     "balanced": "Balanced: the largest context that keeps at least 80% of the best generation speed; if that is "
                 "under 32k, a 32k+ config that keeps at least 50% wins instead (agent work needs 32k).",
@@ -89,25 +103,27 @@ def forget(model_path=None):
 # ---- search space ----------------------------------------------------------------------------------
 
 class Space:
-    """The knobs and their ladders. A config is {ctx, k, kv, ub, t}; k = layers (dense) or expert
-    blocks (MoE) kept on the CPU."""
+    """The knobs and their ladders. A config is {ctx, k, kv, ub, t[, f]}; k = layers (dense) or expert
+    blocks (MoE) kept on the CPU; with f (dense only) k counts layers whose feed-forward weights alone are in RAM."""
 
-    def __init__(self, meta, hw, settings, gpu):
-        self.meta, self.gpu = meta, gpu
+    def __init__(self, meta, hw, settings, gpu, full=False):
+        self.meta, self.gpu, self.full = meta, gpu, full
         self.n = meta["n_layer"]
         self.moe = meta["experts"] > 0
         cap = int(settings.get("context_cap") or 0)
         ctx_max = max(2048, min(cap, meta["ctx_train"]) if cap else meta["ctx_train"])
         self.ctx = [c for c in LADDER if c < ctx_max] + [ctx_max]
-        self.kv = (["q4_0"] if settings.get("allow_q4_kv") else []) + ["q8_0", "f16"]
+        self.kv = (["q4_0"] if settings.get("allow_q4_kv") or full else []) + ["q8_0", "f16"]
         self.ub = [256, 512, 1024, 2048]
         phys, logical = hw["cores"], hw["threads"]
         self.thr = sorted({max(2, phys // 2), phys, logical})
         self.phys = phys
+        self.ffn = False             # set by the tuner: a dense model whose feed-forward can be split off
+        self.equiv = None            # tuner: the config of the other split kind with about the same VRAM
 
     @staticmethod
     def key(c):
-        return (c["ctx"], c["k"], c["kv"], c["ub"], c["t"])
+        return (c["ctx"], c["k"], c["kv"], c["ub"], c["t"], bool(c.get("f")))
 
     def cpu_layers(self, c):
         return (not self.gpu) or c["k"] > 0
@@ -129,6 +145,9 @@ class Space:
                 out.append(("gpu+", {**c, "k": c["k"] - 1}))
             if c["k"] < self.n:
                 out.append(("gpu-", {**c, "k": c["k"] + 1}))
+            e = self.equiv(c) if self.ffn and self.equiv and c["k"] > 0 else None
+            if e:
+                out.append(("split", e))
         for d, nm in ((1, "kv+"), (-1, "kv-")):
             v = step(self.kv, c["kv"], d)
             if v:
@@ -137,7 +156,7 @@ class Space:
             v = step(self.ub, c["ub"], d)
             if v:
                 out.append((nm, {**c, "ub": v}))
-        if self.cpu_layers(c):
+        if self.cpu_layers(c) or self.full:
             for d, nm in ((1, "threads+"), (-1, "threads-")):
                 v = step(self.thr, c["t"], d)
                 if v:
@@ -152,9 +171,13 @@ class Space:
             s["ngl"] = 999
             if c["k"]:
                 s["ncmoe"] = c["k"]
+        elif c.get("f"):
+            s["ngl"] = 999
+            if c["k"]:
+                s["ot"] = [bigmodel.ffn_override(range(c["k"]))]
         else:
             s["ngl"] = 999 if c["k"] == 0 else self.n - c["k"]
-        if self.cpu_layers(c):
+        if self.cpu_layers(c) or self.full:
             s["threads"] = c["t"]
         return s
 
@@ -163,6 +186,8 @@ class Space:
             g = "CPU only"
         elif self.moe:
             g = f"gpu experts {self.n - c['k']}/{self.n}"
+        elif c.get("f"):
+            g = f"gpu {self.n}/{self.n}, ffn {self.n - c['k']}/{self.n}"
         else:
             g = f"gpu {self.n - c['k']}/{self.n}"
         s = f"ctx {c['ctx']:,} | {g} | kv {c['kv']} | ub {c['ub']}"
@@ -187,7 +212,18 @@ class Tuner:
         self.depth = depth if depth in DEPTHS else "medium"
         self.budget = DEPTHS[self.depth] or FULL_CAP
         self.advisor = advisor if (advisor and advisor.ready) else None
-        self.space = Space(self.meta, self.hw, settings, self.gpu)
+        self.space = Space(self.meta, self.hw, settings, self.gpu, full=self.depth == "full")
+        self.ffn_frac = 0.0
+        if self.gpu and not self.space.moe:
+            try:
+                info = bigmodel.inspect(self.model)
+                self.ffn_frac = sum(x["ffn"] for x in info["layers"]) / max(1, info["total"])
+            except Exception:  # noqa: BLE001
+                pass
+        self.space.ffn = self.ffn_frac > 0.2
+        self.space.equiv = self.equiv
+        self.best_since = 0          # trials since the best changed (Full's patience)
+        self.best_key = None
         self.server = LlamaServer(TRIAL_PORT, "tune")
         self.spec = spec_args(self.model, settings)      # trials carry it too, so its VRAM counts against the limit
         self.trials = []
@@ -228,6 +264,8 @@ class Tuner:
         n, k = self.space.n, c["k"]
         if self.space.moe:
             w, kv_frac = self.size_mb * (1 - 0.9 * k / n), 1.0
+        elif c.get("f"):
+            w, kv_frac = self.size_mb * (1 - self.ffn_frac * k / n), 1.0
         else:
             w, kv_frac = self.size_mb * (n - k) / n, (n - k) / n
         kv = kv_all * kv_frac
@@ -236,6 +274,21 @@ class Tuner:
 
     def est(self, c):
         return self.est_raw(c) * self.calib
+
+    def equiv(self, c):
+        """The same config with the other kind of split, keeping VRAM at or under what c needs; None when it can't
+        (the feed-forward split keeps every layer's KV cache on the GPU, so a huge context may not fit that way)."""
+        f = not c.get("f")
+        cap = self.est_raw(c)
+        k = next((k for k in range(0, self.space.n + 1) if self.est_raw({**c, "f": f, "k": k}) <= cap), None)
+        if k is None:
+            return None
+        out = {**c, "k": k}
+        if f:
+            out["f"] = True
+        else:
+            out.pop("f", None)
+        return out
 
     def recalibrate(self):
         ratios = [t["mem_mb"] / self.est_raw(t["cfg"]) for t in self.trials
@@ -255,6 +308,8 @@ class Tuner:
             if t["ok"] or t.get("kind") != "mem":
                 continue
             f = t["cfg"]
+            if bool(c.get("f")) != bool(f.get("f")):
+                continue
             if c["ctx"] >= f["ctx"] and c["k"] <= f["k"] and c["ub"] >= f["ub"] and kvr(c["kv"]) >= kvr(f["kv"]):
                 return True
         return False
@@ -338,7 +393,13 @@ class Tuner:
         except Cancelled:
             raise
         except Exception as e:  # noqa: BLE001
-            res.update(error=f"{type(e).__name__}: {e}", kind="load")
+            # the server died under the benchmark (connection reset): near the limit that is memory running out,
+            # so bigger configs are predicted to fail too instead of being tried one by one
+            tail = self.server.log_tail(40)
+            mem = "memory" in classify_failure(tail) or "out of memory" in tail.lower() or \
+                self.est(c) >= self.cap * 0.9
+            res.update(error=f"{type(e).__name__}: {e}" + (" (ran out of memory under load)" if mem else ""),
+                       kind="mem" if mem else "load")
         finally:
             self.server.stop()
         return res
@@ -352,6 +413,10 @@ class Tuner:
         t = {"n": n, "cfg": c, "desc": desc, "move": move, "base": base, "reason": reason, "by": by, **r}
         self.trials.append(t)
         self.recalibrate()
+        b = self.best()
+        k = Space.key(b["cfg"]) if b else None
+        self.best_since = 0 if k != self.best_key else self.best_since + 1
+        self.best_key = k
         self.emit({"type": "trial_done", **{k: v for k, v in t.items() if k != "cfg"}})
         return t
 
@@ -464,27 +529,28 @@ class Tuner:
         def useful(t):
             return t["ok"] and not t.get("retest") and t["tg"] >= floor
         if self.mode == "max_speed":
-            order = [("gpu+", b), ("ub+", b)] + ([("ctx+", b)] if b["cfg"]["ctx"] < 32768 else []) + \
+            order = [("gpu+", b), ("split", b), ("ub+", b)] + ([("ctx+", b)] if b["cfg"]["ctx"] < 32768 else []) + \
                     [("threads+", b), ("threads-", b), ("kv+", b)]
         else:
             order = [("ctx+", b)]
             # a walk toward more context: give up one GPU layer, then try ctx+ from there, while speed holds
-            if last is not b and useful(last) and last["cfg"]["ctx"] >= b["cfg"]["ctx"]:
+            same = bool(last["cfg"].get("f")) == bool(b["cfg"].get("f"))     # walks stay in the best split kind
+            if last is not b and same and useful(last) and last["cfg"]["ctx"] >= b["cfg"]["ctx"]:
                 order.append(("ctx+", last))
                 if self.walk_feasible(last):
                     order.append(("gpu-", last))
-            if not last["ok"] and last.get("kind") == "mem" and last["cfg"]["ctx"] > b["cfg"]["ctx"]:
+            if not last["ok"] and same and last.get("kind") == "mem" and last["cfg"]["ctx"] > b["cfg"]["ctx"]:
                 order.append(("gpu-", last))
             # a walk back from a bigger-context trial that is too slow: gpu+ for speed, else ctx- to make room
             # (the best itself counts when it only wins through the 32k agent rule)
             slow = [t for t in self.trials if t["ok"] and not t.get("retest") and t["tg"] < floor
-                    and (t["cfg"]["ctx"] > b["cfg"]["ctx"] or t is b)]
+                    and (t["cfg"]["ctx"] > b["cfg"]["ctx"] or t is b) and bool(t["cfg"].get("f")) == bool(b["cfg"].get("f"))]
             if slow:
                 v = last if last in slow else max(slow, key=lambda t: (t["tg"], t["cfg"]["ctx"]))
                 order.append(("gpu+", v))
                 if not (v is b and v["cfg"]["ctx"] <= 32768):
                     order.append(("ctx-", v))
-            order += [("gpu+", b), ("ub+", b)]
+            order += [("gpu+", b), ("split", b), ("ub+", b)]
             if not find("ctx+", b["n"], fitting=True) and self.walk_feasible(b):
                 order.append(("gpu-", b))   # ctx+ from the best is blocked by memory: start a walk
             order += [("kv+", b), ("threads+", b), ("threads-", b)]
@@ -498,6 +564,19 @@ class Tuner:
                 and o["est"] <= self.cap * 1.04]
         return min(near, key=lambda o: o["est"]) if near else None
 
+    def sweep(self, opts):
+        """Full depth, once the improving moves are used up: the next untested combination next to the best
+        configs (by rank), fitting by estimate; None when there is none or the best hasn't moved for PATIENCE trials."""
+        if self.depth != "full" or self.best_since >= PATIENCE:
+            return None
+        rank = {t["n"]: i for i, t in enumerate(self.ranked())}
+        order = {"split": 0, "kv-": 0, "kv+": 1, "ub+": 2, "ub-": 3, "ctx+": 4, "threads+": 5, "threads-": 6, "gpu+": 7, "ctx-": 8,
+                 "gpu-": 9}
+        fit = [o for o in opts if not o["over"]]
+        if not fit:
+            return None
+        return min(fit, key=lambda o: (rank.get(o["base"], 99), order.get(o["move"], 50)))
+
     def alpha(self):
         """How fast generation drops as layers move to the CPU: tg(k) ~ tg(0) / (1 + alpha * k / n).
         Starts from a typical value and is re-fit from measured trials (same ctx/kv/ub, different k)."""
@@ -507,7 +586,8 @@ class Tuner:
         for a in P:
             for b in P:
                 ca, cb = a["cfg"], b["cfg"]
-                if cb["k"] <= ca["k"] or (ca["kv"], ca["ub"], ca["t"]) != (cb["kv"], cb["ub"], cb["t"]):
+                if cb["k"] <= ca["k"] or (ca["kv"], ca["ub"], ca["t"], bool(ca.get("f"))) != \
+                        (cb["kv"], cb["ub"], cb["t"], bool(cb.get("f"))):
                     continue
                 r = a["tg"] / b["tg"]
                 den = cb["k"] / n - r * ca["k"] / n
@@ -593,8 +673,11 @@ class Tuner:
         else:
             k = kmin(small)
             anchor = {**base, "ctx": small, "k": sp.n if k is None else k}
+        def split(seeds):
+            """Each seed that needs layers on the CPU, again with the feed-forward split at the same VRAM."""
+            return seeds + [e for e in (self.equiv(c) for c in seeds if sp.ffn and c["k"] > 0) if e]
         if self.mode == "max_speed":
-            return [anchor]
+            return split([anchor])
         a, n = self.alpha(), sp.n
         def rel(k):
             return (1 + a * anchor["k"] / n) / (1 + a * k / n)
@@ -610,7 +693,73 @@ class Tuner:
             k = kmin(32768)
             if k is not None and rel(k) >= 0.5:
                 opt = {**base, "ctx": 32768, "k": k}
-        return [anchor] if Space.key(opt) == Space.key(anchor) else [anchor, opt]
+        return split([anchor] if Space.key(opt) == Space.key(anchor) else [anchor, opt])
+
+    # ---- tool calling ------------------------------------------------------------------------------------
+    def tool_phase(self, best):
+        """Run the tool-calling exam on the winner (and a runner-up of similar speed on Long / Full), at the user's
+        temperature and at 0.2. Returns (chosen trial, summary)."""
+        from . import forced_call, tool_eval, tools
+        tools.load_all()
+        schemas = tools.schemas({**self.settings, "tools_enabled": True})
+        temps = sorted({0.2, round(float(self.settings.get("temperature") or 0.7), 2)})
+        limit = {"short": 12, "medium": 30}.get(self.depth)
+        slow = best["tg"] < 8                 # a big model at a few tokens/s: a short exam at one temperature
+        if slow:
+            limit, temps = 12, [0.2]
+        cands = [best]
+        if self.depth in ("long", "full") and not slow:
+            other = next((t for t in self.ranked()[1:4] if t["ok"] and t["tg"] >= best["tg"] * 0.9 and
+                          (t["cfg"]["kv"], t["cfg"]["ctx"]) != (best["cfg"]["kv"], best["cfg"]["ctx"])), None)
+            if other:
+                cands.append(other)
+        scored = []
+        for cand in cands:
+            self.check()
+            self.emit({"type": "tool_eval_start", "n": cand["n"], "desc": cand["desc"]})
+            self.log(f"Tool-calling exam on #{cand['n']} ({cand['desc']}): BFCL cases + Aero requests…")
+            self.server.start(build_args(self.model, self.space.server_cfg(cand["cfg"]), TRIAL_PORT, self.mmproj,
+                                         spec=self.spec))
+            try:
+                ok, why = self.server.wait_ready(self.load_timeout, self.cancel)
+                if not ok:
+                    self.log(f"#{cand['n']} didn't start for the exam ({why}).")
+                    continue
+                runs = [tool_eval.run(self.server.url, schemas, temperature=t, limit=limit, cancel=self.cancel)
+                        for t in (temps if self.depth != "short" else temps[:1])]
+                aero_cases = [c for c in tool_eval.AERO_CASES if c[1]][:6 if slow else None]
+                top = max(runs, key=lambda r: (r["score"], -r["ms_per_case"]))
+                forced_ok = 0
+                offered = [s for s in schemas if s["function"]["name"] in tool_eval.AERO_TOOLS]
+                for req, names, check in aero_cases:
+                    self.check()
+                    got = forced_call.ask(self.server.url, [{"role": "user", "content": req}], offered,
+                                          top["temperature"])
+                    forced_ok += bool(got) and got[0] in names and (check is None or check(got[1]))
+                forced = round(forced_ok / max(1, len(aero_cases)), 3)
+                a_ok, a_n = (int(x) for x in top["by_category"].get("aero", "0/0").split("/"))
+                auto = a_ok / max(1, a_n)
+                summary = {**top, "runs": [{k: r[k] for k in ("temperature", "score", "bfcl", "aero", "ms_per_case")}
+                                           for r in runs],
+                           "forced_aero": forced, "auto_aero": round(auto, 3), "act_first": forced > auto,
+                           "trial": cand["n"]}
+                scored.append((cand, summary))
+                self.log(f"#{cand['n']}: tool calling {top['score']:.0%} (BFCL {top['bfcl']:.0%}, Aero requests "
+                         f"{top['aero']:.0%}) at temperature {top['temperature']}; first actions forced "
+                         f"{forced:.0%} vs on its own {auto:.0%}"
+                         + (" → Aero will force the first action for requests that need one." if forced > auto else "."))
+                self.emit({"type": "tool_eval_done", "n": cand["n"], **{k: summary[k] for k in
+                                                                          ("score", "bfcl", "aero", "temperature",
+                                                                           "forced_aero", "auto_aero", "act_first")}})
+            finally:
+                self.server.stop()
+        if not scored:
+            return best, None
+        cand, summary = max(scored, key=lambda x: (x[1]["score"], x[0]["tg"]))
+        if cand is not best:
+            self.log(f"#{cand['n']} calls tools better ({summary['score']:.0%}) at {cand['tg']} tok/s: it becomes the "
+                     "pick.")
+        return cand, summary
 
     # ---- main loop ---------------------------------------------------------------------------------------
     def run(self):
@@ -631,7 +780,9 @@ class Tuner:
         why = ["estimator's fastest usable config (sets the reference speed)",
                "estimator's predicted optimum for this goal"]
         for i, c in enumerate(self.seeds()):
-            first = self.trial(c, "seed", reason=why[i] if len(why) > i else "")
+            r = "the other split: feed-forward of some layers in RAM, attention and KV on the GPU" if c.get("f") \
+                else (why[i] if len(why) > i else "")
+            first = self.trial(c, "seed", reason=r)
             if not first["ok"] and first.get("kind") == "load" and "model failed to load" in first.get("error", ""):
                 raise RuntimeError("This model can't be loaded by the installed llama.cpp: " + first["error"])
 
@@ -650,7 +801,7 @@ class Tuner:
                     listed.append(("FINISH", "stop searching; the current best is final"))
                 cid, why = self.advisor.ask(self.state_text(), listed)
                 if cid == "FINISH":
-                    pol = self.policy(opts)
+                    pol = self.policy(opts) or self.sweep(self.options(wide=True))
                     if pol is None:
                         self.decisions.append({"after": len(self.trials), "advisor": "FINISH", "accepted": True})
                         self.log(f"Advisor: finished. {why}")
@@ -666,6 +817,9 @@ class Tuner:
             if choice is None:
                 choice = self.policy(opts)
                 reason = reason or "built-in step policy"
+                if choice is None:
+                    choice = self.sweep(self.options(wide=True))
+                    reason, by = "full sweep: an untested combination next to the best configs", "sweep"
                 if choice is None:
                     converged = True
                     self.log("Search converged: no remaining one-step move can improve the goal. "
@@ -719,6 +873,16 @@ class Tuner:
         else:
             raise RuntimeError("No configuration survived the long-prompt check.")
 
+        # ---- tool calling, baked in ------------------------------------------------------------------------------
+        tool = None
+        if self.settings.get("tune_tool_eval", True):
+            try:
+                best, tool = self.tool_phase(best)
+            except Cancelled:
+                raise
+            except Exception as e:  # noqa: BLE001
+                self.log(f"Tool-calling check skipped: {type(e).__name__}: {e}")
+
         cfg = self.space.server_cfg(best["cfg"])
         elapsed = round(time.time() - t0, 1)
         result = {
@@ -729,9 +893,9 @@ class Tuner:
             "verdict": verdict, "converged": converged,
             "trials": [{**{k: v for k, v in t.items() if k != "cfg"}, "knobs": t["cfg"]} for t in self.trials],
             "decisions": self.decisions, "tuned_at": time.strftime("%Y-%m-%d %H:%M"), "elapsed_s": elapsed,
-            "model_file": self.model.name, "llama_version": server_version(), "meta": m,
+            "model_file": self.model.name, "llama_version": server_version(), "meta": m, "tool_eval": tool,
         }
         self.emit({"type": "tune_done", "desc": best["desc"], "pp": best["pp"], "tg": best["tg"],
                    "tg_deep": deep.get("tg_deep"), "n": best["n"], "elapsed_s": elapsed, "trials": len(self.trials),
-                   "verdict": verdict, "mem_mb": best.get("mem_mb")})
+                   "verdict": verdict, "mem_mb": best.get("mem_mb"), "tool_eval": tool})
         return result

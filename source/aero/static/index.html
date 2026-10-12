@@ -90,7 +90,7 @@
         <div class="l-section-head"><h2>Find a model on Hugging Face</h2></div>
         <div class="search">
           <span class="search-ico"></span>
-          <input id="hfQuery" placeholder="Search GGUF models: qwen3, gemma, llama, deepseek, mistral…" autocomplete="off">
+          <input id="hfQuery" placeholder="Search any model, any size: qwen3, gemma 3 27b, llama 3.3 70b, deepseek…" autocomplete="off">
         </div>
         <div id="hfResults" class="hf-results"></div>
       </div>
@@ -115,7 +115,7 @@
       <button class="sb-mem" id="memoryBtn" title="What Aero remembers across chats (facts and lessons)"><span class="ico-mem"></span><span>Memory</span><small id="memCount"></small></button>
       <button class="sb-mem" id="labBtn" title="Profiles, tuning and benchmarks measured on this PC"><span class="ico-lab"></span><span>Performance Lab</span></button>
       <button class="sb-mem" id="modsBtn" title="Change Aero itself: describe the change, a model edits a copy of Aero, you check it and apply or undo it"><span class="ico-mod"></span><span>Mod Aero</span><small id="modCount"></small></button>
-      <div class="sb-label">Workspaces</div>
+      <button id="wsToggle" class="sb-label sb-fold" aria-expanded="true">Workspaces</button>
       <div id="wsList" class="ws-side"></div>
       <div class="sb-label">Recent</div>
       <div id="chatList" class="chat-list client"></div>
@@ -134,7 +134,6 @@
         <span class="agent-chip hidden" id="agentChip"></span>
         <div class="grow"></div>
         <div class="ctx-meter" id="ctxMeter" title="Context used"><div class="ctx-bar"><i></i></div><span></span></div>
-        <button class="btn ghost sm hidden" id="compactBtn" title="Save this chat to memory and continue in a fresh chat with an empty context">Compact</button>
         <button class="icon-btn" id="themeBtn" title="Theme: auto / day / night"></button>
         <button class="icon-btn" id="dashBtn" title="Show or hide the live dashboard"></button>
       </div>

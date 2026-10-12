@@ -29,6 +29,7 @@ How experiments work
 - A trial PASSES when the model loads, stays inside the user's VRAM limit and runs at normal speed. Otherwise it FAILS.
 - ctx = context length in tokens (longer chats and files; uses VRAM).
 - gpu = layers running on the GPU (more = much faster; uses VRAM). gpu+ moves one layer onto the GPU, gpu- moves one layer to the CPU.
+- "gpu N/N, ffn M/N" = every layer on the GPU except the feed-forward weights of N-M layers, which sit in RAM (big dense models). split swaps between this and whole layers at about the same VRAM; measure both and keep the faster.
 - kv = KV-cache precision: f16 is exact, q8_0 is near-exact at half the memory.
 - ub = prompt chunk size (bigger = faster prompt reading, slightly more VRAM).
 - threads = CPU threads; only matters when some layers run on the CPU.

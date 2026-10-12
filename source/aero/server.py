@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import (advisor, agent, agents, app_registry, attachments, autonomy, bench, claude_code, clarifications, cloud, experience, fit,
                gguf, github, hapo, hardware, hf, input_guard, localonly, looplog, memory, migrate, models, mods, osinfo,
-               pipeline, remote_sessions, resources, router, skills, stats, task_graph, tools, tuner, updater, vault,
+               pipeline, quantize, remote_sessions, resources, router, skills, stats, task_graph, tools, tuner, updater, vault,
                vram_policy)
 from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, UI_PORT, VERSION, load_settings,
                      save_settings)
@@ -278,9 +278,9 @@ def forget_tune(mid: str):
 # ---- Hugging Face ----------------------------------------------------------------------------
 
 @app.get("/api/hf/search")
-def hf_search(q: str = ""):
+def hf_search(q: str = "", scope: str = "all"):
     try:
-        return hf.search(q)
+        return hf.search(q, scope=scope)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Hugging Face search failed: {e}")
 
@@ -291,6 +291,8 @@ def hf_files(repo: str):
         d = hf.list_files(repo)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Could not list files: {e}")
+    if not d["files"]:
+        return _source_repo(repo, d)
     h = hw(force=True)
     vram, ram = h["vram_total_mb"], h["ram_total_mb"]
     for f in d["files"]:
@@ -313,6 +315,46 @@ def hf_files(repo: str):
         d["recommended"] = d["recommended_text"] = hf.recommend(d["files"], vram, ram)
         d["recommended_reason"] = d["recommended_text_reason"] = "estimated from file sizes only"
     return d
+
+
+def _source_repo(repo, d):
+    """A repo with the original weights, not GGUF: the GGUF versions others published (best first), the quant Aero
+    would make itself, and whether AirLLM can run it as it is."""
+    h = hw(force=True)
+    d["vram_mb"], d["ram_mb"] = h["vram_total_mb"], h["ram_total_mb"]
+    d["budget_mb"], d["budget_note"] = _plan_budget(h)
+    try:
+        d["versions"] = hf.gguf_versions(repo)
+        if not d["versions"]:                   # an AWQ / FP8 / fine-tuned repo: the GGUFs of the model it came from
+            base = hf.model_info(repo).get("base_model")
+            base = base[0] if isinstance(base, list) and base else base
+            if isinstance(base, str) and base and base != repo:
+                d["versions"], d["versions_of"] = hf.gguf_versions(base), base
+    except Exception as e:  # noqa: BLE001
+        d["versions"], d["versions_error"] = d.get("versions") or [], str(e)
+    try:
+        src = hf.source_info(repo)
+        params = src["params"] or int(src["size"] / 2)
+        q, imx, why = quantize.pick(params, d["budget_mb"], h["ram_total_mb"], bool(h["gpus"]))
+        d["source"] = {**{k: src[k] for k in ("arch", "params", "size", "gated", "license", "library")},
+                       "weights": len(src["weights"]), "make": {"quant": q, "imatrix": imx, "why": why,
+                                                                "size": int(params * dict((x[0], x[1]) for x in
+                                                                                          quantize.LADDER)[q] / 8)},
+                       "converter_ready": quantize.converter_ready()}
+    except Exception as e:  # noqa: BLE001
+        d["source"] = None
+        d["source_error"] = str(e)
+    return d
+
+
+@app.post("/api/hf/convert")
+async def hf_convert(req: Request):
+    """Make a GGUF of a repo that has none (quantize.py), then it's in Your models like any download."""
+    body = await req.json()
+
+    def job(emit, cancel):
+        return quantize.run(body["repo"], body.get("quant"), emit, cancel)
+    return stream_job(job)
 
 
 def _plan_budget(h):
@@ -599,7 +641,10 @@ async def load(req: Request):
                            "trials": len(entry["trials"]), "limit_gb": round(entry.get("limit_mb", 0) / 1024, 2),
                            "depth": entry.get("depth"), "advisor": (entry.get("advisor") or {}).get("name"),
                            "profile": prof.get("profile") if prof else None,
-                           "profile_name": prof.get("name") if prof else None, "key": key},
+                           "profile_name": prof.get("name") if prof else None, "key": key,
+                           "tools": {k: (entry.get("tool_eval") or {}).get(k) for k in
+                                     ("score", "bfcl", "aero", "temperature", "act_first")}
+                           if entry.get("tool_eval") else None},
                      warning=warning, error=None)
         models.update(m["id"], last_used=time.time())
         return {"ready": True, "desc": desc, "ctx": cfg["ctx"], "tg": tg, "pp": pp, "warning": warning,
@@ -1195,6 +1240,8 @@ def shutdown():
     router.stop()
     mcp_client.stop_all()
     from . import integrations
+    from .integrations import bundle
+    bundle.stop()
     integrations.stop_all()
     threading.Timer(0.3, lambda: os._exit(0)).start()
     return {"ok": True}
@@ -1747,6 +1794,20 @@ def integrations_overview():
     return {"workspaces": integrations.overview()}
 
 
+@app.get("/api/integrations/bundle")
+def integrations_bundle():
+    from .integrations import bundle
+    return bundle.status()
+
+
+@app.post("/api/integrations/bundle/retry")
+def integrations_bundle_retry():
+    """Clear the background attempts and start again (after going back online, say)."""
+    from .integrations import bundle
+    bundle.STATE.unlink(missing_ok=True)
+    return {"started": bundle.start_background(busy=lambda: _job["busy"])}
+
+
 @app.get("/api/integrations/ws/{ws}")
 def integrations_panel(ws: str):
     from . import integrations
@@ -1801,6 +1862,16 @@ async def integrations_cancel(req: Request):
     if ev:
         ev.set()
     return {"ok": bool(ev)}
+
+
+@app.get("/api/made/{fid}")
+def made_file(fid: str, inline: int = 0):
+    """A file a tool made (made_files.py): only registered ids, never a path from the request."""
+    from . import made_files
+    p = made_files.path_of(fid) if re.fullmatch(r"[0-9a-f]{16}", fid) else None
+    if not p:
+        raise HTTPException(404, "That file is gone (moved or deleted).")
+    return FileResponse(p, filename=p.name, content_disposition_type="inline" if inline else "attachment")
 
 
 _FILES = {"diagrams": DATA / "diagrams", "images": DATA / "images"}
@@ -2204,6 +2275,9 @@ async def _startup():
     app_registry.scan_async()
     task_graph.prune()
     vram_policy_runner().start()
+    if load_settings().get("bundle_integrations", True):        # every integration ships with Aero (bundle.py)
+        from .integrations import bundle
+        bundle.start_background(busy=lambda: _job["busy"])
 
 
 app.mount("/", StaticFiles(directory=str(PKG_DIR / "static"), html=True), name="static")

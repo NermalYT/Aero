@@ -68,13 +68,19 @@ def upgrade_settings(log=print):
         s = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return False
-    if int(s.get("settings_version") or 1) >= 2:
+    v = int(s.get("settings_version") or 1)
+    if v >= 3:
         return False
-    if s.get("thinking") is True:
+    if v < 2 and s.get("thinking") is True:
         s["thinking"] = "auto"
-    s["settings_version"] = 2
+    # 1.2: what the model does is on screen unless a request asks for the background; compaction is always automatic
+    if s.get("browser_mode") == "background":
+        s["browser_mode"] = "visible"
+    if not s.get("auto_compact_at"):
+        s["auto_compact_at"] = 0.75
+    s["settings_version"] = 3
     p.write_text(json.dumps(s, indent=2, ensure_ascii=False), encoding="utf-8")
-    log("  settings upgraded (thinking: auto)")
+    log("  settings upgraded (thinking: auto; browser and apps on screen; automatic compaction)")
     return True
 
 

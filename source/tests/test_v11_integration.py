@@ -92,7 +92,7 @@ class Upgrade(unittest.TestCase):
                 self.assertEqual(s[k], old[k], k)
             self.assertEqual((s["tool_policy"]["desktop"], s["tool_policy"]["shell"]), ("auto", "off"))
             self.assertEqual(s["tool_policy"]["ask"], "auto")                    # new category gets its default
-            self.assertEqual((s["remote_mode"], s["strict_background"], s["browser_mode"]), ("auto", False, "background"))
+            self.assertEqual((s["remote_mode"], s["strict_background"], s["browser_mode"]), ("auto", False, "visible"))      # 1.2: on screen by default
             config.save_settings({"remote_mode": "off"})
             saved = json.loads(p.read_text(encoding="utf-8"))
             self.assertEqual(saved["user_profile"], "I'm Pat.")                  # untouched user data

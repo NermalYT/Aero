@@ -217,6 +217,31 @@ def integration_context(turn, task):
             "exposed": list(turn.exposed) if turn.exposed is not None else None}
 
 
+# ------------------------------------------------------------------------------------------------ intents
+
+def intent_context(turn, task):
+    """What the request plainly means Aero should do (intents.py): the plan goes into the turn context, its tools into
+    the exposed set, and whether apps and the browser are on screen. With tools off, say what turning them on would
+    do instead of answering "I can't"."""
+    from . import intents
+    it = intents.match(task, turn.settings)
+    turn.intent = it
+    if it is None:
+        return None
+    turn.visible = it.visible
+    turn.tctx.visible = it.visible               # tools read it: browser on screen or not, apps raised or not
+    if not turn.settings.get("tools_enabled", True):
+        return {"t": "notice", "kind": "tools_off", "text": f"This request needs Aero to act ({it.label}), but tools "
+                "are off, so the model can only answer in words. Turn on Tools and send it again.",
+                "action": {"label": "Turn on tools", "settings": {"tools_enabled": True}}}
+    turn.memory_text = (intents.context_line(it) + "\n\n" + turn.memory_text).strip()
+    if turn.exposed is not None:
+        available = [c[0] for c in tool_catalog(turn.settings)]
+        order = {n: i for i, n in enumerate(available)}
+        turn.exposed = sorted(set(turn.exposed) | {n for n in it.tools if n in order}, key=lambda n: order.get(n, 1e9))
+    return {"t": "intent", "intent": it.public(), "exposed": list(turn.exposed) if turn.exposed is not None else None}
+
+
 # ------------------------------------------------------------------------------------------------ apps
 
 BACKEND_TOOLS = {"accessibility": ["app_view", "app_click", "app_type", "app_read", "app_keys"],
@@ -594,6 +619,10 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
             ev = await asyncio.to_thread(integration_context, turn, task)
             if ev:
                 yield out(ev)
+        if not mod:
+            ev = intent_context(turn, task)
+            if ev:
+                yield out(ev)
         journal = bool(loop) and settings.get("loop_journal", True)
         if journal:
             turn.journal_text = looplog.block(task)
@@ -637,6 +666,13 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         except OSError:
             pass
         turn.close()
+        it = getattr(turn, "intent", None)
+        if it is not None and it.close_browser:      # "close the browser on completion"
+            try:
+                from .tools import browser
+                browser.finish_owner(turn.tctx.owner)
+            except Exception:  # noqa: BLE001
+                pass
         agent.release(ids["chat"])
         if ids["chat"] != chat_id:
             agent.release(chat_id)
