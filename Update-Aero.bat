@@ -22,7 +22,7 @@ title Aero Updater
 :: AERO_INSTALL_FLAGS can hold the same options (Aero's own updater passes its environment on). AERO_PORT is the port
 :: of the Aero to stop first; for a folder other than C:\Aero that port is only asked when AERO_PORT is set.
 :: Administrator rights are asked for unless the install doesn't need them: a folder other than C:\Aero with
-:: --no-shortcuts and --no-register. Only C:\Aero ever takes over C:\Halcyon or C:\VRAMpire.
+:: --no-shortcuts and --no-register. Only C:\Aero ever takes over an install under the app's earlier names.
 :: ---------------------------------------------------------------------------
 
 set "ARGFILE=%TEMP%\aero-update-arg.txt"
