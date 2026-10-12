@@ -152,8 +152,23 @@ everything in it.
 
 ## Status
 
-1.1.0 adds app discovery, honest background control, questions during a task, whole-page reading and Remote Mode.
-What has passed for 1.1:
+1.2.0 adds workspaces with other projects built in, autonomy modes, models bigger than the GPU and a faster router.
+What has passed for 1.2:
+
+- 291 automated tests on Windows 11, and in CI on Windows, Ubuntu and macOS; CI also updates real 1.0.0 and 1.1.0
+  installs in place with the new build.
+- Every integration installed and run on a Windows 11 PC with an RTX 5080: toolchains and project checks for Python,
+  TypeScript, Go and Rust; a Flutter app previewed and hot-reloaded inside Aero; images, diagrams, code review and
+  app exploration on a local model; Hindsight; the finance checks; xtool in WSL; AirLLM on 7B and 32B checkpoints;
+  Llama-3.3-70B loaded and answering in Aero's chat on the 16 GB card.
+- 1.0 and 1.1 data folders opened by 1.2: settings, chats and memory kept.
+
+Not tested for 1.2: a RAD Debugger debugging session (Windows Firewall asks first, and Aero never answers that for
+you), Flutter builds for Android, iOS and desktop, xtool builds (Apple's SDK and account), recalculation with
+LibreOffice, AMD and Intel GPUs, the integrations on macOS and Linux
+([test matrix](source/docs/V1.2_TEST_MATRIX.md)).
+
+From 1.1.0 (app discovery, honest background control, questions during a task, whole-page reading, Remote Mode):
 
 - 218 automated tests on Windows 11, and in CI on Windows, Ubuntu and macOS.
 - Live on Windows 11: background typing and button presses verified with the window in front, the cursor and the

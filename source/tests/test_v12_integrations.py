@@ -479,6 +479,40 @@ class RadDebuggerExposure(unittest.TestCase):
             debug._session.update(port=None, proc=None)
 
 
+class ReleaseFiles(unittest.TestCase):
+    """tools/build_release.py skipped every folder named "data", so the Library's bundled lists never shipped."""
+
+    def _build_release(self):
+        import importlib.util
+        p = Path(__file__).resolve().parent.parent.parent / "tools" / "build_release.py"
+        if not p.exists():
+            self.skipTest("tools/ is not next to source/ here")
+        spec = importlib.util.spec_from_file_location("aero_build_release", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_every_file_under_aero_ships(self):
+        br = self._build_release()
+        shipped = {rel for _, rel in br.source_files()}
+        self.assertIn("aero/integrations/data/awesome-python.json", shipped)
+        self.assertIn("aero/integrations/data/secret-knowledge.json", shipped)
+        aero = br.SRC / "aero"
+        on_disk = {p.relative_to(br.SRC).as_posix() for p in aero.rglob("*")
+                   if p.is_file() and "__pycache__" not in p.parts and p.suffix not in (".pyc", ".pyo")}
+        self.assertEqual(on_disk - shipped, set())
+
+    def test_runtime_folders_at_the_top_stay_out(self):
+        br = self._build_release()
+        d = Path(tempfile.mkdtemp())
+        for rel in ("data/settings.json", "models/x.gguf", "aero/integrations/data/list.json", "aero/x.py"):
+            (d / rel).parent.mkdir(parents=True, exist_ok=True)
+            (d / rel).write_text("x", encoding="utf-8")
+        with mock.patch.object(br, "SRC", d):
+            shipped = {rel for _, rel in br.source_files()}
+        self.assertEqual(shipped, {"aero/integrations/data/list.json", "aero/x.py"})
+
+
 class McpSchemas(unittest.TestCase):
     def test_refs_into_defs_are_resolved(self):
         from aero.tools import mcp_client

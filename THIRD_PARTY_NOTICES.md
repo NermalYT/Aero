@@ -72,10 +72,12 @@ into your data folder when you ask, and it stays under its own licence there.
 | RAD Debugger | EpicGames/raddebugger | MIT |
 | rea-agents | morluto/rea | MIT |
 | Hindsight (hindsight-api-slim) | vectorize-io/hindsight | MIT (in its own Python environment) |
+| pg0 (embedded PostgreSQL with pgvector, a Hindsight dependency) | vectorize-io/pg0; PostgreSQL; pgvector | MIT; PostgreSQL Licence; PostgreSQL Licence (in Hindsight's environment) |
 | stable-diffusion.cpp | leejet/stable-diffusion.cpp | MIT |
 | Z-Image-Turbo, its VAE | Tongyi-MAI/Z-Image-Turbo (GGUF by leejet; VAE from Comfy-Org/z_image_turbo) | Apache-2.0 |
 | Qwen3-4B-Instruct-2507 (authority model, image text encoder) | Qwen (GGUF by unsloth) | Apache-2.0 |
 | AirLLM, PyTorch, transformers, accelerate | lyogavin/airllm; pytorch; huggingface | Apache-2.0; BSD-3-Clause; Apache-2.0 (in AirLLM's own environment) |
+| bitsandbytes (AirLLM's 4-bit / 8-bit layers, NVIDIA only) | bitsandbytes-foundation/bitsandbytes | MIT (in AirLLM's own environment) |
 | Draft models for big models | Llama-3.2-1B (Llama 3.2 Community Licence), Gemma-3-1B (Gemma Terms), Qwen2.5-0.5B / Qwen3-0.6B (Apache-2.0) | as listed; downloaded only when you ask |
 
 llama.cpp (MIT) binaries come from its GitHub releases, or are built from source where no build fits. Model files

@@ -1,0 +1,1619 @@
+{
+ "at": "2026-10-11 21:14:46",
+ "tree": "<checkout>\\f16b2223-c80d-4492-a861-19d4b516a938\\88b44bdc-9fbc-4e6a-ae8f-6e775361460c\\scratch-2026-10-09-6fd3fd\\Aero\\source",
+ "model": "MiniCPM5-2B-Q4_K_M.gguf",
+ "threads": 10,
+ "device": "gpu",
+ "sizes": {
+  "catalog_tools": 53,
+  "rules_chars": 2588,
+  "catalog_chars": 4687,
+  "schema_chars": 1220
+ },
+ "rows": [
+  {
+   "text": "Open up my Bloxstrap, find me a fun Roblox game, and launch it.",
+   "need": [
+    [
+     "app.launch"
+    ],
+    [
+     "browser.search",
+     "browser.read"
+    ]
+   ],
+   "ms": 384,
+   "router_ms": 384,
+   "prompt_n": 29,
+   "cached_n": 1777,
+   "gen_n": 48,
+   "tg": 197.2,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "open_app",
+    "app_find",
+    "app_launch",
+    "web_search",
+    "fetch_url"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Roblox (installed; opens through Bloxstrap.exe; related: Bloxstrap; best via protocol; app_launch \"roblox\") · Bloxstrap (installed; related: Roblox; best via protocol; app_launch \"bloxstrap\")"
+  },
+  {
+   "text": "Check my Gmail for meetings this week and make me a document with everything I need.",
+   "need": [
+    [
+     "email.read",
+     "browser.navigate",
+     "mcp.call"
+    ],
+    [
+     "document.create"
+    ]
+   ],
+   "ms": 310,
+   "router_ms": 309,
+   "prompt_n": 27,
+   "cached_n": 1777,
+   "gen_n": 42,
+   "tg": 221.2,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "app_find",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections",
+    "meeting_doc"
+   ],
+   "complexity": "moderate",
+   "error": null,
+   "apps": "Apps: Gmail (web service; best via mcp/browser)"
+  },
+  {
+   "text": "Open Discord, find my conversation with Alex, and summarize the important points.",
+   "need": [
+    [
+     "app.launch",
+     "app.inspect"
+    ],
+    [
+     "app.read"
+    ]
+   ],
+   "ms": 334,
+   "router_ms": 333,
+   "prompt_n": 25,
+   "cached_n": 1777,
+   "gen_n": 41,
+   "tg": 216.6,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "open_app",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Discord PTB (installed; best via accessibility/browser; app_launch \"discordptb\")"
+  },
+  {
+   "text": "Open my most recent Python project in VS Code and fix the failing tests.",
+   "need": [
+    [
+     "filesystem.search"
+    ],
+    [
+     "terminal.execute"
+    ],
+    [
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 436,
+   "router_ms": 436,
+   "prompt_n": 23,
+   "cached_n": 1778,
+   "gen_n": 59,
+   "tg": 197.6,
+   "skipped": null,
+   "tools": [
+    "app_list",
+    "app_launch",
+    "run_subagent"
+   ],
+   "exposed": [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "run_command",
+    "open_app",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch",
+    "run_subagent"
+   ],
+   "complexity": "moderate",
+   "error": null,
+   "apps": "Apps: Visual Studio Code (not found on this computer; best via file/terminal)"
+  },
+  {
+   "text": "Open my budget spreadsheet and update the totals.",
+   "need": [
+    [
+     "filesystem.search",
+     "filesystem.read"
+    ],
+    [
+     "filesystem.modify",
+     "spreadsheet.edit"
+    ]
+   ],
+   "ms": 368,
+   "router_ms": 368,
+   "prompt_n": 16,
+   "cached_n": 1779,
+   "gen_n": 48,
+   "tg": 213.9,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "read_file",
+    "write_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "find_files",
+    "open_app",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Play my workout playlist on Spotify.",
+   "need": [
+    [
+     "app.launch",
+     "app.interact"
+    ]
+   ],
+   "ms": 337,
+   "router_ms": 336,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 200.4,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Spotify (installed; best via media_session/accessibility; app_launch \"spotify\")"
+  },
+  {
+   "text": "Read all the pages on this pricing site and compare the plans: https://example.com/pricing",
+   "need": [
+    [
+     "browser.read",
+     "browser.navigate"
+    ]
+   ],
+   "ms": 352,
+   "router_ms": 352,
+   "prompt_n": 28,
+   "cached_n": 1777,
+   "gen_n": 43,
+   "tg": 206.3,
+   "skipped": null,
+   "tools": [
+    "fetch_url",
+    "web_search"
+   ],
+   "exposed": [
+    "web_search",
+    "fetch_url",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections"
+   ],
+   "complexity": "moderate",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Use the browser to finish the signup form on example.com.",
+   "need": [
+    [
+     "browser.interact"
+    ]
+   ],
+   "ms": 428,
+   "router_ms": 427,
+   "prompt_n": 22,
+   "cached_n": 1777,
+   "gen_n": 73,
+   "tg": 237.2,
+   "skipped": null,
+   "tools": [
+    "browser_open",
+    "browser_click",
+    "browser_type",
+    "browser_select",
+    "browser_scroll",
+    "browser_wait_for"
+   ],
+   "exposed": [
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_select",
+    "browser_scroll",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections",
+    "browser_wait_for"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "What's 17 times 23?",
+   "need": [],
+   "ms": 317,
+   "router_ms": 317,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 35,
+   "tg": 187.0,
+   "skipped": null,
+   "tools": [],
+   "exposed": [],
+   "complexity": "trivial",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "hi",
+   "need": [],
+   "ms": 0,
+   "router_ms": 0,
+   "prompt_n": null,
+   "cached_n": null,
+   "gen_n": null,
+   "tg": null,
+   "skipped": "greeting or thanks",
+   "tools": [],
+   "exposed": [],
+   "complexity": "trivial",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Rename every .jpeg in my Downloads folder to .jpg.",
+   "need": [
+    [
+     "filesystem.search"
+    ],
+    [
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 476,
+   "router_ms": 475,
+   "prompt_n": 24,
+   "cached_n": 1777,
+   "gen_n": 51,
+   "tg": 146.1,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "find_files",
+    "edit_file",
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "move_path",
+    "delete_path",
+    "find_files",
+    "run_command"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Find the TODO comments in my repo and list them.",
+   "need": [
+    [
+     "filesystem.search"
+    ]
+   ],
+   "ms": 389,
+   "router_ms": 389,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 49,
+   "tg": 198.4,
+   "skipped": null,
+   "tools": [
+    "search_files",
+    "read_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Install the requests package with pip.",
+   "need": [
+    [
+     "terminal.execute"
+    ]
+   ],
+   "ms": 360,
+   "router_ms": 360,
+   "prompt_n": 16,
+   "cached_n": 1777,
+   "gen_n": 43,
+   "tg": 188.5,
+   "skipped": null,
+   "tools": [
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "run_command"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Take a screenshot and tell me what's on my screen.",
+   "need": [
+    [
+     "screen.observe"
+    ]
+   ],
+   "ms": 345,
+   "router_ms": 345,
+   "prompt_n": 21,
+   "cached_n": 1777,
+   "gen_n": 43,
+   "tg": 203.8,
+   "skipped": null,
+   "tools": [
+    "screenshot"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "screenshot"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Click the Save button in Notepad.",
+   "need": [
+    [
+     "app.interact"
+    ]
+   ],
+   "ms": 340,
+   "router_ms": 339,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 194.1,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Notepad (installed; best via file/accessibility; app_launch \"notepad\")"
+  },
+  {
+   "text": "Type 'meeting notes' into the open Notepad window.",
+   "need": [
+    [
+     "app.interact"
+    ]
+   ],
+   "ms": 422,
+   "router_ms": 420,
+   "prompt_n": 21,
+   "cached_n": 1777,
+   "gen_n": 58,
+   "tg": 207.2,
+   "skipped": null,
+   "tools": [
+    "app_list",
+    "app_click",
+    "app_read",
+    "app_type",
+    "type_text"
+   ],
+   "exposed": [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "screenshot",
+    "type_text",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Notepad (installed; best via file/accessibility; app_launch \"notepad\")"
+  },
+  {
+   "text": "What windows do I have open right now?",
+   "need": [
+    [
+     "app.inspect"
+    ]
+   ],
+   "ms": 354,
+   "router_ms": 354,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 44,
+   "tg": 203.4,
+   "skipped": null,
+   "tools": [
+    "list_windows",
+    "app_list"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "list_windows",
+    "app_list"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Search the web for the latest llama.cpp release notes.",
+   "need": [
+    [
+     "browser.search"
+    ]
+   ],
+   "ms": 368,
+   "router_ms": 368,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 43,
+   "tg": 183.8,
+   "skipped": null,
+   "tools": [
+    "web_search"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "web_search",
+    "fetch_url"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Summarize this article: https://en.wikipedia.org/wiki/Frog",
+   "need": [
+    [
+     "browser.read"
+    ]
+   ],
+   "ms": 413,
+   "router_ms": 413,
+   "prompt_n": 22,
+   "cached_n": 1777,
+   "gen_n": 41,
+   "tg": 138.2,
+   "skipped": null,
+   "tools": [
+    "fetch_url"
+   ],
+   "exposed": [
+    "web_search",
+    "fetch_url",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Log in to my bank's website and check my balance.",
+   "need": [
+    [
+     "browser.interact",
+     "browser.navigate"
+    ]
+   ],
+   "ms": 353,
+   "router_ms": 352,
+   "prompt_n": 21,
+   "cached_n": 1777,
+   "gen_n": 36,
+   "tg": 208.4,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Remember that my favorite color is green.",
+   "need": [
+    [
+     "memory.learn"
+    ]
+   ],
+   "ms": 331,
+   "router_ms": 331,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 36,
+   "tg": 204.7,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "remember"
+   ],
+   "complexity": "trivial",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "What did we talk about yesterday about the router?",
+   "need": [
+    [
+     "memory.recall"
+    ]
+   ],
+   "ms": 394,
+   "router_ms": 394,
+   "prompt_n": 19,
+   "cached_n": 1777,
+   "gen_n": 41,
+   "tg": 200.8,
+   "skipped": null,
+   "tools": [
+    "recall"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "recall"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Write a Python script that prints the first 20 primes and save it to primes.py.",
+   "need": [
+    [
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 387,
+   "router_ms": 387,
+   "prompt_n": 27,
+   "cached_n": 1777,
+   "gen_n": 47,
+   "tg": 179.0,
+   "skipped": null,
+   "tools": [
+    "write_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "find_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Edit config.yaml and change the port to 8080.",
+   "need": [
+    [
+     "filesystem.read"
+    ],
+    [
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 375,
+   "router_ms": 374,
+   "prompt_n": 21,
+   "cached_n": 1777,
+   "gen_n": 45,
+   "tg": 180.3,
+   "skipped": null,
+   "tools": [
+    "read_file",
+    "edit_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "edit_file",
+    "find_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Delete the temp folder on my desktop.",
+   "need": [
+    [
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 371,
+   "router_ms": 371,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 46,
+   "tg": 183.3,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "move_path",
+    "delete_path",
+    "find_files",
+    "run_command"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Launch Steam and start Hades.",
+   "need": [
+    [
+     "app.launch"
+    ]
+   ],
+   "ms": 407,
+   "router_ms": 407,
+   "prompt_n": 15,
+   "cached_n": 1777,
+   "gen_n": 52,
+   "tg": 192.4,
+   "skipped": null,
+   "tools": [
+    "run_command",
+    "app_list",
+    "app_launch"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "run_command",
+    "open_app",
+    "app_list",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Steam (installed; best via protocol; app_launch \"steam\")"
+  },
+  {
+   "text": "Open Calculator and add 1234 and 5678.",
+   "need": [
+    [
+     "app.launch"
+    ],
+    [
+     "app.interact"
+    ]
+   ],
+   "ms": 323,
+   "router_ms": 322,
+   "prompt_n": 21,
+   "cached_n": 1777,
+   "gen_n": 36,
+   "tg": 192.4,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "open_app",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Calculator (not found on this computer; best via accessibility)"
+  },
+  {
+   "text": "Open File Explorer to my Documents folder.",
+   "need": [
+    [
+     "app.launch"
+    ]
+   ],
+   "ms": 381,
+   "router_ms": 380,
+   "prompt_n": 16,
+   "cached_n": 1778,
+   "gen_n": 53,
+   "tg": 208.3,
+   "skipped": null,
+   "tools": [
+    "app_list",
+    "app_find",
+    "app_launch"
+   ],
+   "exposed": [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "open_app",
+    "app_list",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Files (installed; best via file; app_launch \"files\")"
+  },
+  {
+   "text": "Check what's using port 8180.",
+   "need": [
+    [
+     "terminal.execute"
+    ]
+   ],
+   "ms": 405,
+   "router_ms": 405,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 45,
+   "tg": 176.5,
+   "skipped": null,
+   "tools": [
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "run_command"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Read the PDF on my desktop called report.pdf and summarize it.",
+   "need": [
+    [
+     "filesystem.read",
+     "document.read"
+    ]
+   ],
+   "ms": 518,
+   "router_ms": 518,
+   "prompt_n": 22,
+   "cached_n": 1777,
+   "gen_n": 41,
+   "tg": 118.7,
+   "skipped": null,
+   "tools": [
+    "read_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Make a Word document listing my meetings for next week from my email.",
+   "need": [
+    [
+     "email.read",
+     "browser.navigate",
+     "mcp.call"
+    ],
+    [
+     "document.create"
+    ]
+   ],
+   "ms": 447,
+   "router_ms": 446,
+   "prompt_n": 23,
+   "cached_n": 1777,
+   "gen_n": 44,
+   "tg": 156.6,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_back",
+    "browser_read",
+    "meeting_doc"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Word (installed; best via file/accessibility; app_launch \"winword\")"
+  },
+  {
+   "text": "Open Outlook and read my newest email.",
+   "need": [
+    [
+     "app.launch",
+     "app.inspect",
+     "email.read"
+    ],
+    [
+     "app.read",
+     "email.read"
+    ]
+   ],
+   "ms": 532,
+   "router_ms": 531,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 52,
+   "tg": 163.8,
+   "skipped": null,
+   "tools": [
+    "app_list",
+    "app_launch",
+    "app_read"
+   ],
+   "exposed": [
+    "open_app",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Outlook (classic) (installed; best via accessibility/browser; app_launch \"outlook\")"
+  },
+  {
+   "text": "Send a message to Sam on Slack saying I'm running late.",
+   "need": [
+    [
+     "app.interact",
+     "browser.interact",
+     "mcp.call"
+    ]
+   ],
+   "ms": 478,
+   "router_ms": 477,
+   "prompt_n": 23,
+   "cached_n": 1777,
+   "gen_n": 41,
+   "tg": 156.9,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Slack (not found on this computer; best via mcp/accessibility)"
+  },
+  {
+   "text": "Open the GitHub issues for NermalYT/Aero and list the open ones.",
+   "need": [
+    [
+     "mcp.call",
+     "browser.read",
+     "browser.navigate"
+    ]
+   ],
+   "ms": 507,
+   "router_ms": 506,
+   "prompt_n": 25,
+   "cached_n": 1777,
+   "gen_n": 50,
+   "tg": 170.6,
+   "skipped": null,
+   "tools": [
+    "web_search",
+    "fetch_url"
+   ],
+   "exposed": [
+    "open_app",
+    "app_find",
+    "app_launch",
+    "web_search",
+    "fetch_url",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: GitHub (web service; best via mcp/browser)"
+  },
+  {
+   "text": "Scroll down in the browser and read the rest of the page.",
+   "need": [
+    [
+     "browser.read"
+    ]
+   ],
+   "ms": 416,
+   "router_ms": 415,
+   "prompt_n": 22,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 178.7,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Go back to the previous page in the browser.",
+   "need": [
+    [
+     "browser.navigate"
+    ]
+   ],
+   "ms": 456,
+   "router_ms": 454,
+   "prompt_n": 19,
+   "cached_n": 1777,
+   "gen_n": 44,
+   "tg": 162.5,
+   "skipped": null,
+   "tools": [
+    "browser_back"
+   ],
+   "exposed": [
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_scroll",
+    "browser_back",
+    "browser_read",
+    "browser_read_sections"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Fill in the 'Name' field on the form in my browser with Pat Lee.",
+   "need": [
+    [
+     "browser.interact"
+    ]
+   ],
+   "ms": 721,
+   "router_ms": 721,
+   "prompt_n": 26,
+   "cached_n": 1777,
+   "gen_n": 109,
+   "tg": 210.8,
+   "skipped": null,
+   "tools": [
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_read",
+    "browser_open",
+    "browser_type",
+    "browser_select",
+    "browser_scroll",
+    "browser_read",
+    "browser_extract",
+    "browser_screenshot",
+    "browser_wait_for",
+    "browser_back"
+   ],
+   "exposed": [
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_select",
+    "browser_scroll",
+    "browser_back",
+    "browser_screenshot",
+    "browser_read",
+    "browser_read_sections",
+    "browser_extract",
+    "browser_wait_for"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Download the latest Aero release notes and save them to notes.md.",
+   "need": [
+    [
+     "browser.read"
+    ],
+    [
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 469,
+   "router_ms": 468,
+   "prompt_n": 22,
+   "cached_n": 1777,
+   "gen_n": 53,
+   "tg": 177.4,
+   "skipped": null,
+   "tools": [
+    "web_search",
+    "fetch_url",
+    "write_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "web_search",
+    "fetch_url"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Compare the specs of the RTX 5080 and RX 9070 XT from their official pages.",
+   "need": [
+    [
+     "browser.search",
+     "browser.read"
+    ]
+   ],
+   "ms": 500,
+   "router_ms": 499,
+   "prompt_n": 31,
+   "cached_n": 1777,
+   "gen_n": 54,
+   "tg": 161.2,
+   "skipped": null,
+   "tools": [
+    "web_search",
+    "fetch_url"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "web_search",
+    "fetch_url"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Open VS Code.",
+   "need": [
+    [
+     "app.launch"
+    ]
+   ],
+   "ms": 485,
+   "router_ms": 484,
+   "prompt_n": 13,
+   "cached_n": 1777,
+   "gen_n": 45,
+   "tg": 159.5,
+   "skipped": null,
+   "tools": [
+    "app_launch",
+    "app_list"
+   ],
+   "exposed": [
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "run_command",
+    "open_app",
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Visual Studio Code (not found on this computer; best via file/terminal)"
+  },
+  {
+   "text": "Start Minecraft.",
+   "need": [
+    [
+     "app.launch"
+    ]
+   ],
+   "ms": 409,
+   "router_ms": 408,
+   "prompt_n": 13,
+   "cached_n": 1777,
+   "gen_n": 36,
+   "tg": 154.2,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "open_app",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Minecraft Launcher (not found on this computer; best via protocol)"
+  },
+  {
+   "text": "Open settings and turn on dark mode.",
+   "need": [
+    [
+     "app.launch",
+     "app.interact"
+    ]
+   ],
+   "ms": 397,
+   "router_ms": 395,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 37,
+   "tg": 149.9,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "open_app",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Which account should you use to check my email? Just check the work one.",
+   "need": [
+    [
+     "email.read",
+     "browser.navigate",
+     "mcp.call"
+    ]
+   ],
+   "ms": 383,
+   "router_ms": 383,
+   "prompt_n": 25,
+   "cached_n": 1777,
+   "gen_n": 44,
+   "tg": 188.6,
+   "skipped": null,
+   "tools": [
+    "run_command",
+    "web_search"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "run_command",
+    "web_search",
+    "fetch_url",
+    "browser_open",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_back",
+    "browser_read"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Run the tests in this project and tell me which fail.",
+   "need": [
+    [
+     "terminal.execute"
+    ]
+   ],
+   "ms": 526,
+   "router_ms": 526,
+   "prompt_n": 21,
+   "cached_n": 1777,
+   "gen_n": 58,
+   "tg": 170.9,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "find_files",
+    "search_files",
+    "run_command",
+    "read_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files",
+    "run_command"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Look at the app window I selected and click Next.",
+   "need": [
+    [
+     "app.interact"
+    ]
+   ],
+   "ms": 430,
+   "router_ms": 429,
+   "prompt_n": 20,
+   "cached_n": 1777,
+   "gen_n": 47,
+   "tg": 191.4,
+   "skipped": null,
+   "tools": [
+    "app_view",
+    "app_click"
+   ],
+   "exposed": [
+    "app_list",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Read the text in the open Word document.",
+   "need": [
+    [
+     "app.read",
+     "document.read"
+    ]
+   ],
+   "ms": 324,
+   "router_ms": 324,
+   "prompt_n": 18,
+   "cached_n": 1777,
+   "gen_n": 40,
+   "tg": 195.2,
+   "skipped": null,
+   "tools": [
+    "read_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "find_files",
+    "search_files",
+    "app_view",
+    "app_click",
+    "app_type",
+    "app_keys",
+    "app_read",
+    "app_find",
+    "app_launch"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": "Apps: Word (installed; best via file/accessibility; app_launch \"winword\")"
+  },
+  {
+   "text": "Find all photos larger than 10 MB on my D drive.",
+   "need": [
+    [
+     "filesystem.search",
+     "terminal.execute"
+    ]
+   ],
+   "ms": 378,
+   "router_ms": 378,
+   "prompt_n": 22,
+   "cached_n": 1777,
+   "gen_n": 51,
+   "tg": 195.8,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "find_files",
+    "run_command"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "run_command"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Translate 'good morning' into Japanese.",
+   "need": [],
+   "ms": 292,
+   "router_ms": 292,
+   "prompt_n": 17,
+   "cached_n": 1777,
+   "gen_n": 34,
+   "tg": 199.1,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Explain how a CPU cache works.",
+   "need": [],
+   "ms": 334,
+   "router_ms": 334,
+   "prompt_n": 16,
+   "cached_n": 1777,
+   "gen_n": 37,
+   "tg": 172.6,
+   "skipped": null,
+   "tools": [],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  },
+  {
+   "text": "Organize my desktop into folders by file type.",
+   "need": [
+    [
+     "filesystem.search"
+    ],
+    [
+     "filesystem.modify"
+    ]
+   ],
+   "ms": 393,
+   "router_ms": 392,
+   "prompt_n": 19,
+   "cached_n": 1777,
+   "gen_n": 56,
+   "tg": 207.2,
+   "skipped": null,
+   "tools": [
+    "list_dir",
+    "find_files",
+    "search_files",
+    "write_file"
+   ],
+   "exposed": [
+    "list_dir",
+    "read_file",
+    "write_file",
+    "move_path",
+    "delete_path",
+    "find_files",
+    "search_files"
+   ],
+   "complexity": "simple",
+   "error": null,
+   "apps": ""
+  }
+ ]
+}

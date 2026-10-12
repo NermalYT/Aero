@@ -318,6 +318,17 @@ class EmptyReply(unittest.TestCase):
         self.assertNotIn("tool_choice", model.bodies[2])                 # tools are back after the one retry
         self.assertNotIn('"name"', [e for e in ev if e["t"] == "assistant_done"][1]["message"]["content"])
 
+    def test_bare_call_parser(self):
+        s = settings()
+        call = agent.bare_tool_call('I will look. {"name": "list_dir", "parameters": {"path": "."}}', s)
+        self.assertEqual(call[:2], ("list_dir", {"path": "."}))
+        fenced = "```json\n" + json.dumps({"name": "read_file", "arguments": json.dumps({"path": "a"})}) + "\n```"
+        self.assertEqual(agent.bare_tool_call(fenced, s)[:2], ("read_file", {"path": "a"}))
+        # an example in the middle of an explanation never runs; neither does a tool blocked for the turn
+        self.assertIsNone(agent.bare_tool_call('Like {"name": "list_dir", "parameters": {}} here.', s))
+        self.assertIsNone(agent.bare_tool_call('{"name": "list_dir", "parameters": {}}', s, ["list_dir"]))
+        self.assertIsNone(agent.bare_tool_call('{"name": "no_such_tool", "parameters": {}}', s))
+
     def test_a_second_empty_reply_ends_the_turn(self):
         _reset()
         model = Model([("", []), ("", [])])

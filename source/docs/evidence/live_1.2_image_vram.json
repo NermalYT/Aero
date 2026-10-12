@@ -1,0 +1,102 @@
+{
+ "note": "stable-diffusion.cpp sd-cli, Z-Image-Turbo Q4_K, 1024x1024, 8 steps, --offload-to-cpu --diffusion-fa, RTX 5080; used_mb = peak minus before (nvidia-smi, 0.2 s polling)",
+ "max_vram=3.5": {
+  "rc": 0,
+  "s": 35.8,
+  "vram_before": 595,
+  "peak": 4786,
+  "used_mb": 4191,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=3.5 +vae-tiling": {
+  "rc": 0,
+  "s": 32.9,
+  "vram_before": 590,
+  "peak": 5307,
+  "used_mb": 4717,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=6": {
+  "rc": 0,
+  "s": 14.3,
+  "vram_before": 590,
+  "peak": 5103,
+  "used_mb": 4513,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=6 +vae-tiling": {
+  "rc": 0,
+  "s": 11.6,
+  "vram_before": 590,
+  "peak": 5103,
+  "used_mb": 4513,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=none": {
+  "rc": 0,
+  "s": 16.1,
+  "vram_before": 600,
+  "peak": 9421,
+  "used_mb": 8821,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=2.5": {
+  "rc": 0,
+  "s": 39.0,
+  "vram_before": 593,
+  "peak": 4274,
+  "used_mb": 3681,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=2.5 +vae-tiling": {
+  "rc": 0,
+  "s": 36.8,
+  "vram_before": 588,
+  "peak": 4286,
+  "used_mb": 3698,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=2": {
+  "rc": 0,
+  "s": 57.4,
+  "vram_before": 588,
+  "peak": 3824,
+  "used_mb": 3236,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=2 +vae-tiling": {
+  "rc": 0,
+  "s": 51.4,
+  "vram_before": 588,
+  "peak": 3903,
+  "used_mb": 3315,
+  "ok": true,
+  "err": ""
+ },
+ "max_vram=1.5": {
+  "rc": 1,
+  "s": 12.6,
+  "vram_before": 588,
+  "peak": 2196,
+  "used_mb": 1608,
+  "ok": false,
+  "err": "e.prelude) failed during weight preparation --- ggml_runner.cpp:899\n[E] diffusion model compute failed --- diffusion_engine.cpp:2620\n[E] Diffusion model sampling failed --- diffusion_engine.cpp:2838\n[E] sampling for image 1/1 failed after 3.08s --- image.cpp:907\n[E] generate failed --- main.cpp:939\n"
+ },
+ "max_vram=1.5 +vae-tiling": {
+  "rc": 1,
+  "s": 12.6,
+  "vram_before": 588,
+  "peak": 2196,
+  "used_mb": 1608,
+  "ok": false,
+  "err": "e.prelude) failed during weight preparation --- ggml_runner.cpp:899\n[E] diffusion model compute failed --- diffusion_engine.cpp:2620\n[E] Diffusion model sampling failed --- diffusion_engine.cpp:2838\n[E] sampling for image 1/1 failed after 3.08s --- image.cpp:907\n[E] generate failed --- main.cpp:939\n"
+ }
+}

@@ -353,7 +353,7 @@ projects whose functions are built into Aero (sources, licences and what is not 
 | --- | --- |
 | Code | finds what a project is (Python, JS/TS, Rust, Go, C/C++, CSS), installs uv, ruff, pyright, Node, Biome, TypeScript, Go or Rust into Aero's folder, and runs lint, type checks and tests into one list of problems; "does Safari support X?" from MDN's data |
 | Mobile apps | Flutter: create, packages, analyse, test, build, and a **live preview inside Aero** with hot reload and hot restart; iOS apps from Windows through xtool in WSL |
-| Create | images made on your GPU (Z-Image-Turbo with stable-diffusion.cpp) with a gallery |
+| Create | images made on your GPU (Z-Image-Turbo with stable-diffusion.cpp) with a gallery: 1024 x 1024 in about 14 s on an RTX 5080; Aero gives it a VRAM budget from what is free, so it also fits a 4 GB card (slower) |
 | Diagrams | 44 diagram types as self-contained HTML/SVG (diagram-design), imports from Mermaid, draw.io and Excalidraw, SVG/PNG export |
 | Review & test | code review of your changes with open-code-review on your local model; end-to-end tests and "explore my site and find bugs" with e2e |
 | Debug & reverse | RAD Debugger sessions the model drives (breakpoints, stepping, state, evaluate; only while Windows Firewall blocks `raddbg.exe` from the network, because its control port has no authentication: if Windows asks when it starts, choose Cancel) and debug-info tools; reverse engineering through rea |
@@ -373,7 +373,8 @@ speed. When a small model of the same family exists, it adds it as a draft for s
 download it: on the test PC, Llama-3.3-70B Q6_K went from 1.0 to 4.85 tokens a second on a 16 GB card with
 Llama-3.2-1B as the draft. **Load** starts the plan. For a full-precision Hugging Face checkpoint that fits nowhere,
 install **AirLLM** in the pack and use **Run with AirLLM**: it streams one layer at a time through the GPU, so it runs
-in a few GB of VRAM, but every token reads the whole model from disk (seconds per token). Measurements:
+in a few GB of VRAM, but every token reads the whole model from disk: Qwen2.5-32B in bf16 took 30 s per token in
+1.9 GB of VRAM, 18 s with 8-bit layers (4-bit is faster again but answered wrongly on a 7B). Measurements:
 [docs/V1.2_BIG_MODELS.md](docs/V1.2_BIG_MODELS.md).
 
 ### Performance Lab and HAPO

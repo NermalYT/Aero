@@ -905,15 +905,14 @@ def tool_budget(turn):
 
 
 def fit_tools(turn, schemas):
-    """The tool definitions that fit tool_budget, Aero's own tools first, then integration tools, then MCP tools, in
-    registry order (a stable prompt prefix). Before, every tool went out when no router decision existed, and one MCP
-    server (rea: 170 tools) made a 230,000-token request for an 8,192-token context."""
-    from . import pipeline
+    """The tool definitions that fit tool_budget, in registry order (a stable prompt prefix), chosen in this order: the
+    request's hinted tools and ESSENTIAL, Aero's other tools, integration tools, MCP tools. Before, every tool went out
+    when no router decision existed, and one MCP server (rea: 170 tools) made a 230,000-token request for an
+    8,192-token context."""
+    from . import capabilities, pipeline
     budget = tool_budget(turn) - 400                     # room for load_tools
     if sum(_schema_cost(s) for s in schemas) <= budget + 400:
         return schemas
-
-    from . import capabilities
     names = [s["function"]["name"] for s in schemas]
     first = set(capabilities.hint_tools(_last_user_text(getattr(turn, "history", None) or []), names)) | ESSENTIAL
 
@@ -931,16 +930,17 @@ def fit_tools(turn, schemas):
     return [s for i, s in enumerate(schemas) if i in keep]
 
 
-def bare_tool_call(text, settings):
-    """(name, args, (start, end)) of the first {"name": <an enabled tool>, "parameters"|"arguments": {...}} in text."""
-    enabled = {s["function"]["name"] for s in tools.schemas(settings)}
+def bare_tool_call(text, settings, blocked=()):
+    """(name, args, (start, end)) of a {"name": <an enabled tool>, "parameters"|"arguments": {...}} that ends the
+    text (only a code fence may follow), so a JSON example inside an explanation never runs."""
+    enabled = {s["function"]["name"] for s in tools.schemas(settings)} - set(blocked)
     dec = json.JSONDecoder()
     for m in re.finditer(r'\{\s*"name"\s*:', text):
         try:
             obj, end = dec.raw_decode(text, m.start())
         except ValueError:
             continue
-        if not isinstance(obj, dict) or obj.get("name") not in enabled:
+        if not isinstance(obj, dict) or obj.get("name") not in enabled or text[end:].strip().strip("`").strip():
             continue
         args = obj.get("parameters", obj.get("arguments", {}))
         if isinstance(args, str):
@@ -1121,11 +1121,11 @@ async def run_local(turn, lane="local", max_steps=None):
         # the tool it wants wasn't offered (llama-server drops such a structured call, hence force_text above). A
         # real, enabled Aero tool runs as a normal call (its permission applies as always) and stays loaded.
         if not calls and schemas and '"name"' in msg["content"]:
-            found = bare_tool_call(msg["content"], turn.settings)
+            found = bare_tool_call(msg["content"], turn.settings, getattr(turn, "blocked", None) or ())
             if found:
                 name, args, (a, b) = found
                 calls[0] = {"id": None, "name": name, "args": json.dumps(args)}
-                msg["content"] = (msg["content"][:a] + msg["content"][b:]).strip()
+                msg["content"] = re.sub(r"```\w*\s*```", "", msg["content"][:a] + msg["content"][b:]).strip()
                 if turn.exposed is not None and name not in turn.exposed:
                     turn.exposed.append(name)
 

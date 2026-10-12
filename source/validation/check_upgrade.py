@@ -89,13 +89,21 @@ def main():
         check("new tool category 'ask' defaults to auto", s.get("tool_policy", {}).get("ask") == "auto")
         check("strict_background defaults off", s.get("strict_background") is False)
         check("browser_mode has a default", bool(s.get("browser_mode")), s.get("browser_mode"))
+        # 1.2: autonomy starts at "ask" for chats and loops, the router stays on the CPU, integration tools get
+        # their policies
+        check("approval_mode defaults to ask", s.get("approval_mode") == "ask", s.get("approval_mode"))
+        check("loop_approval_mode defaults to ask", s.get("loop_approval_mode") == "ask", s.get("loop_approval_mode"))
+        check("router_device defaults to cpu", s.get("router_device") == "cpu", s.get("router_device"))
+        pol = s.get("tool_policy") or {}
+        check("integration tool policies present", all(k in pol for k in ("integrations", "dev", "setup", "create")),
+              {k: pol.get(k) for k in ("integrations", "dev", "setup", "create")})
         chat = c.get("/api/chats/upgchat1").json()
         check("chat kept", [m["content"] for m in chat["messages"]]
               == ["hello from the old version", "reply from the old version"])
         check("chat listed", any(x["id"] == "upgchat1" for x in c.get("/api/chats").json()))
         check("memory fact kept", "metric units" in json.dumps(c.get("/api/memory").json()))
         for path in ("/api/questions", "/api/apps", "/api/remote", "/api/resources", "/api/tasks/upgchat1",
-                     "/api/stats"):
+                     "/api/stats", "/api/integrations", "/api/autonomy?chat_id=upgchat1"):
             r = c.get(path)
             check(f"GET {path}", r.status_code == 200, r.status_code)
     finally:

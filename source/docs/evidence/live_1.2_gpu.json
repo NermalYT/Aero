@@ -1,0 +1,214 @@
+{
+ "airllm_qwen2.5_7b": {
+  "ok": true,
+  "s": 110.2,
+  "result": {
+   "load_or_split_s": 22,
+   "gen_s": 87.8,
+   "tokens": 12,
+   "s_per_token": 7.31,
+   "text": "A GPU, or Graphics Processing Unit, is a specialized electronic",
+   "vram_before_mb": 1326,
+   "vram_peak_mb": 2713,
+   "vram_used_mb": 1387
+  }
+ },
+ "image_install": {
+  "ok": true,
+  "s": 527.8,
+  "result": {
+   "engine": "stable-diffusion.cpp master-956-1b0ba10 (sd-master-1b0ba10-bin-win-vulkan-x64.zip)",
+   "models": "Z-Image-Turbo (diffusion Q4_K, VAE, Qwen3-4B text encoder)",
+   "ok": [
+    true,
+    "Z-Image-Turbo ready"
+   ]
+  }
+ },
+ "image_generate": {
+  "ok": true,
+  "s": 14.2,
+  "result": {
+   "file": "<test folder>\\home_live12\\data\\images\\20261011-214821-a-glass-bubble-floating-over-green-hills.png",
+   "meta": {
+    "prompt": "A glass bubble floating over green hills under a bright blue sky, Frutiger Aero style, glossy, clean, high detail",
+    "width": 1024,
+    "height": 1024,
+    "steps": 8,
+    "seed": 42,
+    "model": "Z-Image-Turbo Q4_K",
+    "seconds": 14.1,
+    "engine": "sd-master-1b0ba10-bin-win-vulkan-x64.zip",
+    "vram_budget_gb": 6.0
+   },
+   "vram_before_mb": 594,
+   "vram_peak_mb": 5114,
+   "vram_used_mb": 4520,
+   "bytes": 1667391
+  }
+ },
+ "ocr_review_real_model": {
+  "ok": true,
+  "s": 8.4,
+  "result": {
+   "status": "complete",
+   "exit": 0,
+   "comments": [
+    {
+     "path": "store.py",
+     "content": "SQL injection vulnerability - uses string concatenation to build query. Must use parameterized queries to prevent injection attacks.",
+     "suggestion_code": "cur.execute(\"SELECT * FROM users WHERE name = ?\", (name,))",
+     "existing_code": "cur.execute(\"SELECT * FROM users WHERE name = '\" + name + \"'\")",
+     "start_line": 8,
+     "end_line": 8,
+     "category": "security",
+     "severity": "critical"
+    }
+   ],
+   "summary": {
+    "files_reviewed": 1,
+    "comments": 1,
+    "total_tokens": 12012,
+    "input_tokens": 11301,
+    "output_tokens": 711,
+    "cache_read_tokens": 4676,
+    "elapsed": "5s"
+   },
+   "error": null
+  }
+ },
+ "e2e_install": {
+  "ok": true,
+  "s": 5.4,
+  "result": "e2e and its web engine"
+ },
+ "e2e_explore_real_model": {
+  "ok": true,
+  "s": 19.1,
+  "result": {
+   "rc": 1,
+   "findings": [
+    {
+     "id": "01a12dae-12df-7956-8ecb-bd17fecd7279",
+     "index": 0,
+     "step": 1,
+     "kind": "issue",
+     "severity": 5,
+     "title": "Sign up button does not respond to tap",
+     "expected": "Tapping the sign up button should submit the form and redirect to a success or account creation page.",
+     "actual": "After tapping the sign up button, no change is visible on the screen, and no navigation occurs.",
+     "reproduction": [
+      "Tap the sign up button",
+      "Observe the screen"
+     ],
+     "path": "/",
+     "observationRevision": "b104",
+     "artifactId": "01a12dad-df39-7047-8e3d-c5ce8b0e14d0:artifact:0",
+     "reportedAt": "2026-10-12T01:15:45.247Z"
+    }
+   ],
+   "stdout_tail": "e app: visit each top-level page or screen the navigation offers once, note what each one is for and which controls it has, and try one obvious action on each. Report any defect you see on the way.\",\n          \"status\": \"passed\",\n          \"summary\": \"Visited the signup screen, entered test email and password, and attempted to sign up. The sign up button did not respond or navigate, indicating a broken core functionality. No other screens or features were explored as the signup flow is the primary focus. A critical defect was reported: the sign up button is unresponsive.\",\n          \"startedAt\": \"2026-10-12T01:15:33.390Z\",\n          \"durationMs\": 12512\n        }\n      ],\n      \"findings\": [\n        {\n          \"id\": \"01a12dae-12df-7956-8ecb-bd17fecd7279\",\n          \"index\": 0,\n          \"step\": 1,\n          \"kind\": \"issue\",\n          \"severity\": 5,\n          \"title\": \"Sign up button does not respond to tap\",\n          \"expected\": \"Tapping the sign up button should submit the form and redirect to a success or account creation page.\",\n          \"actual\": \"After tapping the sign up button, no change is visible on the screen, and no navigation occurs.\",\n          \"reproduction\": [\n            \"Tap the sign up button\",\n            \"Observe the screen\"\n          ],\n          \"path\": \"/\",\n          \"observationRevision\": \"b104\",\n          \"artifactId\": \"01a12dad-df39-7047-8e3d-c5ce8b0e14d0:artifact:0\",\n          \"reportedAt\": \"2026-10-12T01:15:45.247Z\"\n        }\n      ]\n    }\n  }\n}\n",
+   "stderr_tail": "K_LOG_WARNINGS global to false.\n(Use `node --trace-warnings ...` to show where the warning was created)\n(node:18944) Warning: AI SDK Warning (aero.chat / local): The feature \"responseFormat\" is not supported. JSON response format schema is only supported with structuredOutputs\n(node:18944) Warning: AI SDK Warning (aero.chat / local): The feature \"responseFormat\" is not supported. JSON response format schema is only supported with structuredOutputs\n(node:18944) Warning: AI SDK Warning (aero.chat / local): The feature \"responseFormat\" is not supported. JSON response format schema is only supported with structuredOutputs\n(node:18944) Warning: AI SDK Warning (aero.chat / local): The feature \"responseFormat\" is not supported. JSON response format schema is only supported with structuredOutputs\n"
+  }
+ },
+ "flutter_install": {
+  "ok": true,
+  "s": 82.4,
+  "result": "Flutter 3.47.7 (Dart 3.13.5)"
+ },
+ "flutter_create_test_preview": {
+  "ok": true,
+  "s": 47.2,
+  "result": {
+   "create": "Created <home>\\AppData\\Local\\Temp\\aero-flutter-n5d_drlq\\bakery_app\nCreating project ..\\..\\AppData\\Local\\Temp\\aero-flutter-n5d_drlq\\bakery_app...\nResolving dependencies in `..\\..\\AppData\\Local\\Temp\\aero-flutter-n5d_drlq\\bakery_app`...\nDownloading packages...\nGot dependencies in `..\\..\\AppData\\L",
+   "test": "1 passed, 0 failed",
+   "analyze": "No issues found.",
+   "url": "http://127.0.0.1:53627",
+   "page_head": "<!DOCTYPE html>\r\n<html>\r\n<head>\r\n  <!--\r\n    If you are serving your web app in a path other than the root, change the\r\n    href value below to reflect the base path you are serving from.\r\n\r\n    The path provided below has to start and end with a slash \"/\" in order for\r\n    it to work correctly.\r\n\r\n",
+   "reload_log": [
+    "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"a48e5ec8-edc8-4473-bc96-aa4b3c7f7287\",\"id\":\"0\",\"progressId\":null,\"message\":\"Waiting for connection from debug service on Web Server...\",\"finished\":false}}]",
+    "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"a48e5ec8-edc8-4473-bc96-aa4b3c7f7287\",\"id\":\"0\",\"progressId\":null,\"finished\":true}}]",
+    "lib\\main.dart is being served at http://127.0.0.1:53627",
+    "The web-server device requires the Dart Debug Chrome extension for debugging. Consider using the Chrome or Edge devices for an improved development workflow.",
+    "[{\"event\":\"app.webLaunchUrl\",\"params\":{\"url\":\"http://127.0.0.1:53627\",\"launched\":false}}]",
+    "[{\"event\":\"app.started\",\"params\":{\"appId\":\"a48e5ec8-edc8-4473-bc96-aa4b3c7f7287\"}}]",
+    "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"a48e5ec8-edc8-4473-bc96-aa4b3c7f7287\",\"id\":\"1\",\"progressId\":\"hot.reload\",\"message\":\"Performing hot reload...\",\"finished\":false}}]",
+    "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"a48e5ec8-edc8-4473-bc96-aa4b3c7f7287\",\"id\":\"2\",\"progressId\":null,\"message\":\"Waiting for connection from debug service on Web Server...\",\"finished\":false}}]",
+    "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"a48e5ec8-edc8-4473-bc96-aa4b3c7f7287\",\"id\":\"2\",\"progressId\":null,\"finished\":true}}]",
+    "[{\"event\":\"app.progress\",\"params\":{\"appId\":\"a48e5ec8-edc8-4473-bc96-aa4b3c7f7287\",\"id\":\"1\",\"progressId\":\"hot.reload\",\"finished\":true}}]",
+    "Recompile complete. No client connected.",
+    "[{\"id\":1,\"result\":{\"code\":0,\"message\":\"\"}}]"
+   ]
+  }
+ },
+ "airllm_qwen2.5_32b": {
+  "ok": true,
+  "s": 318.6,
+  "result": {
+   "load_or_split_s": 78,
+   "gen_s": 240.3,
+   "tokens": 8,
+   "s_per_token": 30.04,
+   "text": "A GPU, or Graphics Processing Unit,",
+   "vram_before_mb": 1278,
+   "vram_peak_mb": 3152,
+   "vram_used_mb": 1874
+  }
+ },
+ "airllm_qwen2.5_7b_4bit": {
+  "ok": true,
+  "s": 74.2,
+  "result": {
+   "load_or_split_s": 22,
+   "gen_s": 52.0,
+   "tokens": 12,
+   "s_per_token": 4.34,
+   "text": "A gnu is a mythical Chinese character from the popular Legend",
+   "vram_before_mb": 561,
+   "vram_peak_mb": 1960,
+   "vram_used_mb": 1399
+  }
+ },
+ "airllm_qwen2.5_32b_4bit": {
+  "ok": true,
+  "s": 152.5,
+  "result": {
+   "load_or_split_s": 56,
+   "gen_s": 96.1,
+   "tokens": 8,
+   "s_per_token": 12.02,
+   "text": "A GPU (Graphics Processing Unit) is",
+   "vram_before_mb": 565,
+   "vram_peak_mb": 2416,
+   "vram_used_mb": 1851
+  }
+ },
+ "airllm_qwen2.5_7b_8bit": {
+  "ok": true,
+  "s": 80.7,
+  "result": {
+   "load_or_split_s": 19,
+   "gen_s": 61.6,
+   "tokens": 12,
+   "s_per_token": 5.13,
+   "text": "A GPU, or Graphics Processing Unit, is a specialized electronic",
+   "vram_before_mb": 596,
+   "vram_peak_mb": 2542,
+   "vram_used_mb": 1946
+  }
+ },
+ "airllm_qwen2.5_32b_8bit": {
+  "ok": true,
+  "s": 206.6,
+  "result": {
+   "load_or_split_s": 59,
+   "gen_s": 147.3,
+   "tokens": 8,
+   "s_per_token": 18.41,
+   "text": "A GPU, or Graphics Processing Unit,",
+   "vram_before_mb": 590,
+   "vram_peak_mb": 4769,
+   "vram_used_mb": 4179
+  }
+ }
+}

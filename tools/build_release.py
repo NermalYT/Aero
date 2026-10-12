@@ -32,7 +32,9 @@ from pathlib import Path
 REPO_DIR = Path(__file__).resolve().parent.parent
 SRC = REPO_DIR / "source"
 DIST = REPO_DIR / "dist"
-SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", "data", "models", "llama", "venv", "node_modules"}
+SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", "node_modules"}
+# what running from source/ creates next to the code; only at its top (aero/integrations/data ships)
+SKIP_TOP = {"data", "models", "llama", "venv"}
 SKIP_FILES = {".DS_Store", "mods-applied.json"}
 CRLF_EXT = {".bat", ".cmd", ".ps1"}
 EXEC_EXT = {".sh", ".command"}
@@ -48,7 +50,8 @@ def source_files():
     """(path on disk, path inside source/) for every file that ships."""
     out = []
     for dp, dns, fns in os.walk(SRC):
-        dns[:] = sorted(d for d in dns if d not in SKIP_DIRS)
+        top = Path(dp) == SRC
+        dns[:] = sorted(d for d in dns if d not in SKIP_DIRS and not (top and d in SKIP_TOP))
         for f in sorted(fns):
             if f in SKIP_FILES or f.endswith((".pyc", ".pyo")):
                 continue

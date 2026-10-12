@@ -1,0 +1,256 @@
+{
+ "toolchains_install_rest": {
+  "ok": true,
+  "s": 33.6,
+  "result": {
+   "node_found": [
+    true,
+    "C:\\Program Files\\nodejs\\node.EXE"
+   ],
+   "node_s": 0.0,
+   "pyright": "pyright (npm)",
+   "pyright_found": [
+    true,
+    "<test folder>\\home_live12\\data\\toolchains\\npm\\pyright\\node_modules\\.bin\\pyright.CMD"
+   ],
+   "pyright_s": 5.4,
+   "typescript": "TypeScript (npm)",
+   "typescript_found": [
+    true,
+    "<test folder>\\home_live12\\data\\toolchains\\npm\\typescript\\node_modules\\.bin\\tsc.CMD"
+   ],
+   "typescript_s": 1.4,
+   "go": "go1.27.2",
+   "go_found": [
+    true,
+    "<test folder>\\home_live12\\data\\toolchains\\go\\bin\\go.EXE"
+   ],
+   "go_s": 8.6,
+   "rust": "Rust stable (rustup, cargo, clippy, rustfmt). Building on Windows also needs the Visual Studio C++ build tools (rustup links with them).",
+   "rust_found": [
+    true,
+    "<test folder>\\home_live12\\data\\toolchains\\rust\\cargo\\bin\\cargo.EXE"
+   ],
+   "rust_s": 17.2,
+   "bcd": "MDN browser-compat-data",
+   "bcd_found": [
+    true,
+    "downloaded"
+   ],
+   "bcd_s": 0.9
+  }
+ },
+ "project_check_typescript": {
+  "ok": true,
+  "s": 0.3,
+  "result": {
+   "kinds": [
+    "typescript"
+   ],
+   "ran": [
+    [
+     "biome",
+     1,
+     2,
+     ""
+    ],
+    [
+     "tsc",
+     1,
+     2,
+     ""
+    ]
+   ],
+   "diagnostics": [
+    [
+     "biome",
+     "app.ts",
+     1,
+     "lint/correctness/noUnusedVariables",
+     "This variable n is unused."
+    ],
+    [
+     "biome",
+     "app.ts",
+     2,
+     "lint/suspicious/noDoubleEquals",
+     "Using == may be unsafe if you are relying on type coercion."
+    ],
+    [
+     "tsc",
+     "app.ts",
+     1,
+     "TS2322",
+     "Type 'string' is not assignable to type 'number'."
+    ],
+    [
+     "tsc",
+     "app.ts",
+     2,
+     "TS7006",
+     "Parameter 'a' implicitly has an 'any' type."
+    ]
+   ]
+  }
+ },
+ "project_check_python_types": {
+  "ok": true,
+  "s": 0.4,
+  "result": {
+   "kinds": [
+    "python"
+   ],
+   "ran": [
+    [
+     "ruff",
+     0,
+     0,
+     ""
+    ],
+    [
+     "pyright",
+     1,
+     1,
+     ""
+    ]
+   ],
+   "diagnostics": [
+    [
+     "pyright",
+     "m.py",
+     5,
+     "reportAssignmentType",
+     "Type \"int\" is not assignable to declared type \"str\"\n  \"int\" is not assignable to \"str\""
+    ]
+   ]
+  }
+ },
+ "project_check_go": {
+  "ok": true,
+  "s": 0.4,
+  "result": {
+   "kinds": [
+    "go"
+   ],
+   "ran": [
+    [
+     "go vet",
+     1,
+     1,
+     ""
+    ],
+    [
+     "go test",
+     1,
+     1,
+     ""
+    ]
+   ],
+   "diagnostics": [
+    [
+     "go vet",
+     "m.go",
+     null,
+     "vet",
+     "m.go:7:27: fmt.Printf format %d has arg \"x\" of wrong type string"
+    ],
+    [
+     "go test",
+     "m.go",
+     7,
+     "build failed",
+     "fmt.Printf format %d has arg \"x\" of wrong type string"
+    ]
+   ]
+  }
+ },
+ "project_check_rust": {
+  "ok": true,
+  "s": 0.7,
+  "result": {
+   "kinds": [
+    "rust"
+   ],
+   "ran": [
+    [
+     "cargo clippy",
+     0,
+     3,
+     ""
+    ]
+   ],
+   "diagnostics": [
+    [
+     "cargo",
+     "src\\lib.rs",
+     1,
+     "clippy::ptr_arg",
+     "writing `&Vec` instead of `&[_]` involves a new object where a slice will do"
+    ],
+    [
+     "cargo",
+     "src\\lib.rs",
+     2,
+     "clippy::len_zero",
+     "length comparison to zero"
+    ],
+    [
+     "cargo",
+     "src\\lib.rs",
+     3,
+     "clippy::bool_comparison",
+     "equality checks against true are unnecessary"
+    ]
+   ]
+  }
+ },
+ "web_compat": {
+  "ok": true,
+  "s": 0.1,
+  "result": {
+   "container-type": "css.properties.container-type\n- chrome: since 105\n- edge: since 105\n- firefox: since 110\n- safari: since 16\n- safari_ios: since 16\n- chrome_android: since 105\nMDN: https://developer.mozilla.org/docs/Web/CSS/Reference/Properties/container-type\nData: MDN browser-compat-data (CC0)",
+   "has": "css.selectors.has\n- chrome: since 105\n- edge: since 105\n- firefox: since 121\n- safari: since 15.4\n- safari_ios: since 15.4\n- chrome_android: since 105\nMDN: https://developer.mozilla.org/docs/Web/CSS/Reference/Selectors/:has\nOther matches: css.selectors.has-slotted\nData: MDN browser-compat-data (CC0)"
+  }
+ },
+ "finance_xlsx_audit": {
+  "ok": true,
+  "s": 0.2,
+  "result": {
+   "audit": "model.xlsx: 1 errors, 3 warnings\n10 formulas have no calculated value saved (written by a script, never opened in a spreadsheet app): xlsx_recalc, or open it in Excel, before trusting values.\n- [warning] Model!D3: hard-coded number(s) 1.15 inside a formula: =D1-D2*1.15\n- [warning] Model!D4: refers to empty cell Model!D9\n- [warning] Model!D3: formula differs from the rest of its row\n- [error] Model!G1: circular reference: Model!G1 → Model!G2",
+   "recalc": "{'text': \"LibreOffice isn't installed, so Aero can't recalculate. The values are calculated when the file is opened in Excel or LibreOffice.\", 'error': True}"
+  }
+ },
+ "finance_dcf_validate": {
+  "ok": true,
+  "s": 0.2,
+  "result": {
+   "text": "{'text': '{\\n  \"file\": \"<home>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\aero-live3-7y90bwqe\\\\\\\\dcf.xlsx\",\\n  \"validation_date\": \"2026-10-11T21:29:02.889818\",\\n  \"status\": \"FAIL\",\\n  \"error_count\": 1,\\n  \"warning_count\": 4,\\n  \"errors\": [\\n    \"CRITICAL: Terminal growth (11.00%) >= WACC (9.00%). This creates infinite value and is mathematically invalid.\"\\n  ],\\n  \"warnings\": [\\n    \"Recommended sheet missing: WACC\",\\n    \"Recommended sheet missing: Sensitivity\",\\n    \"Could not validate WACC range: \\'Workbook\\' object has no attribute \\'get\\'\",\\n    \"Could not locate terminal value and enterprise value\"\\n  ],\\n  \"info\": [\\n    \"Found sheet: DCF\",\\n    \"Total formulas: 0\",\\n    \"\\\\u2713 No formula errors found\"\\n  ]\\n}\\n', 'error': False}"
+  }
+ },
+ "finance_deck_numbers": {
+  "ok": true,
+  "s": 0.1,
+  "result": {
+   "text": "deck.pptx: 4 numbers, 1 groups that disagree (same category and unit, more than 1% apart; different periods also land here, so check the context)\n- revenue (USD_M): $120.5M (slide 1) vs $118.0M (slide 2)\nNumbers by slide:\n- slide 1: $120.5M (revenue) in \"Revenue grew to $120.5M in FY2025, EBITDA margin 23%\"\n- slide 1: 23% (revenue) in \"Revenue grew to $120.5M in FY2025, EBITDA margin 23%\"\n- slide 2: $118.0M (revenue) in \"FY2025 revenue of $118.0M; EBITDA margin 23%\"\n- slide 2: 23% (revenue) in \"FY2025 revenue of $118.0M; EBITDA margin 23%\""
+  }
+ },
+ "finance_skills": {
+  "ok": true,
+  "s": 0.1,
+  "result": {
+   "count": 48,
+   "first": [
+    "3-statement-model",
+    "accrual-schedule",
+    "ai-readiness",
+    "audit-xls",
+    "break-trace"
+   ],
+   "hint": [
+    "dcf-model",
+    "lbo-model"
+   ],
+   "dcf_skill_chars": "<class 'tuple'>"
+  }
+ }
+}
