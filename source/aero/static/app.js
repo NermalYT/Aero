@@ -467,7 +467,7 @@ const DEPTH_INFO = {
   short: ['Short', '10 trials', 'The estimator\'s best guess plus the 9 most promising one-step moves.'],
   medium: ['Medium', '25 trials', 'Explores context, GPU offload, batch and KV precision. Recommended.'],
   long: ['Long', '50 trials', 'Wider search plus repeat runs of the top configs to average out noise.'],
-  full: ['Full', 'until done', 'Keeps stepping until no one-step move can improve the goal (max 120).'],
+  full: ['Full', 'until done', 'Keeps going until 8 trials in a row bring nothing better (max 120), then tests tool calling.'],
 };
 const GOALS = [['balanced', 'Balanced'], ['max_context', 'Max context'], ['max_speed', 'Max speed']];
 const fmtDur = s => s < 90 ? `${Math.max(1, Math.round(s))} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
@@ -508,7 +508,7 @@ function askVramLimit(info) {
         info.suggest ? h('button', { class: 'btn ghost sm', title: info.suggest.why, onclick: () => { input.value = String(info.suggest.gb); check(); input.focus(); } },
           `Suggested for this PC: ${info.suggest.gb} GB`) : null),
       info.suggest ? h('small', { class: 'muted' }, `Suggestion: ${info.suggest.why}.`) : null,
-      info.last_limit_gb ? h('small', { class: 'muted' }, `Last time you typed ${info.last_limit_gb} GB.`) : null,
+      info.last_limit_gb ? h('small', { class: 'muted' }, ` Last time you typed ${info.last_limit_gb} GB.`) : null,
       live, msg, h('div', { class: 'gate-foot' }, cancel, go));
     const done = v => { g.close(); resolve(v); };
     const check = () => {

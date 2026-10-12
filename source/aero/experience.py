@@ -160,7 +160,10 @@ def add_notes(worked, failed, model, agent_name, task, source="reflect"):
 def _round_text(history, start):
     lines = []
     for name, args, res in tool_calls(history, start):
-        state = "REFUSED BY THE USER" if res.get("denied") else "ERROR" if res.get("error") else "ok" if res else "no result"
+        state = "REFUSED BY THE USER" if res.get("denied") else "ERROR" if res.get("error") else \
+            ("ok, effect verified" if res.get("verified") is True else
+             "ran, but the check found it did NOT take effect" if res.get("verified") is False else
+             "ran (effect not checked)") if res else "no result"
         body = re.sub(r"\s+", " ", _text(res.get("content")))[:240]
         lines.append(f"CALL {name}({args[:200]}) -> {state}: {body}")
     final = next((m.get("content") for m in reversed(history[start:]) if m.get("role") == "assistant"
@@ -181,7 +184,9 @@ async def reflect(turn, task, agent_name):
               f"THE USER'S REQUEST:\n{_text(task)[:3000]}\n\nWHAT YOU DID:\n{work}\n\n"
               "Reply as JSON:\n"
               "- worked: up to 3 approaches, tools, commands, paths or settings that worked and are worth reusing on "
-              "similar tasks. Be specific (name the tool and what to pass it).\n"
+              "similar tasks. Be specific (name the tool and what to pass it). Only what the results prove: a call "
+              "marked \"effect verified\", or output that shows the result. A call that only ran (\"effect not "
+              "checked\") and claims in the final answer are not proof: leave those out.\n"
               "- failed: up to 3 things that failed or that the user refused, with the reason and what to do "
               "instead when you know it.\n"
               "- preferences: up to 2 lasting preferences the user stated about how they want things done (\"Prefers "

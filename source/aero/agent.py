@@ -833,7 +833,7 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
         ask_fut.cancel()
     if t and name.startswith("browser_") and isinstance(res, dict) and not res.get("error") and \
             SIGNIN_MARK in (res.get("text") or "") and not turn.cancel.is_set():
-        async for ev in signin_pause(turn, res, lane):
+        async for ev in signin_pause(turn, res, lane, asked=str((args or {}).get("url") or "")):
             yield ev
     if t:
         _note_outcome(turn, name, args, res)
@@ -890,7 +890,7 @@ UNSAFE = re.compile(r"\b(harm|illegal|unsafe|dangerous|unethical|not appropriate
                     r"hack|malware|password)\b", re.I)
 
 
-async def signin_pause(turn, res, lane="local"):
+async def signin_pause(turn, res, lane="local", asked=""):
     """A page in Aero's browser wants a sign-in: put the window in front, ask the user to sign in themselves (a card
     with "I've signed in" / "Skip this site"), wait, then hand the model the page as it is now. Aero never types a
     password; the profile keeps the sign-in for next time."""
@@ -903,6 +903,10 @@ async def signin_pause(turn, res, lane="local"):
     except Exception:  # noqa: BLE001
         url = browser.page_url(owner)
     site = (urlparse(url).hostname or "this site").removeprefix("www.")
+    want = ""
+    if asked:
+        want = (urlparse(asked if "://" in asked else "https://" + asked).hostname or "").removeprefix("www.")
+    shown = f"{want} (its sign-in page, {site})" if want and want != site else site   # name what the user asked for
     skipped = root.__dict__.setdefault("skipped_signins", set())
     if site in skipped:                     # asked once already this request: don't ask again for every page
         res["text"] = (f"The user already skipped signing in to {site}. Don't open {site} again in this request; "
@@ -913,11 +917,11 @@ async def signin_pause(turn, res, lane="local"):
         from . import osinfo
         ub = osinfo.user_browser()
         if ub and browser.B.kind != "mine":       # the sign-ins the user already has could be used instead
-            hint = (f" (Already signed in to {site} in your {ub['name']}? Let Aero work there instead: "
+            hint = (f" (Already signed in to {want or site} in your {ub['name']}? Let Aero work there instead: "
                     "Settings > Tools > Which browser Aero works in.)")
     except Exception:  # noqa: BLE001
         pass
-    q, created = clarifications.ask(root.chat_id, f"Please sign in to {site} in the Aero browser window that just "
+    q, created = clarifications.ask(root.chat_id, f"Please sign in to {shown} in the Aero browser window that just "
                                     "opened, then press \"I've signed in\". Aero never types your password." + hint,
                                     ["I've signed in", "Skip this site"], kind="choice", allow_free=False,
                                     owner=owner, context="sign-in")
@@ -936,7 +940,9 @@ async def signin_pause(turn, res, lane="local"):
             res["text"] += "\nIt still shows a sign-in page: tell the user, then go on without this site."
     elif value:
         skipped.add(site)
-        res["text"] = f"The user skipped signing in to {site}: go on without it (say so in your answer)."
+        res["text"] = (f"The user skipped signing in to {site}: go on without it. In your answer say {site} wasn't "
+                       "checked because nobody signed in, and that next time they can sign in when Aero asks. Don't "
+                       "tell them to use the window: Aero closes its browser when this request is done.")
     else:
         res["text"] += "\nNobody signed in (no answer): go on without this site and say so."
 
@@ -1199,10 +1205,11 @@ async def run_local(turn, lane="local", max_steps=None):
             found, cleaned = toolcall_text.parse(msg["content"], set(tools.REGISTRY))
             msg["content"] = cleaned
             names = ", ".join(dict.fromkeys(n for n, _ in found)) or "a tool"
-            yield {"t": "notice", "lane": lane, "kind": "tools_off",
-                   "text": f"The model wanted to use {names}, but tools are off, so nothing was done. Turn on Tools "
-                           "(under the message box) and send the request again.",
-                   "action": {"label": "Turn on tools", "settings": {"tools_enabled": True}}}
+            if not getattr(_root(turn), "tools_off_told", False):     # the intent notice already said it
+                yield {"t": "notice", "lane": lane, "kind": "tools_off",
+                       "text": f"The model wanted to use {names}, but tools are off, so nothing was done. Turn on "
+                               "Tools (under the message box) and send the request again.",
+                       "action": {"label": "Turn on tools", "settings": {"tools_enabled": True}}}
 
         if msg["reasoning"] == "" and "<think>" in msg["content"]:
             m = re.search(r"<think>(.*?)(</think>|$)", msg["content"], re.S)
