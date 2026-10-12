@@ -101,6 +101,61 @@ class AdvisorRemembers(unittest.TestCase):
             self.assertEqual(len(downloads), 2)                               # a new llama.cpp build tries again
 
 
+class ToolsGetUtf8(unittest.TestCase):
+    def test_programs_aero_starts_write_utf8(self):
+        """Hindsight crashed at start on the owner's PC: its banner can't be written in cp1252."""
+        from aero.integrations import toolchain as tc
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PYTHONUTF8", None)
+            os.environ.pop("PYTHONIOENCODING", None)
+            e = tc.env()
+        self.assertEqual((e["PYTHONUTF8"], e["PYTHONIOENCODING"]), ("1", "utf-8"))
+        self.assertEqual(tc.env({"PYTHONIOENCODING": "cp437"})["PYTHONIOENCODING"], "cp437")   # callers can override
+
+
+class LendTheGpu(unittest.TestCase):
+    """An image with Qwen3.8-27B filling the card took 8 minutes on the owner's PC (14 s on a free card)."""
+
+    def test_the_model_steps_aside_only_when_needed(self):
+        from aero import gpu_lend, vram_policy
+        calls, during = [], {}
+        gpu_lend.register(lambda: calls.append("stop") or {"ctx": 81920},
+                          lambda st: calls.append(("restore", st["ctx"])) or True)
+        try:
+            with mock.patch.object(gpu_lend, "free_mb", lambda: 9000):
+                with gpu_lend.lend(4600) as lent:
+                    self.assertFalse(lent)
+            self.assertEqual(calls, [])                                         # enough room: nothing happens
+            with mock.patch.object(gpu_lend, "free_mb", lambda: 800):
+                with gpu_lend.lend(4600) as lent:
+                    during["held"] = vram_policy.holding()
+                    self.assertTrue(lent)
+            self.assertEqual(calls, ["stop", ("restore", 81920)])
+            self.assertTrue(during["held"])                                     # chat waits meanwhile
+            self.assertFalse(vram_policy.holding())
+            calls.clear()
+            gpu_lend.register(lambda: None, lambda st: calls.append("restore"))  # nothing loaded / server busy
+            with mock.patch.object(gpu_lend, "free_mb", lambda: 800):
+                with gpu_lend.lend(4600) as lent:
+                    self.assertFalse(lent)
+            self.assertEqual(calls, [])
+        finally:
+            gpu_lend.register(None, None)
+
+    def test_restore_runs_even_when_the_job_fails(self):
+        from aero import gpu_lend, vram_policy
+        calls = []
+        gpu_lend.register(lambda: {"ctx": 1}, lambda st: calls.append("restore") or True)
+        try:
+            with mock.patch.object(gpu_lend, "free_mb", lambda: 100), self.assertRaises(RuntimeError):
+                with gpu_lend.lend(4600):
+                    raise RuntimeError("stable-diffusion.cpp failed")
+            self.assertEqual(calls, ["restore"])
+            self.assertFalse(vram_policy.holding())
+        finally:
+            gpu_lend.register(None, None)
+
+
 class AdvisorOnTheCpu(unittest.TestCase):
     """With the main model filling the GPU the advisor runs on the CPU; 1.2.1 picked a 27B there (7.8 tokens/s,
     minutes per decision) and Cancel waited for it."""

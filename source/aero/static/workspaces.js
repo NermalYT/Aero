@@ -77,7 +77,9 @@ async function openWorkspace(id, why) {
 async function renderWorkspace(id, why, quiet) {
   const pane = $('#ws');
   let d;
-  try { d = await api('/api/integrations/ws/' + id); } catch (e) { pane.innerHTML = `<div class="err-msg">${esc(e.message)}</div>`; return; }
+  try { d = await api('/api/integrations/ws/' + id); } catch (e) { if (WS.open === id) pane.innerHTML = `<div class="err-msg">${esc(e.message)}</div>`; return; }
+  // another workspace opened while this answer was on its way (Memory+'s 5-second refresh landed over Create in 1.2.1)
+  if (WS.open !== id) return;
   if (quiet && pane.dataset.ws === id) { const live = $('.ws-live', pane); if (live) { live.replaceWith(liveBody(id, d)); } return; }
   pane.dataset.ws = id; pane.innerHTML = '';
   const w = d.workspace || {};

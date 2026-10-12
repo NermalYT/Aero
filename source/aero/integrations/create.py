@@ -99,6 +99,9 @@ def _models_ok():
     return not missing, "Z-Image-Turbo ready" if not missing else "missing: " + ", ".join(missing)
 
 
+NEED_MB = 4600       # free VRAM for the fast setting (6 GiB budget: 4.5 GB used, 14 s); less and the model steps aside
+
+
 def vram_budget_gb(free_mb=None):
     """stable-diffusion.cpp's --max-vram (GiB) for the first GPU's free memory: free minus 1.2 GB (the process needs
     about that on top of the budget), between 2 and 6. Measured on an RTX 5080, 1024 x 1024, 8 steps (VRAM the process
@@ -127,16 +130,19 @@ def generate(prompt, width=1024, height=1024, steps=8, seed=-1, cancel=None):
     cmd = [str(b), "--diffusion-model", str(_local("diffusion")), "--vae", str(_local("vae")), "--llm",
            str(_local("llm")), "-p", prompt[:2000], "--cfg-scale", "1.0", "--steps", str(max(1, min(50, int(steps)))),
            "-W", str(w), "-H", str(h), "--seed", str(int(seed)), "--offload-to-cpu", "--diffusion-fa", "-o", str(out)]
-    budget = vram_budget_gb()
-    if budget:
-        cmd[-2:-2] = ["--max-vram", str(budget)]
+    from .. import gpu_lend
     t0 = time.time()
-    r = tc.run(cmd, cwd=b.parent, timeout=1800, cancel=cancel)
+    # a model filling the card left 1.2.1 at 8 minutes per image; lend the GPU instead (gpu_lend.py)
+    with gpu_lend.lend(NEED_MB) as lent:
+        budget = vram_budget_gb()
+        if budget:
+            cmd[-2:-2] = ["--max-vram", str(budget)]
+        r = tc.run(cmd, cwd=b.parent, timeout=1800, cancel=cancel)
     if r["rc"] != 0 or not out.exists():
         raise RuntimeError("stable-diffusion.cpp failed: " + (r["err"] or r["out"])[-800:])
     meta = {"prompt": prompt, "width": w, "height": h, "steps": steps, "seed": seed, "model": "Z-Image-Turbo Q4_K",
             "seconds": round(time.time() - t0, 1), "engine": tc.installed().get("sdcpp", {}).get("build"),
-            "vram_budget_gb": budget}
+            "vram_budget_gb": budget, "model_unloaded": lent}
     out.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
     return out, meta
 

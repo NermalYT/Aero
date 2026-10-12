@@ -14,6 +14,7 @@ move the data folder; pg0 keeps the PostgreSQL program in ~/.pg0/installation). 
 embedding model (intfloat/multilingual-e5-small) from Hugging Face.
 """
 import json
+import re
 import subprocess
 import sys
 import time
@@ -115,7 +116,12 @@ def start(timeout=240):
             break
         time.sleep(1)
     tail = (HOME / "server.log").read_text(encoding="utf-8", errors="replace")[-1200:] if (HOME / "server.log").exists() else ""
-    raise RuntimeError("Hindsight didn't start:\n" + tail)
+    # lead with the error that stopped it: the model read "PyTorch was not found" (a harmless warning) as the cause
+    # and offered to reinstall
+    errs = [ln.strip() for ln in tail.splitlines() if re.match(r"\s*\w+(Error|Exception)\b.*:", ln)]
+    lead = f"Hindsight didn't start: {errs[-1]}" if errs else "Hindsight didn't start."
+    raise RuntimeError(lead + " (Warnings in the log such as 'PyTorch was not found' are normal; reinstalling "
+                       "won't help unless the error says a package is missing.)\nLog:\n" + tail)
 
 
 def stop():
