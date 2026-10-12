@@ -1,4 +1,10 @@
-"""Hugging Face search, file listing and resumable downloads for GGUF models."""
+"""Hugging Face search, file listing and resumable downloads for GGUF models.
+
+Any model can be searched for, not only GGUF repos: a repo with the original weights (safetensors) resolves to the
+GGUF versions people have published of it (the Hub's base_model:quantized links), and when there is none Aero can
+make its own (quantize.py) or run it with AirLLM. Downloads resume, use several connections for big files and are
+checked against the SHA-256 the Hub publishes for every LFS file."""
+import hashlib
 import io
 import json
 import os
@@ -34,20 +40,85 @@ def _headers():
     return h
 
 
-def search(query: str, limit=40):
-    params = {"filter": "gguf", "limit": limit, "full": "false"}
-    if query.strip():
-        params.update(search=query.strip(), sort="downloads", direction=-1)
+TEXT_TASKS = {None, "text-generation", "image-text-to-text", "any-to-any", "audio-text-to-text",
+              "text2text-generation", "conversational"}
+SIZE_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*[bB](?![a-zA-Z])")
+QUANTERS = ("bartowski", "unsloth", "lmstudio-community", "ggml-org", "Qwen", "google", "MaziyarPanahi",
+            "mradermacher", "QuantFactory", "TheBloke", "second-state")
+
+
+def _row(m):
+    tags = m.get("tags") or []
+    mid = m.get("id") or m.get("modelId")
+    sz = SIZE_RE.search(mid.split("/")[-1])
+    return {"id": mid, "downloads": m.get("downloads", 0), "likes": m.get("likes", 0),
+            "updated": (m.get("lastModified") or m.get("createdAt") or "")[:10], "pipeline": m.get("pipeline_tag"),
+            "gated": bool(m.get("gated")), "gguf": "gguf" in tags or mid.lower().endswith("-gguf"),
+            "size_b": float(sz.group(1)) if sz else None}
+
+
+def search(query: str, limit=40, scope="all"):
+    """scope 'all': every model whose name matches (text models; the GGUF ones are marked), 'gguf': GGUF repos only.
+    No query: what's trending in GGUF."""
+    q = query.strip()
+    params = {"limit": limit, "full": "false"}
+    if scope == "gguf" or not q:
+        params["filter"] = "gguf"
+    if q:
+        params.update(search=q, sort="downloads", direction=-1)
     else:
         params.update(sort="trendingScore", direction=-1)
     r = httpx.get(f"{API}/api/models", params=params, headers=_headers(), timeout=20, follow_redirects=True)
     r.raise_for_status()
-    out = []
+    out = [_row(m) for m in r.json()]
+    return [x for x in out if x["gguf"] or x["pipeline"] in TEXT_TASKS]
+
+
+def gguf_versions(repo: str, limit=12):
+    """GGUF versions of a repo with the original weights, best first: the same model (not fine-tunes of it) from
+    well-known quantizers, then by downloads."""
+    params = [("filter", f"base_model:quantized:{repo}"), ("filter", "gguf"), ("sort", "downloads"),
+              ("direction", "-1"), ("limit", "40"), ("full", "false")]
+    r = httpx.get(f"{API}/api/models", params=params, headers=_headers(), timeout=20, follow_redirects=True)
+    r.raise_for_status()
+    base = re.sub(r"[^a-z0-9]", "", repo.split("/")[-1].lower())
+    rows = []
     for m in r.json():
-        out.append({"id": m.get("id") or m.get("modelId"), "downloads": m.get("downloads", 0),
-                    "likes": m.get("likes", 0), "updated": (m.get("lastModified") or "")[:10],
-                    "pipeline": m.get("pipeline_tag"), "gated": bool(m.get("gated"))})
-    return out
+        x = _row(m)
+        name = re.sub(r"[-_.](i1|imat(rix)?|gguf)(?![a-z0-9])", "", x["id"].split("/")[-1].lower())
+        name = re.sub(r"[^a-z0-9]", "", name)
+        x["same"] = name == base or name.endswith(base)      # bartowski prefixes the org: Qwen_Qwen3-8B-GGUF
+        x["known"] = x["id"].split("/")[0] in QUANTERS
+        rows.append(x)
+    rows.sort(key=lambda x: (not x["same"], not x["known"], -x["downloads"]))
+    return rows[:limit]
+
+
+def source_info(repo: str):
+    """A repo with the original weights: parameter count, architecture and its weight files (for quantize.py and
+    AirLLM)."""
+    r = httpx.get(f"{API}/api/models/{repo}", params={"blobs": "true"}, headers=_headers(), timeout=30,
+                  follow_redirects=True)
+    if r.status_code in (401, 403):
+        raise RuntimeError(GATED)
+    r.raise_for_status()
+    j = r.json()
+    sib = j.get("siblings") or []
+    weights = [s for s in sib if s["rfilename"].endswith(".safetensors")]
+    if not weights:
+        weights = [s for s in sib if re.search(r"pytorch_model.*\.bin$", s["rfilename"])]
+    need = [s for s in sib if re.match(r"^(config\.json|generation_config\.json|tokenizer.*|special_tokens_map\.json|"
+                                       r".*\.tiktoken|vocab\.json|merges\.txt|tokenizer\.model|chat_template.*|"
+                                       r"preprocessor_config\.json|.*\.safetensors\.index\.json)$", s["rfilename"])]
+    cfg = j.get("config") or {}
+    st = j.get("safetensors") or {}
+    return {"repo": repo, "library": j.get("library_name"), "pipeline": j.get("pipeline_tag"),
+            "arch": (cfg.get("architectures") or [None])[0], "model_type": cfg.get("model_type"),
+            "params": int(st.get("total") or 0), "dtypes": st.get("parameters") or {},
+            "gated": bool(j.get("gated")), "license": (j.get("cardData") or {}).get("license") or "",
+            "weights": [{"path": s["rfilename"], "size": s.get("size") or 0} for s in weights],
+            "files": [s["rfilename"] for s in weights + need],
+            "size": sum(s.get("size") or 0 for s in weights)}
 
 
 def quant_of(name: str):
@@ -67,6 +138,8 @@ def list_files(repo: str):
     for f in files:
         size = (f.get("lfs") or {}).get("size") or f.get("size") or 0
         path = f["path"]
+        if (f.get("lfs") or {}).get("oid"):
+            _SHA[(repo, path)] = f["lfs"]["oid"]
         name = Path(path).name
         if "mmproj" in name.lower():
             mmproj.append({"path": path, "size": size})
@@ -90,6 +163,7 @@ def list_files(repo: str):
 
 
 _INFO_CACHE = {}
+_SHA = {}                    # (repo, path) -> the SHA-256 the Hub lists for that LFS file
 
 
 def model_info(repo: str):
@@ -152,6 +226,19 @@ def recommend(files, vram_mb, ram_mb):
 
 
 ADVISOR_DIR = "_advisor"   # tuning-advisor models live here, hidden from "Your models"
+
+
+def sha256_file(path, cancel=None):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            if cancel is not None and cancel.is_set():
+                raise RuntimeError("Cancelled")
+            b = f.read(8 << 20)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
 
 
 def local_path(repo: str, path: str, root=None) -> Path:
@@ -331,6 +418,14 @@ def download(repo: str, paths, emit, cancel, root=None):
             raise RuntimeError(str(e))
         if sizes[p] and part.stat().st_size != sizes[p]:
             raise RuntimeError(f"{p}: downloaded {part.stat().st_size} of {sizes[p]} bytes; run the download again to resume")
+        want = _SHA.get((repo, p))
+        if want and load_settings().get("verify_downloads", True):
+            emit({"type": "verify", "file": p})
+            got = sha256_file(part, cancel)
+            if got != want:
+                part.unlink(missing_ok=True)
+                raise RuntimeError(f"{p} is corrupt (SHA-256 doesn't match what Hugging Face lists); it was deleted, "
+                                   "download it again")
         part.replace(dest)
         prog["done"] = base + dest.stat().st_size
     emit({"type": "progress", "file": "", "done": total, "total": total, "speed": 0})

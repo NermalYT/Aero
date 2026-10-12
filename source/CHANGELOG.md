@@ -1,5 +1,73 @@
 # Changelog
 
+## Aero 1.2.1 (2026-10-12)
+
+A quality-of-life release for 1.2: requests that need doing get done (on screen, in your own signed-in browser),
+tool calling is tuned for each model, any model on Hugging Face loads at the size that fits, and every integration
+comes installed. Details: `docs/V1.2_TOOL_CALLING.md`.
+
+- **Requests that need an action get one.** A request like "look at my GitHub notifications" or "check my emails and
+  look for any meetings this week" is recognised without a model call (`intents.py`): Aero shows the plan above the
+  work, offers the right tools, and when the model answers "I can't" (measured: Qwen3-4B refused about half the time
+  with every tool offered), the first action is made with a grammar-forced call instead (`forced_call.py`; llama-server
+  doesn't enforce `tool_choice: "required"`, measured on b11501). Email means every account: the ones listed in
+  Settings, mail sites in the browser bookmarks (read only) and Gmail / Outlook, with `/u/1/`, `/u/2/`… for extra
+  Gmail accounts; meetings become a Word schedule plus a table in the chat.
+- **Work happens on screen.** Aero's browser and the apps it uses are visible unless the request says "in the
+  background". When a page asks for a sign-in, Aero shows it and waits with a card ("I've signed in" / "Skip this
+  site"); it never types a password. The browser closes when the request is done.
+- **Tool calls look like tool calls.** Calls a model writes as text (Hermes `<tool_call>`, Qwen3-Coder XML, GLM,
+  functionary, Mistral, Llama, Granite, DeepSeek, Gemma) are parsed and run instead of printed
+  (`toolcall_text.py`); steps that only call tools show the tool cards, not their thinking. With tools switched off,
+  Aero says so with a one-click "Turn on tools".
+- **Tool calling is part of tuning.** Every tune ends with a tool-calling exam: 40 cases from the Berkeley
+  Function-Calling Leaderboard (BFCL v4, Apache-2.0: simple, multiple, parallel, irrelevance) and 12 Aero requests
+  (`tool_eval.py`). It picks the temperature for tool steps and whether Aero should start actions itself for that
+  model. Settings → Model & tuning shows the score.
+- **Full tuning is full.** q4_0 KV, finer context steps and thread counts are in the search; when the improving moves
+  run out, a sweep tries the untested neighbours of the best configs until 8 trials in a row change nothing
+  (Qwen3-4B: 22 trials, where 1.2.0 stopped at 8). A server that dies under load near the limit counts as out of
+  memory, so bigger configs aren't tried one by one.
+- **Big models are built into loading.** Search finds any model on Hugging Face, any size. A repo with the original
+  weights lists the GGUF versions others published (same model from known quantizers first; AWQ / FP8 repos fall back
+  to their base model), or Aero makes its own: download, llama.cpp's converter, an importance matrix for low-bit
+  quants, `llama-quantize` to the quant that fits this PC (`quantize.py`). The tuner now also tries the
+  feed-forward split for dense models bigger than the GPU (attention and KV on the GPU, feed-forward of some layers
+  in RAM) against whole-layer offload and keeps the faster: Gemma-3-27B Q8_0 under a 15 GB limit ran out of memory
+  at 131k context with whole layers (26 of 62 on the GPU) but ran 131k with the split; the tuner picked 98k at
+  2.7 tok/s (Balanced). At 8k both ran at 3.4-3.7 tok/s. Downloads are checked against the SHA-256 the Hub
+  publishes and show the time left.
+- **Every integration comes with Aero.** The installer sets them all up (Hindsight, AirLLM, image generation, code
+  tools, Flutter…; `--lean` to skip), and Aero finishes any that are missing in the background, with one progress
+  line under the workspaces (`integrations/bundle.py`). xtool stays opt-in because it changes WSL.
+- **Hindsight's forced tool calls** are answered by the loopback adapter with a grammar-forced call, streamed or not.
+- **Files Aero makes are downloadable** from the chat (Download / Open), served by id only (`made_files.py`).
+- **Tidier UI:** no Compact button (compaction is automatic at 75 %); themed text fields; workspace cards and the Big
+  models panel open with arrows (what it does, things to ask, its tools, what it needs); the Workspaces group in the
+  sidebar folds away; a plan chip shows what Aero understood; the tuning screen shows the tool-calling exam.
+- **Your own browser, signed in already.** Aero's browser tools now work in your default browser (Chrome, Edge,
+  Brave or Vivaldi, read from the system's default-browser setting on Windows, macOS and Linux) instead of always
+  Edge. With the browser's remote-debugging switch on (`chrome://inspect/#remote-debugging`, Chrome 144 and later;
+  Settings → Tools copies the address), Aero connects to the browser you already use, with your sign-ins: the browser
+  asks you to Allow the connection, Aero works in tabs it opens itself, never lists or reads your other tabs, closes
+  only its own tabs when done and never closes your browser. Nothing is copied or decrypted. Without the switch,
+  with strict offline on, or for a request that says "in the background", Aero uses its own profile as before and
+  says how to switch.
+- **Sign-in pauses:** answering the card no longer crashes the turn (the answer is the choice's text), a skipped site
+  isn't asked again for every page of it, a signed-out Outlook.com (which redirects to a Microsoft 365 page) counts
+  as a sign-in page, and the card reads "Aero asks" instead of an internal id. The banner says "on screen" when the
+  browser is visible.
+- **The tuning advisor works again.** Its server ran with `--reasoning-format none`, which llama.cpp b11501 rejects
+  together with a JSON grammar ("Unexpected empty grammar stack after accepting piece: <think>"), so every tune had
+  fallen back to the built-in policy after three errors. Measured after the fix: the advisor chose 6 of 10 trials.
+- **The window never runs an older UI against a newer Aero:** the page names its scripts and styles with the version
+  (`app.js?v=1.2.1`) and the UI files are revalidated on every load.
+- **Gemma's tool calls** (`print(default_api.tool(...))` in a `tool_code` or `python` block) run instead of
+  showing as code; the tool exam caps answers at 256 tokens and shows its progress.
+- **Sturdier setup:** pip installs into Aero's own environments retry (a 3 GB PyTorch download dropped once in
+  testing), llama.cpp's converter is fetched file by file and checked against its git hashes, and the importance
+  matrix learns from real text (Aero's docs and source) instead of word lists.
+
 ## Aero 1.2.0 (2026-10-12)
 
 Aero becomes an all-in-one workstation: other projects' functions built into Aero in workspaces, autonomy modes for

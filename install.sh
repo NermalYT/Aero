@@ -10,6 +10,7 @@
 #   --yes            no questions: install missing system packages, keep (or pick the recommended) router model
 #   --update         what Aero's own updater passes: no model chooser, the open window reconnects afterwards
 #   --skip-models    don't run the model chooser
+#   --lean           don't set up the integrations now (Aero finishes them in the background)
 #   --skip-llama     leave llama.cpp as it is
 #   --build-llama    compile llama.cpp on this machine instead of downloading a prebuilt one
 #   --no-launch      don't start Aero at the end
@@ -43,6 +44,7 @@ if [ -z "${AERO_SELF_COPY:-}" ] && [ -f "$0" ] && [ "$(basename "$0")" = "instal
     AERO_SELF_COPY="$_copy" AERO_SRC_DIR="$_here" exec sh "$_copy" "$@"
 fi
 
+LEAN=""
 DEST="${AERO_HOME:-}"; YES=""; UPDATE=""; SKIP_MODELS=""; SKIP_LLAMA=""; BUILD_LLAMA=""; NO_LAUNCH=""; NO_SHORTCUTS=""
 RELEASE=""; HEADLESS=""
 parse_args() {   # a function, so the script's own "$@" stays intact for handing over to a downloaded installer
@@ -53,6 +55,7 @@ parse_args() {   # a function, so the script's own "$@" stays intact for handing
             --yes|-y) YES=1 ;;
             --update) UPDATE=1; YES=1 ;;
             --skip-models) SKIP_MODELS=1 ;;
+            --lean) LEAN=1 ;;
             --skip-llama) SKIP_LLAMA=1 ;;
             --build-llama) BUILD_LLAMA=1 ;;
             --no-launch) NO_LAUNCH=1 ;;
@@ -456,6 +459,12 @@ elif [ -n "$YES" ] || [ ! -t 0 ]; then
     AERO_HOME="$DEST" "$VPY" -m aero.setup_models --yes </dev/null
 else
     AERO_HOME="$DEST" "$VPY" -m aero.setup_models
+fi
+if [ -n "$LEAN" ] || [ -n "$UPDATE" ]; then
+    say "Integrations: Aero sets them up in the background."
+else
+    say "Integrations: Hindsight memory, AirLLM, image generation, code tools and the rest..."
+    AERO_HOME="$DEST" "$VPY" -m aero.integrations.bundle </dev/null || say "Some integrations didn't install; Aero retries them in the background."
 fi
 
 # ---- 7. done ----------------------------------------------------------------------------------------------------------

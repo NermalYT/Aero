@@ -277,6 +277,26 @@ def npm_bin(name, program):
     return None
 
 
+def pip_install(python, packages, what, cancel=None, timeout=3600, index_url=None, attempts=3):
+    """pip install into one of Aero's own environments, with pip's retries and a few fresh attempts on top: a
+    multi-GB wheel (PyTorch) dropping mid-download shouldn't need the user. Raises RuntimeError with pip's last
+    error line."""
+    cmd = [str(python), "-m", "pip", "install", "--disable-pip-version-check", "-q", "--retries", "8", "--timeout",
+           "60", *packages] + (["--index-url", index_url] if index_url else [])
+    r = {"rc": 1, "err": "", "out": ""}
+    for i in range(attempts):
+        r = run(cmd, timeout=timeout, cancel=cancel, network=True, what=f"install {what}")
+        if r["rc"] == 0 or (cancel is not None and cancel.is_set()):
+            break
+        time.sleep(min(30, 5 * (i + 1)))
+    if r["rc"] != 0:
+        lines = [x.strip() for x in (r["err"] or r["out"] or "").splitlines() if x.strip()]
+        key = [x for x in lines if x.startswith(("ERROR", "error:", "pip._vendor", "ReadTimeoutError", "OSError"))
+               or "Error:" in x]
+        raise RuntimeError(f"{what} install failed after {attempts} attempts: " + ((key or lines or ["no output"])[-1])[:400])
+    return r
+
+
 def run_python(script, args, timeout=180):
     """A vendored helper script under `python -I` (isolated: no user site, no current folder on sys.path).
     Returns (exit code, stdout, stderr)."""

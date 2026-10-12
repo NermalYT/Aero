@@ -56,17 +56,11 @@ def install(emit=None, cancel=None):
     if emit:
         emit({"type": "log", "text": f"Installing PyTorch ({'CUDA 12.8' if _nvidia() else 'CPU'}) into AirLLM's own "
                                      "environment (a few GB)…"})
-    r = tc.run([str(_py()), "-m", "pip", "install", "--disable-pip-version-check", "-q", "torch",
-                "--index-url", torch_idx], timeout=7200, cancel=cancel, network=True)
-    if r["rc"] != 0:
-        raise RuntimeError("PyTorch install failed: " + (r["err"] or r["out"])[-800:])
+    tc.pip_install(_py(), ["torch"], "PyTorch", cancel, timeout=7200, index_url=torch_idx)
     if emit:
         emit({"type": "log", "text": "Installing AirLLM and transformers…"})
     extra = ["bitsandbytes"] if _nvidia() else []         # AirLLM's 4-bit / 8-bit layer compression (CUDA only)
-    r = tc.run([str(_py()), "-m", "pip", "install", "--disable-pip-version-check", "-q", *PACKAGES, *extra],
-               timeout=3600, cancel=cancel, network=True)
-    if r["rc"] != 0:
-        raise RuntimeError("AirLLM install failed: " + (r["err"] or r["out"])[-800:])
+    tc.pip_install(_py(), [*PACKAGES, *extra], "AirLLM", cancel)
     v = tc.run([str(_py()), "-c", "import importlib.metadata as m, torch; print(m.version('airllm'), torch.__version__, "
                                   "torch.cuda.is_available())"], timeout=300)
     tc.mark("airllm", version=v["out"].strip())

@@ -292,7 +292,7 @@ def _py():
 
 def _env(home):
     env = {k: v for k, v in os.environ.items() if not k.startswith("AERO_")}
-    env.update(AERO_HOME=str(home), PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8", AERO_UPDATE_CHECK="0",
+    env.update(AERO_HOME=str(home), PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8", AERO_UPDATE_CHECK="0", AERO_BUNDLE="0",
                AERO_VAULT="file")
     llama = os.environ.get("AERO_LLAMA_SERVER")
     if llama:

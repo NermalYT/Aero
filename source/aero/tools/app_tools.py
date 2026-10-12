@@ -60,6 +60,8 @@ def app_launch(ctx, app, uri="", args=None, show=False, method=None):
         return {"text": f"'{uri}' is not a link Aero can open.", "error": True}
     if uri and str(uri).split(":", 1)[0].lower() in ("http", "https", "file", "javascript", "data", "vbscript"):
         return {"text": "Use open_app or the browser tools for web pages and files; uri is for app links.", "error": True}
+    from .apps import on_screen
+    show = bool(show) or on_screen(ctx)                  # apps the model uses are on display unless asked otherwise
     r = app_registry.launch(app, method=method, args=[str(a) for a in (args or [])][:20], uri=uri or None,
                             background=not show, cancel=ctx.cancel)
     if not r.get("ok") and not r.get("verified"):

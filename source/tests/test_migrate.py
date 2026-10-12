@@ -80,10 +80,12 @@ class MigrateTests(unittest.TestCase):
         self.assertTrue((self.data / "legacy-config.py.txt").exists())
 
     def test_settings_upgraded_once(self):
-        self.write("settings.json", {"thinking": True})
+        self.write("settings.json", {"thinking": True, "browser_mode": "background", "auto_compact_at": 0})
         self.assertTrue(migrate.upgrade_settings(log=lambda *_: None))
         s = self.read("settings.json")
-        self.assertEqual((s["thinking"], s["settings_version"]), ("auto", 2))
+        self.assertEqual((s["thinking"], s["settings_version"]), ("auto", 3))
+        # 1.2: on screen by default, compaction always automatic
+        self.assertEqual((s["browser_mode"], s["auto_compact_at"]), ("visible", 0.75))
         self.assertFalse(migrate.upgrade_settings(log=lambda *_: None))
 
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from .osinfo import IS_LINUX, IS_MAC, IS_WIN  # noqa: F401  (re-exported for the other modules)
 
 APP_NAME = "Aero"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 REPO = "NermalYT/Aero"            # GitHub repository the updater reads releases from
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -79,7 +79,7 @@ _PROMPT = """You are Aero, an autonomous AI agent running locally on the user's 
 {apps_section}# Web, GitHub and MCP
 - web_search to find sources, fetch_url to read a page quickly (it returns the page as numbered sections with their headings), browser_* tools when you need to click, log in, fill forms or the page needs JavaScript. In the browser, use the numbered refs from browser_open/browser_snapshot.
 - Read a whole page with browser_read_sections (every section, not just what is on screen; pass query to get only matching sections), and tables, links, forms or page facts with browser_extract. Each result says when it was cut short; never claim to have read what was cut.
-- Aero's browser runs in the background with its own profile. It is not the user's own browser window and is not signed in to their accounts unless they signed in there. When a page needs a sign-in, say so and use browser_open(url, show=true) so the user can sign in themselves; never type their passwords.
+- The browser tools work on screen (the user watches) in the user's own browser, already signed in to their accounts, when it is connected; otherwise in Aero's own profile, signed in wherever the user signed in to it once. A request for the background uses Aero's hidden profile. Never touch tabs you didn't open. When a page asks for a sign-in, Aero shows it and asks the user to sign in, then you continue on the same page; never type their passwords. If they skip, say that site wasn't checked.
 - Tools named mcp_<server>_<tool> come from connected MCP servers (for example mcp_github_... for the user's GitHub). Read their descriptions; anything that writes to an outside service (pushing, commenting, opening issues or pull requests, sending messages) needs the user to have asked for it.
 - Prefer primary sources, include links for facts you looked up, and never invent URLs or citations.
 
@@ -187,7 +187,17 @@ DEFAULTS = {
     "loop_approval_mode": "ask",   # the same for forever-loop rounds
     "batch_wait_s": 600,           # batch: how long a reply waits at its end for your decision (loop rounds don't wait)
     "authority_model": "",         # auto: the small model that decides ("" = best installed, else the router's)
-    "browser_mode": "background",  # background (no window, Aero's own profile) | visible (a window you can watch)
+    "browser_mode": "visible",       # 1.2: on screen unless the request says background
+    "browser_session": "mine",       # 1.2.1: work in the user's own signed-in browser when its remote-debugging
+                                     # switch is on ("aero" = always Aero's own profile)
+    "show_work": True,               # apps the model uses are brought on screen (no focus taken)
+    "tune_tool_eval": True,          # tuning ends with the tool-calling exam (tool_eval.py)
+    "bundle_integrations": True,     # set up every integration in the background when missing (integrations/bundle.py)
+    "verify_downloads": True,        # check Hugging Face downloads against their published SHA-256
+    "keep_quant_source": False,      # quantize.py: keep the original weights after making a GGUF
+    "use_tuned_tool_temp": True,     # tool steps use the temperature the exam measured best
+    "mail_accounts": [],              # extra mail sites to check (URLs); bookmarks and Gmail/Outlook are added
+    "use_bookmarks_for_accounts": True,   # read mail sites from the browsers' bookmarks (read-only)
     "app_scan_hours": 24,          # re-scan installed apps after this long (also after installs, or on request)
     "screenshot_max_side": 1568,
     "keep_screenshots": 2,         # how many recent screenshots stay as images in context
@@ -197,7 +207,7 @@ DEFAULTS = {
     "learn_preferences": True,     # the router notices preferences the user states and saves them to memory
     "memory_enabled": True,        # long-term memory block in every chat's system prompt
     "memory_budget_tokens": 1500,  # max tokens of memory per chat (also capped at 10% of the context)
-    "auto_compact_at": 0.75,       # compact into a fresh chat when the context is this full (0 = off)
+    "auto_compact_at": 0.75,       # compact into a fresh chat when the context is this full (always on)
     "auto_memorize": True,         # summarize chats you leave so later chats remember them
     # --- router (small CPU model that picks tools, thinking and a plan before the main model runs)
     "router_enabled": True,
@@ -263,7 +273,7 @@ DEFAULTS = {
     "remote_restore_cooldown_s": 90,     # wait this long after the last viewer leaves before restoring the profile
     "remote_providers": {"rdp": True, "rustdesk": True, "logind": True},
     "remote_allow_probable": False,      # also act on likely-but-unverified signals (RustDesk's connection window)
-    "settings_version": 2,
+    "settings_version": 3,
 }
 
 _lock = threading.Lock()

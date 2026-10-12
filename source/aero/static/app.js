@@ -125,8 +125,19 @@ function popMenu(anchor, items) {
 
 // ---------------------------------------------------------------- markdown
 marked.setOptions({ gfm: true, breaks: false });
+// Tool-call markup a model prints as text (Hermes, Qwen-XML, GLM, functionary, Mistral, Llama, Granite, DeepSeek,
+// Gemma): never shown. The server turns it into real tool calls; the chat shows the tool cards instead.
+const CALL_OPEN = /<tool_call>|<function=[\w.:-]+>|\[TOOL_CALLS\]|<\|python_tag\|>|<\|tool_call\|>|<｜tool▁calls?▁begin｜>|```tool_code|```(?:python|py)\s*\n\s*(?:print\(\s*)?default_api\./;
+const CALL_BLOCK = /<tool_call>[\s\S]*?<\/tool_call>|<function=[\w.:-]+>[\s\S]*?<\/function>|<｜tool▁calls▁begin｜>[\s\S]*?<｜tool▁calls▁end｜>|```tool_code[\s\S]*?```|```(?:python|py)\s*\n\s*(?:print\(\s*)?default_api\.[\s\S]*?```/g;
+function hideCallMarkup(src, streaming) {
+  let s = src.replace(CALL_BLOCK, '');
+  const open = s.search(CALL_OPEN);
+  if (open >= 0) s = s.slice(0, open);                   // an unclosed (or tag-only) call runs to the end
+  if (streaming) s = s.replace(/\n?\s*(```(json)?\s*)?\{\s*"name"[\s\S]*$/, '');   // a bare JSON call still arriving
+  return s.trimEnd();
+}
 function renderMd(el, text, streaming = false) {
-  let src = text || '';
+  let src = hideCallMarkup(text || '', streaming);
   // close an unterminated code fence while streaming so the rest doesn't render as code-less text
   if (streaming && (src.match(/```/g) || []).length % 2 === 1) src += '\n```';
   el.innerHTML = DOMPurify.sanitize(marked.parse(src), { ADD_ATTR: ['target'] });
@@ -271,12 +282,14 @@ async function hfSearch(q) {
     const rows = await api('/api/hf/search?q=' + encodeURIComponent(q));
     if (seq !== hfSeq) return;
     box.innerHTML = '';
-    if (!q) box.append(h('div', { class: 'muted', style: 'padding:2px 10px 8px;font-size:12.5px' }, 'Trending GGUF models'));
-    if (!rows.length) box.append(h('div', { class: 'muted', style: 'padding:10px' }, 'No GGUF models found.'));
+    if (!q) box.append(h('div', { class: 'muted', style: 'padding:2px 10px 8px;font-size:12.5px' }, 'Trending GGUF models · search finds any model, any size'));
+    if (!rows.length) box.append(h('div', { class: 'muted', style: 'padding:10px' }, 'No models found.'));
     for (const r of rows) {
       const [org, ...rest] = r.id.split('/');
       box.append(h('div', { class: 'hf-row', onclick: () => openRepo(r.id) },
         h('div', { class: 'hf-id' }, h('span', {}, org + '/'), rest.join('/')),
+        r.size_b ? h('span', { class: 'badge' }, r.size_b + 'B') : null,
+        h('span', { class: 'badge ' + (r.gguf ? 'gpu' : 'split'), title: r.gguf ? 'Ready-to-run GGUF files' : 'Original weights: Aero finds a GGUF version of it, makes one for your PC, or runs it with AirLLM' }, r.gguf ? 'GGUF' : 'original'),
         r.gated ? h('span', { class: 'badge split' }, 'gated') : null,
         h('small', {}, `↓ ${fmtK(r.downloads)}  ♥ ${fmtK(r.likes)}  ${r.updated || ''}`)));
     }
@@ -306,7 +319,7 @@ async function openRepo(repo) {
   try {
     const d = await api('/api/hf/files?repo=' + encodeURIComponent(repo));
     body.innerHTML = '';
-    if (!d.files.length) { body.append(h('div', { class: 'empty-note' }, 'This repo has no GGUF model files.')); return; }
+    if (!d.files.length) return sourceRepo(repo, d, body);
     const M = d.model || { caps: { text: true }, notes: [] }, meta = M.meta;
     // capabilities
     body.append(h('div', { class: 'caps' }, ...Object.keys(CAP_LABEL).filter(k => M.caps[k]).map(k =>
@@ -333,7 +346,7 @@ async function openRepo(repo) {
     const why = h('p', { class: 'muted rec-why' });
     body.append(h('p', { class: 'muted', style: 'margin:10px 0 6px;font-size:13px' },
       `Planning for ${fmtNum(d.budget_mb)} MB of VRAM (${d.budget_note}) and ${Math.round(d.ram_mb / 1024)} GB RAM. ` +
-      `Each quant is checked with its weights${d.mmproj.length ? ', the projector' : ''}, the KV cache and llama.cpp's buffers.`), projBox, why);
+      `Each quant is checked with its weights${d.mmproj.length ? ', the projector' : ''}, the KV cache and llama.cpp's buffers.`), ...[projBox, why].filter(Boolean));
     const prog = h('div', { class: 'dl-progress hidden' }, h('div', { class: 'progress' }, h('i')), h('small', { class: 'muted' }, ''));
     body.append(prog);
     const tb = h('tbody');
@@ -366,6 +379,64 @@ async function openRepo(repo) {
   } catch (e) { body.innerHTML = `<div class="err-msg">${esc(e.message)}</div>`; }
 }
 
+/** A repo with the original weights: use a published GGUF version, make one sized for this PC, or run it with AirLLM. */
+function sourceRepo(repo, d, body) {
+  const src = d.source, vs = d.versions || [];
+  if (src) body.append(h('div', { class: 'facts' },
+    h('div', {}, h('span', {}, 'Architecture'), h('b', {}, src.arch || 'unknown')),
+    h('div', {}, h('span', {}, 'Parameters'), h('b', {}, fmtParams(src.params) || '?')),
+    h('div', {}, h('span', {}, 'Original weights'), h('b', {}, `${fmtBytes(src.size)} in ${src.weights} file${src.weights === 1 ? '' : 's'}`)),
+    src.license ? h('div', {}, h('span', {}, 'License'), h('b', {}, src.license)) : null));
+  if (src?.gated) body.append(h('p', { class: 'warn-note' }, 'This repo is gated: accept its license on huggingface.co and add a token in Settings → Hugging Face before Aero can download it.'));
+  // 1. GGUF versions others published
+  const sec1 = wsSec('Ready-made GGUF versions', h('div', {}, vs.length ? null : h('p', { class: 'muted' }, 'Nobody has published a GGUF of this model yet.'),
+    ...vs.slice(0, 8).map((v, i) => h('div', { class: 'hf-row', onclick: () => openRepo(v.id) },
+      h('div', { class: 'hf-id' }, v.id), i === 0 ? h('span', { class: 'badge rec' }, 'recommended') : null,
+      v.same ? null : h('span', { class: 'badge split', title: 'A fine-tune or merge based on this model' }, 'derived'),
+      h('small', {}, `↓ ${fmtK(v.downloads)}  ${v.updated || ''}`)))),
+    { open: vs.length > 0, note: vs.length ? `${vs.length} found${d.versions_of ? ` (of ${d.versions_of}, the model this one is based on)` : ''} · the best quant for your PC is picked when you open one` : 'none yet' });
+  // 2. make one here
+  const prog = h('div', { class: 'dl-progress hidden' }, h('div', { class: 'progress' }, h('i')), h('small', { class: 'muted' }, ''));
+  const mk = src?.make;
+  const makeBtn = h('button', { class: 'btn' + (vs.length ? ' ghost' : ''), disabled: !mk }, mk ? `Make ${mk.quant} here (${fmtBytes(mk.size)})` : 'Can\'t read the weights');
+  makeBtn.onclick = () => convertModel(repo, mk?.quant, prog, makeBtn);
+  const sec2 = wsSec('Make a GGUF for this PC', h('div', {},
+    mk ? h('p', {}, `${mk.why}.` + (mk.imatrix ? ' Low-bit quants get an importance matrix first, so quality holds up.' : '')) : h('p', { class: 'muted' }, d.source_error || ''),
+    h('p', { class: 'muted', style: 'font-size:12.5px' }, 'Aero downloads the original weights, converts them with llama.cpp\'s converter and quantizes them with llama-quantize. ' +
+      'It needs about ' + (src ? fmtBytes(src.size + (src.params || 0) * 2) : '?') + ' of free disk while it works; the 16-bit file and the originals are deleted afterwards.' +
+      (src && !src.converter_ready ? ' The first time it also fetches the converter (about 300 MB).' : '')),
+    makeBtn, prog), { open: !vs.length, note: mk ? `${mk.quant} · ${fmtBytes(mk.size)}` : '' });
+  // 3. AirLLM
+  const sec3 = wsSec('Run it as it is with AirLLM', h('div', {},
+    h('p', {}, 'AirLLM streams one layer at a time from disk, so any size runs on a small GPU at full precision; it is slow (seconds per token).'),
+    h('button', { class: 'btn ghost', onclick: () => { $('#repoPanel').classList.add('hidden'); WS.bigRepo = repo; openWorkspace('models'); } }, 'Open in Big models')), { open: false, note: 'any size, slow' });
+  body.append(sec1, sec2, sec3);
+}
+
+async function convertModel(repo, quant, prog, btn) {
+  if (S.st.busy) return toast('Another download or load is running.', true);
+  prog.classList.remove('hidden'); btn.disabled = true;
+  const bar = $('i', prog), lbl = $('small', prog);
+  let model = null, err = null, stage = '';
+  try {
+    await sseFetch('/api/hf/convert', { repo, quant }, ev => {
+      if (ev.type === 'progress') {
+        bar.style.width = (ev.total ? ev.done / ev.total * 100 : 0).toFixed(1) + '%';
+        lbl.textContent = `${stage ? stage + ' · ' : ''}${fmtBytes(ev.done)} / ${fmtBytes(ev.total)} · ${fmtBytes(ev.speed)}/s`;
+      } else if (ev.type === 'stage') { stage = ev.text; lbl.textContent = ev.text; if (ev.stage !== 'download') bar.style.width = '100%'; }
+      else if (ev.type === 'verify') lbl.textContent = `Checking ${ev.file.split('/').pop()}…`;
+      else if (ev.type === 'log') lbl.textContent = ev.text;
+      else if (ev.type === 'result') model = ev.result;
+      else if (ev.type === 'error') err = ev.error;
+    });
+  } catch (e) { err = e.message; }
+  btn.disabled = false;
+  if (err) { lbl.textContent = err; toast(err.split('\n')[0], true, 8000); return; }
+  $('#repoPanel').classList.add('hidden');
+  await renderMyModels();
+  if (model) loadModel(model.id);
+}
+
 async function downloadModel(repo, f, prog, btn, withProj = true) {
   if (S.st.busy) return toast('Another download or load is running.', true);
   prog.classList.remove('hidden'); btn.disabled = true;
@@ -376,8 +447,10 @@ async function downloadModel(repo, f, prog, btn, withProj = true) {
       if (ev.type === 'progress') {
         const pct = ev.total ? ev.done / ev.total * 100 : 0;
         bar.style.width = pct.toFixed(1) + '%';
-        lbl.textContent = `${fmtBytes(ev.done)} / ${fmtBytes(ev.total)} · ${fmtBytes(ev.speed)}/s · ${ev.file.split('/').pop()}`;
-      } else if (ev.type === 'result') model = ev.result;
+        const eta = ev.speed > 0 && ev.total > ev.done ? ` · ${fmtDur((ev.total - ev.done) / ev.speed)} left` : '';
+        lbl.textContent = `${fmtBytes(ev.done)} / ${fmtBytes(ev.total)} · ${fmtBytes(ev.speed)}/s${eta} · ${ev.file.split('/').pop()}`;
+      } else if (ev.type === 'verify') lbl.textContent = `Checking ${ev.file.split('/').pop()} against Hugging Face's SHA-256…`;
+      else if (ev.type === 'result') model = ev.result;
       else if (ev.type === 'error') err = ev.error;
     });
   } catch (e) { err = e.message; }
@@ -596,6 +669,14 @@ async function runLoad(req, info) {
           log(`Long-prompt check of #${ev.n} (${ev.desc}) with ${fmtNum(ev.tokens)} tokens…`); break;
         case 'verify_done':
           log(ev.ok ? `Long-prompt check passed: ${fmtNum(ev.filled)} tokens read at ${fmtNum(Math.round(ev.pp_deep))} t/s, then ${ev.tg_deep} t/s generation.` : `Long-prompt check failed: ${ev.error}`, ev.ok ? 'ok' : 'err'); break;
+        case 'tool_eval_start':
+          $('#loadSub').textContent = `Tool-calling exam on #${ev.n}: can it pick the right tool and fill it in?`;
+          log(`Tool-calling exam on #${ev.n} (${ev.desc})…`); break;
+        case 'tool_eval_progress':
+          $('#loadSub').textContent = `Tool-calling exam on #${ev.n}: case ${ev.done} of ${ev.of}`; break;
+        case 'tool_eval_done':
+          log(`Tool calling on #${ev.n}: ${Math.round(ev.score * 100)}% (benchmark ${Math.round(ev.bfcl * 100)}%, Aero requests ${Math.round(ev.aero * 100)}%) at temperature ${ev.temperature}` +
+            (ev.act_first ? ' · Aero will start actions for it' : ''), 'ok'); break;
         case 'tune_done':
           log(`Best: #${ev.n} ${ev.desc} · ${ev.tg} tok/s generate · ${fmtNum(Math.round(ev.pp))} tok/s prompt · ${ev.trials} trials in ${fmtDur(ev.elapsed_s)} · ${ev.verdict}`, 'ok');
           $('#trial-' + ev.n)?.classList.add('best'); bar(100);
@@ -809,7 +890,14 @@ function renderItem(ctx, m) {
 }
 
 function appendNotice(ctx, m) {
+  if (m.kind === 'intent' && m.intent) { const c = intentChip(m.intent); ctx.el.append(c); return c; }
   const el = h('div', { class: m.error || m.level === 'error' ? 'err-msg' : 'notice' }, m.content);
+  if (m.action?.settings) {                               // e.g. "Turn on tools": one click instead of hunting for it
+    const b = h('button', { class: 'btn sm notice-act', onclick: async () => {
+      await saveSetting(m.action.settings); b.disabled = true; b.textContent = 'Done: send your request again';
+    } }, m.action.label || 'Fix it');
+    el.append(' ', b);
+  }
   if (m.lane && ctx.lane && ctx.lane.name === m.lane) ctx.lane.el.append(el); else ctx.el.append(el);
   return el;
 }
@@ -866,13 +954,24 @@ async function viewFile(a) {
 }
 function viewImage(src, name) { modal(name || 'Image', h('img', { class: 'full', src }), true); }
 
+/** What Aero understood the request to need: shown above the work so the user knows what is about to happen. */
+function intentChip(it) {
+  const bits = [it.visible ? 'on screen' : 'in the background'];
+  if (it.close_browser) bits.push('closes the browser when done');
+  return h('div', { class: 'intent-chip', title: (it.tools || []).map(t => toolInfo(t).name).join(', ') },
+    h('b', {}, 'Plan'), ' ', it.label, h('small', {}, ' · ' + bits.join(' · ')));
+}
+
+/** A step that only calls tools: its thinking isn't shown, just the tools it calls. */
+const toolStep = m => !!(m.tool_calls || []).length && !m.content;
+
 function thinkBlock(text, cloud, open = false) {
   return h('details', { class: 'think', open }, h('summary', {}, cloud ? 'Thinking (summary)' : 'Thought process'), h('div', { class: 'think-body' }, text));
 }
 
 function appendAssistant(L, m) {
   const cloud = isCloudLane(L.name);
-  if (m.reasoning) L.el.append(thinkBlock(m.reasoning, cloud));
+  if (m.reasoning && !toolStep(m)) L.el.append(thinkBlock(m.reasoning, cloud));
   if (m.content) { const md = h('div', { class: 'md' }); renderMd(md, m.content); L.el.append(md); }
   for (const tc of m.tool_calls || []) if (!isHiddenCall(tc.function.name)) L.el.append(toolCard(tc.id, tc.function.name, parseArgs(tc.function.arguments)));
   L.msgs.push(m);
@@ -929,6 +1028,13 @@ function attachToolResult(ctx, m) {
   $(':scope > .tool-head .abadge', card)?.remove();
   if (m.authority) authorityBadge(card, m.authority);
   else if (m.approved_batch) st.after(h('span', { class: 'abadge ok', 'data-tip': 'You approved this in the queue' }, 'approved'));
+  if (m.file && !$('.made-file', card)) {          // a document Aero made: download it (or open it) from the chat
+    const url = '/api/made/' + m.file.id;
+    const chip = h('div', { class: 'made-file' }, h('span', { class: 'ico', html: I.file || '' }), h('b', {}, m.file.name), h('small', {}, fmtBytes(m.file.size)),
+      h('a', { class: 'btn sm', href: url, download: m.file.name }, 'Download'),
+      h('a', { class: 'btn ghost sm', href: url + '?inline=1', target: '_blank', rel: 'noopener' }, 'Open'));
+    card.after(chip);
+  }
   if (m.preview && typeof wsPreview === 'function') wsPreview(card, m.preview);
   else if (m.image && !$('img.shot', card)) card.append(h('img', { class: 'shot', src: '/api/uploads/' + m.image, onclick: () => viewImage('/api/uploads/' + m.image) }));
   if (m.error && !m.denied) card.classList.add('open');
@@ -1048,10 +1154,6 @@ function updateCtxMeter() {
   $('#ctxMeter span').textContent = ctx ? `${fmtK(used)} / ${fmtCtx(ctx)}` : '';
   $('#ctxMeter').classList.toggle('hidden', !ctx);
   $('#ctxMeter').title = 'Local model context used by this chat';
-  const cb = $('#compactBtn');
-  cb.classList.toggle('hidden', !msgs.some(m => m.role === 'user'));
-  cb.disabled = S.streaming || S.compacting;
-  cb.classList.toggle('hot', pct >= 60);
   return pct;
 }
 function chatPct() {
@@ -1110,7 +1212,6 @@ function bindChatUI() {
   $('#appBtn').onclick = pickApp;
   $('#fileInput').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
   $('#newChat').onclick = newChat;
-  $('#compactBtn').onclick = () => compactChat(false);
   $('#memoryBtn').onclick = () => openSettings('Memory');
   $('#labBtn').onclick = () => openLab();
   $('#modsBtn').onclick = () => openMods();
@@ -1337,7 +1438,7 @@ async function runAgent(loop) {
     raf = 0; if (!cur) return;
     if (cur.reasoning && !cur.think) {
       cur.thinkBody = h('div', { class: 'think-body' });
-      cur.think = h('details', { class: 'think', open: true }, h('summary', {}, cur.cloud ? 'Thinking…' : 'Thinking…'), cur.thinkBody);
+      cur.think = h('details', { class: 'think' }, h('summary', {}, 'Thinking…'), cur.thinkBody);
       cur.L.el.insertBefore(cur.think, cur.md);
     }
     if (cur.think) { cur.thinkBody.textContent = cur.reasoning; cur.thinkBody.scrollTop = 1e9; }
@@ -1380,6 +1481,15 @@ async function runAgent(loop) {
           const chip = ctx.router && $$('.rchip', ctx.router).find(c => / of .* tools$/.test(c.textContent));
           if (chip) chip.textContent = chip.textContent.replace(/^\d+/, ev.exposed.length);
           break;
+        }
+        case 'intent': {
+          const it = ev.intent, n = { role: 'notice', kind: 'intent', intent: it };
+          push(n); ctx.el.append(intentChip(it));
+          if (ev.exposed) {
+            const chip = ctx.router && $$('.rchip', ctx.router).find(c => / of .* tools$/.test(c.textContent));
+            if (chip) chip.textContent = chip.textContent.replace(/^\d+/, ev.exposed.length);
+          }
+          scrollBottom(); break;
         }
         case 'lane': {
           if (ev.phase === 'learn') {
@@ -1440,7 +1550,8 @@ async function runAgent(loop) {
           push(m);
           const L = cur?.L || ensureLane(ctx, m.lane, m.model);
           if (cur) {
-            if (cur.think) { if (!cur.thinkClosed) $('summary', cur.think).textContent = cur.cloud ? 'Thinking (summary)' : 'Thought process'; cur.think.open = false; cur.thinkBody.textContent = m.reasoning || cur.reasoning; }
+            if (toolStep(m)) cur.think?.remove();
+            else if (cur.think) { if (!cur.thinkClosed) $('summary', cur.think).textContent = cur.cloud ? 'Thinking (summary)' : 'Thought process'; cur.think.open = false; cur.thinkBody.textContent = m.reasoning || cur.reasoning; }
             else if (m.reasoning) L.el.insertBefore(thinkBlock(m.reasoning, cur.cloud), cur.md);
             cur.md.classList.remove('cursor');
             if (m.content) renderMd(cur.md, m.content); else cur.md.remove();
@@ -1516,7 +1627,7 @@ async function runAgent(loop) {
           break;
         }
         case 'notice': {
-          const n = { role: 'notice', content: ev.text, lane: ev.lane, level: ev.level };
+          const n = { role: 'notice', content: ev.text, lane: ev.lane, level: ev.level, action: ev.action, kind: ev.kind };
           push(n); appendNotice(ctx, n); scrollBottom(); break;
         }
         case 'error': { failed = ev.error; const n = { role: 'notice', content: ev.error, error: true }; push(n); appendNotice(ctx, n); scrollBottom(); break; }
@@ -1546,7 +1657,7 @@ async function runAgent(loop) {
   ctx.lane = null;
   S.streaming = false; S.abort = null; S.activeLane = null; renderSend(); updateCtxMeter(); syncBusy();
   if (S.chat === chat) await saveChat(); else await api('/api/chats/' + chat.id, { method: 'PUT', json: chat }).catch(() => { });
-  const at = S.settings?.auto_compact_at || 0;
+  const at = S.settings?.auto_compact_at || 0.75;     // always automatic (1.2 removed the Compact button)
   if (at > 0 && S.chat === chat && chatPct() >= at) await compactChat(true);
   if (!stopped) notify(S.loop.active ? `Aero finished loop round ${S.loop.iteration}` : 'Aero finished', S.chat?.title || 'Reply ready');
   return { stopped, error: failed };
@@ -1620,7 +1731,7 @@ function subSummary(sb, rec) {
 function subReplay(sb, rec) {
   for (const m of (rec.messages || []).slice(1)) {
     if (m.role === 'assistant') {
-      if (m.reasoning) sb.body.append(thinkBlock(m.reasoning, false));
+      if (m.reasoning && !toolStep(m)) sb.body.append(thinkBlock(m.reasoning, false));
       if (m.content) { const md = h('div', { class: 'md' }); renderMd(md, m.content); sb.body.append(md); }
       for (const tc of m.tool_calls || []) sb.body.append(toolCard(tc.id, tc.function.name, parseArgs(tc.function.arguments)));
     } else if (m.role === 'tool') attachToolResult(sb.ctx, m);
@@ -1677,7 +1788,8 @@ function subEvent(subs, ev, chat) {
       if (m.discard) { c?.md.remove(); c?.think?.remove(); break; }
       if (c) {
         c.md.classList.remove('cursor');
-        if (c.think) { $('summary', c.think).textContent = 'Thought process'; c.think.open = false; c.thinkBody.textContent = m.reasoning || c.reasoning; }
+        if (toolStep(m)) c.think?.remove();
+        else if (c.think) { $('summary', c.think).textContent = 'Thought process'; c.think.open = false; c.thinkBody.textContent = m.reasoning || c.reasoning; }
         else if (m.reasoning) sb.body.insertBefore(thinkBlock(m.reasoning, false), c.md);
         if (m.content) renderMd(c.md, m.content); else c.md.remove();
       }
@@ -1750,7 +1862,7 @@ function stopControl() {
 function questionCard(m, chat) {
   const q = m.question || {};
   const answered = q.status === 'answered';
-  const who = q.owner ? `${q.owner} (subagent)` : (S.st?.engine.model?.name || 'The local model');
+  const who = q.context === 'sign-in' ? 'Aero' : q.owner ? `${q.owner} (subagent)` : (S.st?.engine.model?.name || 'The local model');
   const wait = h('span', { class: 'qwait muted' }, answered ? '' : ' · the rest of the task keeps going');
   const card = h('div', { class: 'qcard' + (answered ? ' done' : ''), 'data-qid': q.id },
     h('div', { class: 'qh' }, h('span', { class: 'ico', html: I.ask }), h('b', {}, `${who} asks`), wait),
@@ -2527,14 +2639,18 @@ async function openSettings(start = 'General') {
           h('span', {}, 'Configuration'), h('span', {}, e.desc || '-'),
           h('span', {}, 'Speed'), h('span', {}, e.tune ? `${e.tune.tg} tok/s generate · ${e.tune.pp} tok/s prompt` : '-'),
           h('span', {}, 'Tuned'), h('span', {}, e.tune ? `${e.tune.at} · ${e.tune.trials} trials · ${e.tune.depth || ''} · limit ${e.tune.limit_gb} GB` : '-'),
-          h('span', {}, 'Advisor'), h('span', {}, e.tune ? (e.tune.advisor || 'built-in step policy') : '-')) : h('p', { class: 'muted' }, 'No model loaded.'),
+          h('span', {}, 'Advisor'), h('span', {}, e.tune ? (e.tune.advisor || 'built-in step policy') : '-'),
+          h('span', {}, 'Tool calling'), h('span', {}, e.tune?.tools ? `${Math.round(e.tune.tools.score * 100)}% on the exam · temperature ${e.tune.tools.temperature}` +
+            (e.tune.tools.act_first ? ' · Aero starts actions for it' : '') : 'not measured yet (re-tune to measure)')) : h('p', { class: 'muted' }, 'No model loaded.'),
         field('Tuning goal', select('tune_mode', s.tune_mode, [['balanced', 'Balanced: largest context at 80%+ of top speed, 32k+ when possible'], ['max_context', 'Max context: largest context at 50%+ of top speed'], ['max_speed', 'Max speed: smaller context (≤32k), fastest generation']]),
           'Also asked before every tune. Use Re-tune to apply it to a model that is already tuned.'),
         h('div', { class: 'row2' },
           field('Context cap', num('context_cap', s.context_cap, 1024), '0 = model maximum'),
           field('Tuning advisor', h('input', { type: 'text', 'data-k': 'advisor_model', value: s.advisor_model }),
             'auto = Bonsai first, quant sized to the VRAM you leave free · off = built-in step policy · or an HF repo / .gguf path')),
-        toggle('allow_q4_kv', s.allow_q4_kv, 'Let the tuner try a q4_0 KV cache (more context, small quality loss)'),
+        toggle('allow_q4_kv', s.allow_q4_kv, 'Let the tuner try a q4_0 KV cache (more context, small quality loss; Full depth always tries it)'),
+        toggle('tune_tool_eval', s.tune_tool_eval !== false, 'Test tool calling while tuning: a short exam (Berkeley function-calling cases + Aero requests) picks the temperature for tool steps and whether Aero should start actions for this model'),
+        toggle('use_tuned_tool_temp', s.use_tuned_tool_temp !== false, 'Use the temperature the exam found best whenever tools are offered'),
         field('Speculative decoding', select('spec_mode', s.spec_mode || 'auto', [['auto', 'Auto: the model\'s own MTP layer (or a draft model) + n-gram lookup'], ['ngram', 'N-gram lookup only (no extra VRAM)'], ['off', 'Off']]),
           'Drafts several tokens and lets the model check them in one pass. Measured on an RTX 5080 with Qwen3.8-27B: 59 → 168 tok/s editing code, 59 → 69 tok/s on free text. MTP costs about 1 GB of VRAM, which counts against your limit when tuning. Changing it re-tunes on the next load.'),
         field('Draft model (optional)', h('input', { type: 'text', 'data-k': 'draft_model', value: s.draft_model, placeholder: 'path to a draft .gguf from the same family, e.g. mtp-…, eagle3-…, dflash-…' }),
@@ -2558,8 +2674,13 @@ async function openSettings(start = 'General') {
         field('Max tool steps per subagent', num('subagent_max_steps', s.subagent_max_steps ?? 20, 1), 'A subagent has to report back after this many steps.'),
         toggle('strict_background', s.strict_background, 'Strict Background Only: never use my real mouse and keyboard, not even when I allow it'),
         h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 12px' }, 'Background control (UI Automation, window messages, Aero\'s browser) keeps working. Anything that would need your input stops and says so instead.'),
-        field('Aero\'s browser', select('browser_mode', s.browser_mode || 'background', [['background', 'In the background: no window, nothing on screen'], ['visible', 'Visible: a window you can watch']]),
-          'Either way it is Aero\'s own browser profile, not your browser. When a page needs your sign-in, the model opens it in a visible window so you can sign in yourself.'),
+        field('Aero\'s browser', select('browser_mode', s.browser_mode || 'visible', [['visible', 'On screen: you watch every page it opens'], ['background', 'In the background: no window, nothing on screen']]),
+          'On screen it works in your own browser when that is connected (below), else in Aero\'s own profile. Saying "in the background" in a request uses Aero\'s hidden profile for that one. When a page needs your sign-in, Aero shows it and waits for you.'),
+        browserSessionField(s),
+        toggle('show_work', s.show_work !== false, 'Show the apps Aero works in: bring each window to the front while it is used (unless the request says background)'),
+        field('Mail accounts to check', h('textarea', { 'data-k': 'mail_accounts', 'data-lines': '1', rows: 3, placeholder: 'one inbox address per line, e.g. https://mail.google.com/mail/u/1/' }, (s.mail_accounts || []).join('\n')),
+          'Checked first for "check my email" requests. Gmail and Outlook are always included.'),
+        toggle('use_bookmarks_for_accounts', s.use_bookmarks_for_accounts !== false, 'Also check the mail sites in my browser bookmarks (Edge, Chrome, Brave; read only)'),
         h('label', { style: 'font-weight:600;font-size:13px;display:block;margin:6px 0' }, 'Permissions'));
       const pol = { ...s.tool_policy };
       api('/api/tools').then(t => {
@@ -2621,7 +2742,8 @@ async function openSettings(start = 'General') {
   function collect() {
     $$('[data-k]', pane).forEach(el => {
       const k = el.dataset.k;
-      changes[k] = el.type === 'checkbox' ? el.checked : el.dataset.json ? JSON.parse(el.value) : (el.type === 'number' || el.dataset.num) ? Number(el.value) : el.value;
+      changes[k] = el.type === 'checkbox' ? el.checked : el.dataset.json ? JSON.parse(el.value) : el.dataset.lines ? el.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+        : (el.type === 'number' || el.dataset.num) ? Number(el.value) : el.value;
     });
     const pb = $('.policy-box', pane); if (pb?.dataset.policy) changes.tool_policy = JSON.parse(pb.dataset.policy);
   }
@@ -2635,6 +2757,23 @@ async function openSettings(start = 'General') {
   const body = h('div', {}, h('div', { class: 'set-layout' }, nav, pane), h('div', { style: 'display:flex;justify-content:flex-end;gap:8px;margin-top:14px;border-top:1px solid var(--line);padding-top:14px' }, h('button', { class: 'btn ghost', onclick: () => { closeModal(); applyTheme(); } }, 'Cancel'), saveBtn));
   modal('Settings', body, true);
   show(SECTIONS.includes(start) ? start : 'General');
+}
+
+/** Settings > Tools: work in the user's own signed-in browser (its remote-debugging switch), or Aero's own profile. */
+function browserSessionField(s) {
+  const status = h('small', { class: 'muted' }, 'Checking your browser…');
+  const box = h('div', { class: 'field' }, h('label', {}, 'Which browser Aero works in'),
+    select('browser_session', s.browser_session || 'mine', [['mine', 'Your own browser, already signed in to your accounts'], ['aero', 'Aero\'s own browser profile (you sign in to each site there once)']]),
+    status);
+  api('/api/browser/session').then(st => {
+    if (!st.supported) { status.textContent = 'Your default browser isn\'t Chrome, Edge, Brave or Vivaldi, so Aero uses its own profile.'; return; }
+    status.innerHTML = '';
+    status.append(st.connected ? `Connected to your ${st.name}. ` : st.switch_on ? `${st.name} is ready: it asks you to Allow when Aero connects. ` :
+      `To let Aero work in your signed-in ${st.name}, open `, st.connected || st.switch_on ? '' : h('code', {}, st.inspect_url),
+      st.connected || st.switch_on ? '' : ` in ${st.name} and switch on remote debugging. ${st.name} asks you to Allow each time Aero connects; Aero opens its own tabs there and closes only those. `,
+      st.connected || st.switch_on ? '' : h('button', { class: 'btn ghost sm', onclick: async e => { try { await navigator.clipboard.writeText(st.inspect_url); e.target.textContent = 'Copied: paste it in the address bar'; } catch { e.target.textContent = st.inspect_url; } } }, 'Copy the address'));
+  }).catch(() => { status.textContent = ''; });
+  return box;
 }
 
 function privacySection(s) {
@@ -3077,7 +3216,7 @@ function memorySection(s) {
     } }, 'Forget all shared learning'));
   };
   drawLearn();
-  const pctSel = select('auto_compact_at', String(s.auto_compact_at ?? 0.75), [['0', 'Off'], ['0.6', 'At 60% full'], ['0.75', 'At 75% full'], ['0.85', 'At 85% full']]);
+  const pctSel = select('auto_compact_at', String(s.auto_compact_at || 0.75), [['0.6', 'At 60% full'], ['0.75', 'At 75% full'], ['0.85', 'At 85% full']]);
   pctSel.dataset.num = '1';
   return [
     h('label', { class: 'mem-h' }, 'About you'),

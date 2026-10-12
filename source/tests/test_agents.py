@@ -68,8 +68,12 @@ class Control(unittest.TestCase):
                          "Qwen is controlling Notepad in the background")
         self.assertEqual(control.phrase("Qwen", "Notepad", "FOREGROUND_CONSENT_REQUIRED"),
                          "Qwen is controlling Notepad with your mouse and keyboard")
-        self.assertEqual(control.phrase("Qwen", "Aero's browser", "BROWSER_ISOLATED"),
-                         "Qwen is using Aero's browser in the background")
+        with mock.patch.object(control, "_browser_shown", lambda: False):
+            self.assertEqual(control.phrase("Qwen", "Aero's browser", "BROWSER_ISOLATED"),
+                             "Qwen is using Aero's browser in the background")
+        with mock.patch.object(control, "_browser_shown", lambda: True):         # 1.2: on screen by default
+            self.assertEqual(control.phrase("Qwen", "Aero's browser", "BROWSER_ISOLATED"),
+                             "Qwen is using Aero's browser on screen")
         self.assertEqual(control.mode_of("mouse_click", {}), "FOREGROUND_CONSENT_REQUIRED")
         self.assertEqual(control.mode_of("app_click", {"element": 3}), "ACCESSIBILITY_BACKGROUND")
         self.assertEqual(control.mode_of("app_click", {"element": 3, "input": "real"}, physical=True),

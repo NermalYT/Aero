@@ -297,7 +297,7 @@ clicks it, and moves to the bottom of the window when the model needs the spot i
 box stops that chat's task; Stop on the header and on the banner stops every running task. Stopping denies the
 pending approvals of what it stops (and only those), releases the windows and input it held, closes its browser tab,
 and the chat lists what finished and what didn't. In 1.1 the text says how the model works: "… in the background", "… with your mouse and keyboard" (only after
-you allowed it), "… is using Aero's browser in the background" (no banner over your screen), "… is opening …".
+you allowed it), "… is using Aero's browser on screen" (1.2.1; "in the background" for a hidden one), "… is opening …".
 
 ### Apps by name
 
@@ -362,17 +362,23 @@ projects whose functions are built into Aero (sources, licences and what is not 
 | Memory+ | Hindsight memory banks per project |
 | Big models | plans and loads models bigger than your GPU (below), and AirLLM |
 
-You don't have to pick one: ask for the work and the matching workspace opens with its tools. When something isn't
-installed yet, its Install button (or the model, through `integration_install`) asks you first and shows the size.
+You don't have to pick one: ask for the work and the matching workspace opens with its tools. Everything they need
+is set up with Aero: the installer installs it (`--lean` skips that) and Aero finishes anything missing in the
+background (`integrations/bundle.py`; a line under the workspaces shows the progress). xtool is the exception: it
+changes WSL, so it installs from its card when you ask.
 
 ### Big models
 
-**Big models** → choose a GGUF → **Plan**: Aero reads where every tensor of the model would go for the VRAM you give
+Big models are part of normal loading: search any model, Aero recommends the quant that fits (or lists the GGUF
+versions of a repo with original weights, or makes one with **Make a GGUF here**: llama.cpp's converter, an
+importance matrix for low-bit quants, `llama-quantize`), and the tuner measures whole-layer offload against the
+feed-forward split for dense models bigger than the GPU. For manual control, **Big models** → *Manual offload plan*
+→ choose a GGUF → **Plan**: Aero reads where every tensor of the model would go for the VRAM you give
 it (whole layers, feed-forward weights in RAM with attention on the GPU, or MoE experts in RAM) and estimates the
 speed. When a small model of the same family exists, it adds it as a draft for speculative decoding and offers to
 download it: on the test PC, Llama-3.3-70B Q6_K went from 1.0 to 4.85 tokens a second on a 16 GB card with
 Llama-3.2-1B as the draft. **Load** starts the plan. For a full-precision Hugging Face checkpoint that fits nowhere,
-install **AirLLM** in the pack and use **Run with AirLLM**: it streams one layer at a time through the GPU, so it runs
+use **Run with AirLLM** (installed with Aero): it streams one layer at a time through the GPU, so it runs
 in a few GB of VRAM, but every token reads the whole model from disk: Qwen2.5-32B in bf16 took 30 s per token in
 1.9 GB of VRAM, 18 s with 8-bit layers (4-bit is faster again but answered wrongly on a 7B). Measurements:
 [docs/V1.2_BIG_MODELS.md](docs/V1.2_BIG_MODELS.md).
@@ -400,8 +406,8 @@ off. Export any report as Markdown or JSON. Only measured numbers are shown; any
 
 ### Memory and compaction
 
-- **Compact** (top bar) summarizes the chat into long-term memory and continues in a fresh `· part N` chat. It
-  happens on its own at 75% context (Settings → Memory).
+- **Automatic compaction** summarizes the chat into long-term memory and continues in a fresh `· part N` chat when
+  the context reaches 75% (Settings → Memory sets the point; 1.2 removed the Compact button).
 - The newest message also gets a recall block: pinned facts, lessons and the memories most relevant to it, plus
   related past chats. The model can `remember` and `recall`. **Memory** in the sidebar lists everything; passwords,
   keys and tokens are filtered out.
@@ -504,9 +510,12 @@ and tool calls, review verdicts, ChatGPT and Claude usage and spending today, an
   permission of *auto* counts as standing permission). Aero waits until you stop typing, never lets two agents use
   them at once, and puts your window back afterwards. **Strict Background Only** in Settings → Tools refuses them
   completely. Slam the real mouse into a screen corner to abort pyautogui.
-- **The browser** is Aero's own profile (`C:\Aero\data\browser-profile`), in the background by default (Settings →
-  Tools → Aero's browser); a visible window opens when you ask to watch or need to sign in. Each agent has its own
-  tab.
+- **The browser** (1.2.1) is your default browser when it is Chrome, Edge, Brave, Vivaldi or Chromium, on screen. With
+  its remote-debugging switch on (`chrome://inspect/#remote-debugging`, Chrome 144+), Aero connects to the browser
+  you are using, with your sign-ins: the browser asks you to Allow, Aero opens its own tabs, never lists or closes
+  yours, and disconnects when the request is done (Settings → Tools → *Which browser Aero works in*). Otherwise, with
+  strict offline on, or for a request that says "in the background", it uses Aero's own profile
+  (`C:\Aero\data\browser-profile`). Each agent has its own tab.
 
 ## Folders
 

@@ -1,7 +1,8 @@
 // Aero v1.2: workspaces. Each workspace is a panel beside the chat for one kind of work (Code, Mobile apps, Create,
 // Diagrams, Review & test, Debug & reverse, Finance, Library, Memory+, Big models), built from the integration packs
 // (aero/integrations). A request that needs a pack opens its workspace by itself (the "workspace" event); the panel
-// shows what is installed (with Install buttons that ask first), the pack's live state and its results.
+// shows what is installed (everything is set up with Aero; Install buttons only for what failed), the pack's live
+// state and its results.
 'use strict';
 
 Object.assign(I, {
@@ -17,7 +18,7 @@ Object.assign(I, {
   models: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8.5" y="8.5" width="7" height="7" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
 });
 
-const WS = { list: [], open: null, timer: null };
+const WS = { list: [], open: null, timer: null, bigRepo: '' };
 
 async function wsInit(tries = 0) {
   try { WS.list = (await api('/api/integrations')).workspaces || []; } catch { WS.list = []; }
@@ -34,6 +35,30 @@ function renderWsList() {
       h('span', { class: 'ico', html: I[w.icon] || I.tools }), h('span', {}, w.name),
       h('small', { class: 'ws-dot ' + (ready ? 'ok' : 'off'), title: ready ? 'Ready' : 'Needs setup' })));
   }
+}
+
+// every integration ships with Aero: while the background setup runs (integrations/bundle.py), one line under the
+// workspace list says how far it is
+async function bundleStatus() {
+  let st; try { st = await api('/api/integrations/bundle'); } catch { return setTimeout(bundleStatus, 15000); }
+  const box = $('#wsList'); if (!box) return;
+  $('.ws-bundle', box.parentElement)?.remove();
+  const items = st.items || [], done = items.filter(x => x.state === 'done').length;
+  const failed = items.filter(x => x.state === 'failed');
+  const cur = items.find(x => x.state === 'running');
+  let el = null;
+  if (st.running && done < items.length) {
+    el = h('div', { class: 'ws-bundle', title: 'Every integration comes with Aero; it finishes setting them up in the background.' },
+      h('small', {}, `Setting up integrations · ${done} of ${items.length}` + (cur ? ` · ${cur.label}` : '')),
+      h('div', { class: 'progress' }, h('i', { style: `width:${(st.done_mb / Math.max(1, st.total_mb) * 100).toFixed(1)}%` })));
+  } else if (failed.length) {
+    el = h('div', { class: 'ws-bundle bad', title: failed.map(x => `${x.label}: ${x.error || 'failed'}`).join('\n') },
+      h('small', {}, `${failed.length} integration${failed.length === 1 ? '' : 's'} didn't install `),
+      h('button', { class: 'btn ghost sm', onclick: async () => { await api('/api/integrations/bundle/retry', { method: 'POST' }); setTimeout(bundleStatus, 1500); } }, 'Retry'));
+  }
+  if (el) box.after(el);
+  if (st.running) setTimeout(bundleStatus, 8000);
+  else if (done && WS.list.length) wsInit();
 }
 
 function closeWorkspace() {
@@ -78,12 +103,25 @@ function packCard(p) {
     reqs.append(h('div', { class: 'ws-req ' + (r.ok ? 'ok' : r.optional ? 'opt' : 'miss') },
       h('span', { class: 'ws-dot ' + (r.ok ? 'ok' : 'off') }), h('span', { class: 'grow' }, r.label, h('small', { class: 'muted' }, ' · ' + (r.detail || (r.how ? r.how : '')))), btn));
   }
+  // the card opens with an arrow: what it does, things to ask (one click puts them in the message box), its tools,
+  // what it needs, and where it comes from
+  const ex = (p.examples || []).length ? h('div', { class: 'ws-ex' }, ...p.examples.map(t => h('button', { title: 'Put this in the message box', onclick: () => { const ta = $('#input'); ta.value = t; ta.focus(); ta.dispatchEvent(new Event('input')); } }, t))) : null;
+  const tl = (p.tools || []).filter(t => t !== 'use_skill');
+  const tools = tl.length ? h('div', { class: 'ws-tools' }, ...tl.flatMap(t => [h('code', {}, t), h('span', { class: 'muted' }, typeof toolInfo === 'function' ? toolInfo(t).desc : '')])) : null;
   return h('details', { class: 'ws-pack', open: !p.ready },
     h('summary', {}, h('b', {}, p.name), h('span', { class: 'chip ' + (p.ready ? 'ok' : '') }, p.ready ? 'ready' : 'needs setup')),
     h('p', { class: 'muted' }, p.summary),
-    reqs, bar, log,
+    ex ? h('div', { class: 'ws-label' }, 'Try asking') : null, ex,
+    h('div', { class: 'ws-label' }, 'What it needs'), reqs, bar, log,
+    tools ? h('div', { class: 'ws-label' }, 'Its tools') : null, tools,
+    (p.skills || []).length ? h('small', { class: 'muted' }, 'Skills: ' + p.skills.join(', ')) : null,
     p.notes ? h('p', { class: 'muted ws-note' }, p.notes) : null,
     h('small', { class: 'muted' }, 'Built in from ', h('a', { href: (p.source || '').split(' ')[0], target: '_blank', rel: 'noopener' }, (p.source || '').replace('https://github.com/', '').split(' ')[0]), ` · ${p.license}`));
+}
+
+// a section of a workspace panel that opens and closes with an arrow
+function wsSec(title, body, { open = true, note = '' } = {}) {
+  return h('details', { class: 'ws-sec', open }, h('summary', {}, h('span', {}, title), note ? h('span', { class: 'muted' }, note) : null), ...[].concat(body).filter(Boolean));
 }
 
 async function wsRun(tool, args, btn, label) {
@@ -197,10 +235,21 @@ function libraryBox(sh) {
 
 function bigModelsBox(p) {
   const box = h('div');
+  // the normal way: search any model, Aero picks the quant and the tuner places it
+  const q = h('input', { type: 'search', placeholder: 'Any model, any size: "llama 3.3 70b", "qwen3 235b", "gemma 3 27b"…' });
+  const find = () => { showLauncher(); const i = $('#hfQuery'); i.value = q.value; i.dispatchEvent(new Event('input')); };
+  q.onkeydown = e => { if (e.key === 'Enter') find(); };
+  box.append(wsSec('Find and run any model', h('div', {},
+    h('p', {}, 'Big models are part of normal loading now. Search Hugging Face for any model: Aero picks the best quant for your GPU and RAM, ' +
+      'makes one itself when nobody has published a GGUF (with an importance matrix for low-bit quants), and the tuner measures where every ' +
+      'part goes: whole layers, only the feed-forward weights, or MoE experts in RAM.'),
+    h('div', { class: 'ws-form row' }, q, h('button', { class: 'btn sm', onclick: find }, 'Search'))), { note: 'recommended' }));
+
+  // manual offload plans for a GGUF already on disk
   const sel = h('select', {}, ...(p.ggufs || []).map(g => h('option', { value: g.path }, `${g.name} (${g.gb} GB)`)));
   const budget = h('input', { type: 'number', step: '0.5', min: '0.5', placeholder: 'VRAM GB (blank = free VRAM)', style: 'width:170px' });
   const out = h('div');
-  box.append(h('h4', { class: 'sub-h' }, 'GGUF bigger than your GPU'), h('div', { class: 'ws-form row' }, sel, budget, h('button', { class: 'btn sm', onclick: async e => {
+  const planBtn = h('button', { class: 'btn sm', onclick: async e => {
     e.target.disabled = true; out.innerHTML = '';
     try {
       const r = await api('/api/bigmodel/plan', { method: 'POST', json: { path: sel.value, budget_gb: +budget.value || 0 } });
@@ -212,18 +261,23 @@ function bigModelsBox(p) {
         h('button', { class: 'btn ghost sm', onclick: async () => { const lb = h('div', { class: 'logbox' }); out.append(lb); const { err } = await runJob('/api/bigmodel/load', { path: sel.value, cfg: x.cfg, spec: x.spec || null, strategy: x.strategy }, lb); if (err) toast(err, true); else toast('Loaded'); } }, 'Load')));
     } catch (err) { toast(err.message, true); }
     e.target.disabled = false;
-  } }, 'Plan')), out);
-  const repo = h('input', { type: 'text', placeholder: 'Hugging Face repo, e.g. Qwen/Qwen2.5-7B-Instruct, or a folder' });
+  } }, 'Plan');
+  box.append(wsSec('Manual offload plan for a GGUF', h('div', {},
+    h('p', { class: 'muted' }, 'Skip the tuner and pick a placement yourself: every plan that fits the VRAM you give, with an estimated speed.'),
+    (p.ggufs || []).length ? h('div', { class: 'ws-form row' }, sel, budget, planBtn) : h('p', { class: 'muted' }, 'No GGUF models on disk yet.'), out), { open: false, note: 'advanced' }));
+
+  // AirLLM
+  const repo = h('input', { type: 'text', placeholder: 'Hugging Face repo, e.g. Qwen/Qwen2.5-7B-Instruct, or a folder', value: WS.bigRepo || '' });
+  WS.bigRepo = '';
   const comp = h('select', {}, h('option', { value: 'none' }, 'full precision'), h('option', { value: '8bit' }, '8-bit'), h('option', { value: '4bit' }, '4-bit'));
   const lb = h('div', { class: 'logbox hidden' });
-  box.append(h('h4', { class: 'sub-h' }, 'AirLLM: full precision, layer by layer'),
-    h('p', { class: 'muted' }, p.airllm?.installed ? `Installed (${p.airllm.version}).` : 'Not installed: install it in the Big models pack below.'),
-    h('div', { class: 'ws-form row' }, repo, comp, h('button', { class: 'btn sm', disabled: !p.airllm?.installed, onclick: async () => { if (!repo.value.trim()) return; const { err } = await runJob('/api/bigmodel/airllm/load', { model: repo.value.trim(), compression: comp.value }, lb); if (err) toast(err, true); else toast('AirLLM model ready'); } }, 'Run with AirLLM')), lb,
-    h('p', { class: 'muted' }, 'AirLLM reads every layer from disk for every token: expect seconds per token. Use it when a full-precision model doesn\'t fit any other way.'));
-  if ((p.measured || []).length) {
-    box.append(h('h4', { class: 'sub-h' }, 'Measured on this PC'));
-    for (const m of p.measured) box.append(h('div', { class: 'callout' }, `${m.model} · budget ${m.budget_mb} MB`, ...(m.results || []).map(r => h('div', {}, r.ok ? `${r.strategy}: ${r.tg} tok/s generate, ${r.pp} tok/s prompt, ${r.vram_mb} MB VRAM, load ${r.load_s}s` : `${r.strategy}: failed (${r.error})`))));
-  }
+  box.append(wsSec('AirLLM: full precision, layer by layer', h('div', {},
+    h('p', {}, 'Runs the original weights of any size on a small GPU by streaming one layer at a time from disk. Expect seconds per token: use it when a quantized GGUF won\'t do.'),
+    h('p', { class: 'muted' }, p.airllm?.installed ? `Ready (${p.airllm.version}).` : 'Its environment is being set up in the background (PyTorch, a few GB); this unlocks when it\'s done.'),
+    h('div', { class: 'ws-form row' }, repo, comp, h('button', { class: 'btn sm', disabled: !p.airllm?.installed, onclick: async () => { if (!repo.value.trim()) return; const { err } = await runJob('/api/bigmodel/airllm/load', { model: repo.value.trim(), compression: comp.value }, lb); if (err) toast(err, true); else toast('AirLLM model ready'); } }, 'Run with AirLLM')), lb),
+    { open: !!repo.value, note: p.airllm?.installed ? 'ready' : 'setting up' }));
+  if ((p.measured || []).length)
+    box.append(wsSec('Measured on this PC', p.measured.map(m => h('div', { class: 'callout' }, `${m.model} · budget ${m.budget_mb} MB`, ...(m.results || []).map(r => h('div', {}, r.ok ? `${r.strategy}: ${r.tg} tok/s generate, ${r.pp} tok/s prompt, ${r.vram_mb} MB VRAM, load ${r.load_s}s` : `${r.strategy}: failed (${r.error})`)))), { open: false }));
   return box;
 }
 
@@ -247,4 +301,14 @@ function wsPreview(card, pv) {
   if (pv.kind === 'image' && WS.open === 'create') renderWorkspace('create');
 }
 
+// the Workspaces group folds away with its arrow (remembered in this browser); the open one stays listed
+function wsFold(folded) {
+  const b = $('#wsToggle'); if (!b) return;
+  b.setAttribute('aria-expanded', String(!folded)); $('#wsList')?.classList.toggle('folded', folded);
+  try { localStorage.setItem('aero.wsFolded', folded ? '1' : ''); } catch { }
+}
+$('#wsToggle')?.addEventListener('click', () => wsFold($('#wsToggle').getAttribute('aria-expanded') === 'true'));
+try { if (localStorage.getItem('aero.wsFolded')) wsFold(true); } catch { }
+
 setTimeout(wsInit, 300);
+setTimeout(bundleStatus, 2500);

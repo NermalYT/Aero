@@ -40,7 +40,7 @@ import psutil
 
 MARKER = ".aero-update-check"
 PROTECTED = [Path(p) for p in (r"C:\Aero", r"C:\Halcyon", r"C:\VRAMpire")]
-TEST_FLAGS = ["--skip-llama", "--no-shortcuts", "--no-register", "--skip-models"]
+TEST_FLAGS = ["--skip-llama", "--no-shortcuts", "--no-register", "--skip-models", "--lean"]   # --lean: 1.2.1+
 FAKE_VERSION = "99.0.0"
 results = []
 
@@ -206,7 +206,7 @@ def base_env(port, work):
     env = {k: v for k, v in os.environ.items()
            if k not in ("AERO_HOME", "AERO_INSTALL_DIR", "AERO_INSTALL_FLAGS", "AERO_LLAMA_DIR", "AERO_UPDATE_API",
                         "AERO_UPDATE_ANY", "PYTHONPATH")}
-    env.update(AERO_PORT=str(port), AERO_LLAMA_PORT=str(port + 1), AERO_UPDATE_CHECK="0",
+    env.update(AERO_PORT=str(port), AERO_LLAMA_PORT=str(port + 1), AERO_UPDATE_CHECK="0", AERO_BUNDLE="0",
                PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_CACHE_DIR=str(work / "pip-cache"), PYTHONUTF8="1")
     system32 = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
     env["PATH"] = system32 + os.pathsep + env.get("PATH", "")      # Windows' timeout.exe, not Git Bash's

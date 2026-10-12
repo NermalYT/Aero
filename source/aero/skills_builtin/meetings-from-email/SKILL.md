@@ -1,7 +1,7 @@
 ---
 name: meetings-from-email
 description: Turn the user's meeting emails (Gmail, Outlook) for a week into a checked Word document - which account, which week, invitations, updates and cancellations, prep tasks and links.
-version: 1.1.0
+version: 1.2.0
 apps: gmail, outlook, google calendar, word
 capabilities: email.search, email.read, document.create
 backends: mcp, browser, file
@@ -20,15 +20,17 @@ Use for requests like "check my Gmail for meetings this week and make me a docum
 ## 2. Find a way to read mail, best first
 1. A connected MCP server for the mail service: tools named like `mcp_gmail_...` or `mcp_..._search_messages`.
    Prefer it: structured messages, threads and attachments, the user already authorized it.
-2. Aero's browser (`browser_open https://mail.google.com/`). It is Aero's own profile, not the user's browser: if
-   it shows a sign-in page, stop and ask the user to sign in themselves (`browser_open` with `show=true`). Never
-   type a password.
+2. Aero's browser, on screen (`browser_open` with `show=true`) so the user watches it work. It is Aero's own
+   profile, not the user's browser. When a page asks for a sign-in, Aero shows it and waits for the user to sign in
+   (or skip that account); never type a password yourself.
 3. Nothing connected and no sign-in: say so plainly; don't guess what is in the mailbox.
 
-## 3. Which account
-If more than one account is possible and the request doesn't say which, call `ask_user("Which Gmail account should
-I check?", choices=[...])` and keep doing step 1 and the document setup meanwhile. Do not open, search or read any
-mailbox until the user has picked one (`get_answer`).
+## 3. Which accounts: all of them
+"Check my email" means every account: the plan Aero gives you lists them (the user's own list in Settings, mail
+sites in their bookmarks, then Gmail and Outlook). Go through each one; for Gmail also try `/mail/u/1/`,
+`/mail/u/2/`... until an account repeats or asks for a sign-in. Only when the user names one account ("my work
+Gmail") and more than one matches, ask which with `ask_user` and keep working on the rest meanwhile. Say at the end
+which accounts were checked and which were skipped.
 
 ## 4. Read only what the task needs
 - Search the chosen account for the week's range plus words like invitation, meeting, call, agenda, calendar,
@@ -43,11 +45,12 @@ mailbox until the user has picked one (`get_answer`).
   meeting mentions without an invitation separately with no invented time, and never overwrites a file.
 - If a calendar connector is available and the user wants it, cross-check; never claim a calendar was checked when
   none is connected.
-- The tool reopens the .docx and counts the meetings; report the path, the week, the counts and anything that
-  could not be read.
+- The tool reopens the .docx and counts the meetings. The chat shows the document with a Download button, so
+  answer with the schedule itself as a table (day, time, title, where or link, account), then the counts and
+  anything that could not be read. Aero closes its browser when the request is done.
 
 ## Pitfalls
-- Several accounts: never "pick the likely one" silently.
+- Several accounts: check them all; never "pick the likely one" silently.
 - Time zones: invitations carry their own TZID; the document shows times in the user's zone.
 - Don't store email bodies in memory; remember only lasting preferences (for example the user's default account),
   and only when they say so.

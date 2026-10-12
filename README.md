@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2**](#whats-new-in-12) ·
+[**What's new in 1.2.1**](#whats-new-in-121) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -67,11 +67,11 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 | Feature | In plain words |
 | --- | --- |
 | 🧠 **Fits any PC** | Reads your GPU, RAM and CPU and recommends the best model that fits: fully on the GPU, split with RAM, or CPU only. |
-| ⚡ **Tunes for real** | Measures settings on *your* machine within a memory limit you choose, then saves the fastest. Profiles: Maximum Speed, Balanced, Maximum Context, Maximum Quality, Agent Optimized, Efficiency. |
+| ⚡ **Tunes for real** | Measures settings on *your* machine within a memory limit you choose, then saves the fastest, and tests how well the model calls tools so Aero can set it up for agent work. Profiles: Maximum Speed, Balanced, Maximum Context, Maximum Quality, Agent Optimized, Efficiency. |
 | 🧭 **Smart router** | A tiny model reads each message first and gives the main model only the tools it needs: faster and cheaper on memory. |
-| 🛠️ **An agent that does things** | Files, shell, screenshots, other apps, a browser, web search, memory, skills, MCP servers and GitHub. Risky actions ask you first. |
+| 🛠️ **An agent that does things** | Files, shell, screenshots, other apps, a browser, web search, memory, skills, MCP servers and GitHub. "Check my emails for meetings this week" just works: Aero works out the steps, does them on screen where you can watch, and hands you the result. Risky actions ask you first. |
 | 🗂️ **Workspaces** | Ten built-in work areas: Code, Mobile apps, Create (images), Diagrams, Review & test, Debug & reverse, Finance, Library, Memory+, Big models. They open by themselves when you ask for that kind of work. |
-| 🐘 **Big models on small GPUs** | Plans where every part of a huge model goes, adds a small "draft" helper model, and loads it. Full-precision models run through AirLLM. |
+| 🐘 **Big models on small GPUs** | Search any model of any size: Aero picks (or makes) the quant that fits, the tuner places every part of it between GPU and RAM, and a small "draft" helper speeds it up. Full-precision models run through AirLLM. |
 | 🤖 **Autonomy** | Choose per chat: ask me every time, collect the questions while you keep working, or full auto with a safety model that says yes or no. |
 | ♾️ **Forever-loop** | Repeat a task until you press Stop; the AI keeps a journal and gets better each round. |
 | 👥 **Agents and subagents** | Each task gets a named agent ("Photo Renamer"); big jobs are split across subagents you can chat with. |
@@ -86,8 +86,23 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
-## What's new in 1.2
+## What's new in 1.2.1
 
+- **Works in your own browser.** Aero uses your default browser (Chrome, Edge, Brave, Vivaldi), and with its
+  remote-debugging switch on it works right in the browser you're signed in to: no second profile to sign in to.
+  It opens its own tabs, never touches yours, and your browser asks before it connects.
+- **Asks become actions.** Aero recognises requests that need doing ("look at my GitHub", "check my emails and look
+  for meetings this week"), shows its plan, works on screen, pauses for you to sign in when a site needs it, and
+  makes the first move itself when a small model would rather say "I can't".
+  ([details](source/docs/V1.2_TOOL_CALLING.md))
+- **Tool calling is tuned too:** every tune ends with a tool-calling exam (Berkeley function-calling cases plus Aero
+  requests) that sets up the model for agent work.
+- **Any model, any size:** search all of Hugging Face; Aero finds a GGUF version or makes its own, and the tuner
+  places the parts that don't fit (Gemma-3-27B Q8 with 98k context on a 16 GB card).
+- **Everything comes installed:** Hindsight, AirLLM, image generation, Flutter and the code tools are set up with
+  Aero, not later.
+
+1.2.0 brought the workspaces, autonomy modes, models bigger than your GPU and the faster router:
 - **Workspaces with other projects built in.** Flutter apps with a live preview inside Aero, code checks for
   Python / JS / TS / Rust / Go, local image generation, diagrams, code review, end-to-end testing, a debugger,
   finance skills, curated libraries and memory banks. ([details](source/docs/V1.2_INTEGRATIONS.md))
@@ -179,13 +194,19 @@ router in **Settings → Router**.
 <summary><b>Choosing a model, tuning, and chatting</b></summary>
 
 1. Open **Aero** from the desktop or Start menu.
-2. Pick a model: **Your models**, **Find a model on Hugging Face** (type to search; every size is marked *fits* or
-   *doesn't fit* this PC), or **Open .gguf file…**.
+2. Pick a model: **Your models**, **Find a model on Hugging Face** (any model, any size; every quant is marked
+   *fits* or *doesn't fit* this PC and the best one is recommended), or **Open .gguf file…**. A model that only has
+   its original weights shows the GGUF versions others made of it, or **Make a GGUF here** (Aero converts and
+   quantizes it for your PC).
 3. **The first load tunes the model** (later loads skip this):
    - **VRAM limit:** the most graphics memory the model may use. Aero suggests one.
-   - **Depth:** Short (10 trials), **Medium** (25), Long (50) or Full.
+   - **Depth:** Short (10 trials), **Medium** (25), Long (50) or Full (keeps going until 8 trials in a row
+     find nothing better).
    - **Goal:** Balanced, Max context or Max speed.
    - Every trial is a real measurement. The winner is saved for this model, GPU and engine version.
+   - A model bigger than the GPU is tried two ways: whole layers in RAM, or only the feed-forward parts of some
+     layers in RAM; the faster one wins.
+   - Last, a **tool-calling exam** picks the settings Aero uses when the model calls tools.
 4. Chat away:
    - **Think** cycles *auto* → *on* → *off* (auto lets the router decide).
    - Paste long text and it becomes a chip; attach images, PDFs, Office files, code or zips with the paperclip or
@@ -237,6 +258,14 @@ unless you trust the model.
   **Stop** stops it and releases everything it held.
 - **Questions mid-task:** if one detail is missing, the model asks with a card and keeps working on the rest. Answer
   whenever you like.
+- **Watch it work:** apps and Aero's browser are on screen while the model uses them. Say "in the background" to keep
+  a request out of sight. When a site needs a sign-in, Aero shows the page and waits (*I've signed in* / *Skip this
+  site*); it never types your passwords.
+- **Your browser, your sign-ins:** Aero works in your default browser. To let it use the one you're already signed in
+  to, open `chrome://inspect/#remote-debugging` in Chrome (Edge: `edge://…`, Brave: `brave://…`) and switch on remote
+  debugging; Settings → Tools → *Which browser Aero works in* copies the address. Your browser asks you to **Allow**
+  each time Aero connects; Aero opens its own tabs there, never reads or closes yours, and lets go when it's done.
+  Without the switch, Aero uses its own profile of that browser, where you sign in to each site once.
 </details>
 
 ### Workspaces
@@ -245,8 +274,9 @@ unless you trust the model.
 <summary><b>The ten workspaces and what each one does</b></summary>
 
 Open them from **Workspaces** in the sidebar, or just ask for the work ("build me a mobile app for my bakery") and
-the right one opens. Anything a workspace needs is installed into Aero's own folder **after you say yes**, with the
-download size shown first.
+the right one opens. Everything they need comes with Aero: the installer sets it up (about 14 GB in all; add
+`--lean` to skip), and Aero finishes anything missing in the background, with a progress line under the
+workspaces. Each workspace card opens with an arrow: what it does, things to ask, its tools and what it needs.
 
 | Workspace | What you can do |
 | --- | --- |
@@ -259,7 +289,7 @@ download size shown first.
 | **Finance** | 48 professional finance workflows (DCF, LBO, comps, IC memos, reconciliations…) plus spreadsheet and slide-deck checks. Drafts for professional review; never advice or trades. |
 | **Library** | Search awesome-python, awesome-selfhosted and the-book-of-secret-knowledge. |
 | **Memory+** | Hindsight memory banks per project: store, recall and reason over what the AI learned. |
-| **Big models** | Plan and load models bigger than your GPU, and AirLLM (below). |
+| **Big models** | Find and run any model, manual offload plans, and AirLLM (below). |
 </details>
 
 ### Big models
@@ -267,8 +297,9 @@ download size shown first.
 <details>
 <summary><b>Running a model bigger than your graphics card</b></summary>
 
-**Big models** workspace → choose a GGUF → **Plan**. Aero works out where every part of the model goes for the VRAM
-you have (whole layers on the GPU, or attention on the GPU with the rest in RAM, or mixture-of-experts weights in RAM)
+Usually there is nothing to do: search the model, download the recommended quant, load it, and the tuner works out
+the placement. For manual control: **Big models** workspace → *Manual offload plan* → choose a GGUF → **Plan**.
+Aero works out where every part of the model goes for the VRAM you have (whole layers on the GPU, or attention on the GPU with the rest in RAM, or mixture-of-experts weights in RAM)
 and estimates the speed. If a small model from the same family exists, Aero adds it as a **draft** that guesses
 ahead, which the big model then checks, and offers to download it. **Load** starts the plan.
 
@@ -277,8 +308,9 @@ ahead, which the big model then checks, and offers to download it. **Load** star
 | Llama-3.3-70B Q6_K, no draft | 1.0 tokens/s |
 | Llama-3.3-70B Q6_K + Llama-3.2-1B draft | **4.85 tokens/s** |
 | Gemma-3-27B Q8_0 in 3.1 GB of VRAM + draft | 2.6 tokens/s |
+| Gemma-3-27B Q8_0, tuned to 15 GB: feed-forward split, 98k context | 2.7 tokens/s |
 
-**AirLLM** (for full-precision Hugging Face models that fit nowhere else): install it in the Big models pack, then
+**AirLLM** (for full-precision Hugging Face models that fit nowhere else): **Big models** → *AirLLM* →
 **Run with AirLLM**. It streams one layer at a time through the GPU, so it needs only a couple of GB of VRAM, but it
 is slow (Qwen2.5-32B: 30 s per token, 18 s with 8-bit layers). Use a GGUF whenever one exists.
 More numbers: [V1.2_BIG_MODELS.md](source/docs/V1.2_BIG_MODELS.md).
@@ -361,7 +393,8 @@ encrypted, with a daily budget).
 
 - **About you** (Settings → Memory): tell every model who you are and how you like answers.
 - **Preferences are learned:** say "from now on no tables" and it's remembered. Edit or delete anything in the list.
-- **Compact** summarizes a long chat into memory and continues fresh (automatic at 75 % of the context).
+- **Automatic compaction:** at 75 % of the context, Aero saves the older part of a long chat to memory and continues
+  fresh (Settings → Memory sets the point).
 - **Shared learning:** Aero records which tools worked or failed on each kind of task, and whichever model you load
   next gets those notes.
 - Passwords, keys and tokens are filtered out of memory.

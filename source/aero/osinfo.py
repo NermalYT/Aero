@@ -149,11 +149,116 @@ _FLATPAK_IDS = ["com.google.Chrome", "org.chromium.Chromium", "com.microsoft.Edg
                 "io.github.ungoogled_software.ungoogled_chromium"]
 
 
+_CHROMIUM_NAMES = ("chrome", "msedge", "brave", "vivaldi", "chromium", "thorium", "opera", "google-chrome",
+                   "microsoft-edge", "chromium-browser", "brave-browser", "Google Chrome", "Microsoft Edge",
+                   "Brave Browser", "Vivaldi", "Chromium")
+_MAC_BUNDLES = {"com.google.chrome": "Google Chrome", "com.microsoft.edgemac": "Microsoft Edge",
+                "com.brave.browser": "Brave Browser", "com.vivaldi.vivaldi": "Vivaldi", "org.chromium.chromium": "Chromium",
+                "com.google.chrome.canary": "Google Chrome Canary"}
+
+
+def _chromium(exe):
+    stem = Path(exe).stem if not IS_MAC else Path(exe).name
+    return any(stem.lower() == n.lower() for n in _CHROMIUM_NAMES)
+
+
+def default_browser():
+    """The executable of the user's default web browser when it is Chromium-based (Chrome, Edge, Brave, Vivaldi…),
+    else None (Firefox, Safari: Playwright drives Chromium only). Windows: the https UserChoice ProgId and its open
+    command; macOS: LaunchServices' https handler; Linux: xdg-settings."""
+    try:
+        if IS_WIN:
+            import winreg
+            prog = None
+            for scheme in ("https", "http"):
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\Shell\Associations"
+                                        rf"\UrlAssociations\{scheme}\UserChoice") as k:
+                        prog = winreg.QueryValueEx(k, "ProgId")[0]
+                        break
+                except OSError:
+                    continue
+            if not prog:
+                return None
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{prog}\shell\open\command") as k:
+                cmd = winreg.QueryValueEx(k, "")[0]
+            exe = cmd.split('"')[1] if cmd.startswith('"') else cmd.split(" ")[0]
+            return exe if os.path.exists(exe) and _chromium(exe) else None
+        if IS_MAC:
+            out = subprocess.run(["defaults", "read", "com.apple.LaunchServices/com.apple.launchservices.secure",
+                                  "LSHandlers"], capture_output=True, text=True, timeout=10).stdout
+            import re
+            for block in out.split("}"):
+                if re.search(r'LSHandlerURLScheme = https;', block):
+                    m = re.search(r'LSHandlerRoleAll = "?([\w.-]+)"?;', block)
+                    app = _MAC_BUNDLES.get((m.group(1) if m else "").lower())
+                    for root in ("/Applications", str(Path.home() / "Applications")):
+                        exe = os.path.join(root, f"{app}.app", "Contents", "MacOS", app) if app else ""
+                        if exe and os.path.exists(exe):
+                            return exe
+            return None
+        out = subprocess.run(["xdg-settings", "get", "default-web-browser"], capture_output=True, text=True,
+                             timeout=10).stdout.strip()
+        name = out.removesuffix(".desktop")
+        for cand in (name, name.split(".")[-1].lower(), name + "-stable"):
+            exe = shutil.which(cand)
+            if exe and not os.path.realpath(exe).startswith("/snap/") and _chromium(exe):
+                return exe
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+# where each Chromium browser keeps its user data (DevToolsActivePort appears there while remote debugging is on),
+# and the page with its remote-debugging switch
+_USER_DATA = {
+    "chrome": (r"Google\Chrome\User Data", "Google/Chrome", "google-chrome", "chrome://inspect/#remote-debugging",
+               "Chrome"),
+    "msedge": (r"Microsoft\Edge\User Data", "Microsoft Edge", "microsoft-edge", "edge://inspect/#remote-debugging",
+               "Edge"),
+    "brave": (r"BraveSoftware\Brave-Browser\User Data", "BraveSoftware/Brave-Browser", "BraveSoftware/Brave-Browser",
+              "brave://inspect/#remote-debugging", "Brave"),
+    "vivaldi": (r"Vivaldi\User Data", "Vivaldi", "vivaldi", "vivaldi://inspect/#remote-debugging", "Vivaldi"),
+    "chromium": (r"Chromium\User Data", "Chromium", "chromium", "chrome://inspect/#remote-debugging", "Chromium"),
+}
+
+
+def user_browser():
+    """The user's own default browser and its everyday profile: {exe, user_data, inspect_url, name}, or None when the
+    default isn't a Chromium browser Aero knows. Aero connects to that running browser (with the user's sign-ins)
+    when its remote-debugging switch is on (tools/browser.py)."""
+    exe = default_browser()
+    if not exe:
+        return None
+    stem = Path(exe).name.lower() if IS_MAC else Path(exe).stem.lower()
+    key = next((k for k in _USER_DATA if k in stem.replace(" ", "").replace("google", "").replace("microsoft", "")
+                .replace("browser", "") or stem.startswith(k)), None)
+    if IS_MAC and not key:
+        key = {"google chrome": "chrome", "microsoft edge": "msedge", "brave browser": "brave", "vivaldi": "vivaldi",
+               "chromium": "chromium"}.get(stem)
+    if not key and ("google-chrome" in stem or stem == "chrome"):
+        key = "chrome"
+    if not key:
+        return None
+    win, mac, linux, inspect, name = _USER_DATA[key]
+    if IS_WIN:
+        data = Path(os.environ.get("LOCALAPPDATA", "")) / win
+    elif IS_MAC:
+        data = Path.home() / "Library" / "Application Support" / mac
+    else:
+        data = Path.home() / ".config" / linux
+    return {"exe": exe, "user_data": str(data), "inspect_url": inspect, "name": name}
+
+
 def find_browser():
-    """(argv prefix, sandboxed) of a Chromium-family browser that supports --app windows, or (None, False).
-    sandboxed: a snap or flatpak build, which can't use a profile folder inside a hidden directory of $HOME."""
+    """(argv prefix, sandboxed) of a Chromium-family browser that supports --app windows, or (None, False): the
+    user's default browser first (1.2.1), then the usual ones. sandboxed: a snap or flatpak build, which can't use a
+    profile folder inside a hidden directory of $HOME."""
     if os.environ.get("AERO_BROWSER") and os.path.exists(os.environ["AERO_BROWSER"]):
         return [os.environ["AERO_BROWSER"]], False
+    d = default_browser()
+    if d:
+        return [d], False
     if IS_WIN:
         cands = [shutil.which("msedge")]
         for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):

@@ -18,6 +18,7 @@ title Aero Updater
 ::   --no-shortcuts   no Desktop or Start Menu shortcuts
 ::   --no-register    don't list Aero under Settings > Apps > Installed apps
 ::   --skip-models    don't run the model chooser
+::   --lean           a new install leaves the integrations to Aero's background setup
 ::   --headless       start Aero without a window afterwards (Aero's updater passes it when Aero ran with --no-window)
 :: AERO_INSTALL_FLAGS can hold the same options (Aero's own updater passes its environment on). AERO_PORT is the port
 :: of the Aero to stop first; for a folder other than C:\Aero that port is only asked when AERO_PORT is set.
@@ -35,6 +36,7 @@ set "SKIPLLAMA="
 set "NOSHORTCUTS="
 set "NOREGISTER="
 set "SKIPMODELS="
+set "LEAN="
 set "HEADLESS="
 for %%A in (%* %AERO_INSTALL_FLAGS%) do (
     set "OPT=%%~A"
@@ -55,6 +57,8 @@ for %%A in (%* %AERO_INSTALL_FLAGS%) do (
         set "NOREGISTER=1"
     ) else if /I "%%~A"=="--skip-models" (
         set "SKIPMODELS=1"
+    ) else if /I "%%~A"=="--lean" (
+        set "LEAN=1"
     ) else if /I "%%~A"=="--headless" (
         set "HEADLESS=1"
     ) else if "!OPT:~0,2!"=="--" (
@@ -68,6 +72,7 @@ if defined SKIPLLAMA set "FLAGS=!FLAGS! --skip-llama"
 if defined NOSHORTCUTS set "FLAGS=!FLAGS! --no-shortcuts"
 if defined NOREGISTER set "FLAGS=!FLAGS! --no-register"
 if defined SKIPMODELS set "FLAGS=!FLAGS! --skip-models"
+if defined LEAN set "FLAGS=!FLAGS! --lean"
 if defined HEADLESS set "FLAGS=!FLAGS! --headless"
 set "SETUPFLAGS="
 if defined SKIPLLAMA set "SETUPFLAGS=!SETUPFLAGS! --skip-llama"
