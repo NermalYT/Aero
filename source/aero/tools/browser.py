@@ -1,4 +1,4 @@
-"""Aero's own browser (Playwright on the installed Edge, Chrome or Chromium, with a separate profile).
+"""Aero's own browser (Playwright on your default browser when it is Chromium-based, else Chrome, Edge or Chromium, with a separate profile).
 
 How it works:
   - Background by default (Settings > Tools > Browser): no window, no focus taken, nothing on screen. It is Aero's own
@@ -18,6 +18,7 @@ import queue
 import re
 import threading
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 from . import tool
@@ -58,7 +59,9 @@ _SNAPSHOT_JS = r"""
 """
 
 _SIGNIN = re.compile(r"(^|[./])(accounts\.google\.com|login\.|signin\.|auth\.|sso\.)|/(log-?in|sign-?in|oauth|"
-                     r"authorize|sso)\b", re.I)
+                     r"authorize|sso)\b|[?&]prompt=select_account|"
+                     # signed out of Outlook.com: a Microsoft 365 page that keeps the mailbox as ?deeplink=
+                     r"microsoft\.com/[^?#]*outlook[^?#]*\?[^#]*deeplink=", re.I)
 
 
 SIGNIN_NOTE = ("[This page asks for a sign-in. Never type the user's password: ask them to sign in themselves "
@@ -80,6 +83,11 @@ class _Browser:
         self.pages = {}              # owner -> page
         self.gens = {}               # owner -> generation of its latest snapshot
         self.headed = None           # True / False: how the running context was started
+        self.kind = None             # "mine": connected to the user's own browser; "own": Aero's profile
+        self.browser = None          # the connection to the user's browser (kind "mine")
+        self.opened = set()          # tabs Aero opened in the user's browser: the only ones it reads or closes
+        self.note = ""               # said once in the next result (why the user's browser wasn't used)
+        self.mine_failed = 0.0       # when connecting to the user's browser last failed (retry after a while)
 
     def _ensure_thread(self):
         if self.thread and self.thread.is_alive():
@@ -124,8 +132,90 @@ class _Browser:
             return False
         return load_settings().get("browser_mode", "visible") != "background"
 
+    def _mine_wanted(self):
+        """Use the user's own running browser (their sign-ins) for on-screen work: the default, unless Settings say
+        Aero's own profile, strict offline is on (Aero can't police another browser's traffic), or it just failed."""
+        from .. import localonly
+        from ..config import load_settings
+        if load_settings().get("browser_session", "mine") != "mine" or localonly.strict():
+            return False
+        return time.time() - self.mine_failed > 600
+
+    def _connect_mine(self):
+        """Attach to the user's default browser over its remote-debugging switch (chrome://inspect/#remote-debugging,
+        Chrome 144+): the browser writes DevToolsActivePort into its user data while the switch is on, and asks the
+        user to Allow each connection. Nothing is copied or decrypted: Aero works in tabs of that browser, as the
+        user. Returns (context, browser), or None with self.note saying why."""
+        from .. import osinfo
+        ub = osinfo.user_browser()
+        if not ub:
+            self.mine_failed = time.time()
+            return None
+        name = ub["name"]
+        port_file = Path(ub["user_data"]) / "DevToolsActivePort"
+        try:
+            lines = port_file.read_text(encoding="utf-8").split("\n")
+            port, path = int(lines[0].strip()), (lines[1].strip() if len(lines) > 1 else "")
+        except (OSError, ValueError, IndexError):
+            self.mine_failed = time.time()
+            self.note = (f"[Using Aero's own browser profile: to work in your signed-in {name} instead, open "
+                         f"{ub['inspect_url']} in {name} and switch on remote debugging (Settings > Tools has a "
+                         "button for it).]")
+            return None
+        if self.pw is None:
+            from playwright.sync_api import sync_playwright
+            self.pw = sync_playwright().start()
+        try:
+            # waits while the user answers the browser's "Allow remote debugging?" prompt
+            b = self.pw.chromium.connect_over_cdp(f"ws://127.0.0.1:{port}{path}", timeout=120000)
+        except Exception as e:  # noqa: BLE001
+            self.mine_failed = time.time()
+            self.note = (f"[Using Aero's own browser profile: {name} didn't accept the connection "
+                         f"({str(e).splitlines()[0][:120]}). Is {name} open, with remote debugging on and the "
+                         "connection allowed?]")
+            return None
+        self.user_name = name
+        return (b.contexts[0] if b.contexts else b.new_context()), b
+
+    def _drop(self):
+        """Let go of the current browser: Aero's own profile closes; the user's browser is only disconnected
+        (after closing the tabs Aero opened in it), never closed."""
+        if self.ctx is None:
+            return
+        if self.kind == "mine":
+            for p in list(self.opened):
+                try:
+                    if not p.is_closed():
+                        p.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                self.browser.close()          # a connected browser: disconnects, the browser keeps running
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            try:
+                self.ctx.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self._reset()
+
     def _context(self, show=False, hide=False):
         want = self._want_headed(show, hide)
+        if want and self._mine_wanted():
+            if self.ctx is not None and self.kind == "mine":
+                return self.ctx
+            got = self._connect_mine()
+            if got is not None:
+                ctx, b = got
+                self._drop()                      # Aero's own window, if one was open
+                self.ctx, self.browser, self.kind, self.headed = ctx, b, "mine", True
+                b.on("disconnected", lambda *_: self._reset())
+                return ctx
+        elif self.ctx is not None and self.kind == "mine" and not want:
+            self._drop()                          # a background request: Aero's own (hidden) profile
+        if self.ctx is not None and self.kind == "mine":
+            return self.ctx
         if self.ctx is not None and (self.headed == want or (self.headed and not show)):
             return self.ctx
         if self.ctx is not None:                     # switch background <-> visible: same profile, new process
@@ -142,7 +232,8 @@ class _Browser:
         exe = os.environ.get("AERO_BROWSER") or osinfo.browser_executable()
         last = None
         args = ["--start-maximized"] if want else ["--mute-audio"]
-        for kw in ([{"executable_path": exe}] if exe else []) + [{"channel": "msedge"}, {"channel": "chrome"}, {}]:
+        # exe: the user's default browser when it is Chromium-based (osinfo.default_browser), with Aero's own profile
+        for kw in ([{"executable_path": exe}] if exe else []) + [{"channel": "chrome"}, {"channel": "msedge"}, {}]:
             try:
                 self.ctx = self.pw.chromium.launch_persistent_context(prof, headless=not want, viewport=None if want
                                                                       else {"width": 1366, "height": 900},
@@ -153,7 +244,7 @@ class _Browser:
         if self.ctx is None:
             raise RuntimeError("Could not start a browser. Install Chrome, Edge, Chromium or Brave, or run "
                                f"`python -m playwright install chromium` in Aero's environment. ({last})")
-        self.headed = want
+        self.headed, self.kind = want, "own"
         self.ctx.on("close", lambda *_: self._reset())
         self.ctx.route("**/*", _offline_route)
         return self.ctx
@@ -162,15 +253,24 @@ class _Browser:
         self.ctx = None
         self.pages = {}
         self.gens = {}
+        self.browser, self.kind = None, None
+        self.opened = set()
+
+    def _visible_pages(self):
+        """The tabs Aero may see: all of its own profile's, but only the ones it opened in the user's browser."""
+        live = [x for x in self.ctx.pages if not x.is_closed()]
+        return [x for x in live if x in self.opened] if self.kind == "mine" else live
 
     def page(self, owner, show=False, new_tab=False, hide=False):
         ctx = self._context(show, hide)
         p = self.pages.get(owner)
         if p is None or p.is_closed() or new_tab:
             blank = [x for x in ctx.pages if not x.is_closed() and x.url in ("about:blank", "") and
-                     x not in self.pages.values()]
+                     x not in self.pages.values()] if self.kind != "mine" else []
             p = blank[0] if blank and not new_tab else ctx.new_page()
             self.pages[owner] = p
+            if self.kind == "mine":
+                self.opened.add(p)
         if show:
             try:
                 p.bring_to_front()
@@ -179,9 +279,9 @@ class _Browser:
         return p
 
     def tabs(self, owner):
-        ctx = self._context()
+        self._context()
         mine = self.pages.get(owner)
-        return [(i, x, x is mine) for i, x in enumerate(ctx.pages) if not x.is_closed()]
+        return [(i, x, x is mine) for i, x in enumerate(self._visible_pages())]
 
     def snapshot(self, owner, max_text=6000):
         p = self.page(owner)
@@ -191,7 +291,7 @@ class _Browser:
             pass
         d = p.evaluate(_SNAPSHOT_JS, max_text)
         self.gens[owner] = d["gen"]
-        tabs = len([x for x in self.ctx.pages if not x.is_closed()])
+        tabs = len(self._visible_pages())
         cut = d["total"] > len(d["text"])
         txt = (f"URL: {d['url']}\nTitle: {d['title']}\nTabs open: {tabs}\n\nInteractive elements:\n{d['items'] or '(none)'}"
                f"\n\nPage text:\n{d['text']}")
@@ -224,6 +324,7 @@ class _Browser:
                 p.close()
             except Exception:
                 pass
+        self.opened.discard(p)
 
 
 def _offline_route(route):
@@ -267,11 +368,7 @@ def finish_owner(owner):
     def go():
         B.close_owner(owner)
         if B.ctx is not None and not B.pages:
-            try:
-                B.ctx.close()
-            except Exception:  # noqa: BLE001
-                pass
-            B._reset()
+            B._drop()                     # Aero's own window closes; the user's browser is only let go
         return True
     B.q.put((go, {}, threading.Event()))
     return True
@@ -306,9 +403,9 @@ def _visible(ctx):
     v = getattr(ctx, "visible", None)
     return v
 
-@tool("browser_open", "Open a URL in Aero's own browser, on screen so the user can watch (unless they asked for the "
-      "background). It is a separate profile where the user signs in once per site; on a sign-in page Aero asks them "
-      "to sign in and waits. Returns the page's interactive elements as [number] entries plus the start of its "
+@tool("browser_open", "Open a URL in the user's own browser (their default browser, already signed in to their "
+      "accounts) on screen so they can watch; if that isn't connected, in Aero's own browser profile. A request for "
+      "the background uses Aero's hidden profile. On a sign-in page Aero asks the user to sign in and waits. Returns the page's interactive elements as [number] entries plus the start of its "
       "text.", "browser",
       {"url": {"type": "string"}, "new_tab": {"type": "boolean"},
        "show": {"type": "boolean", "description": "Open a visible window (for signing in or when the user wants to "
@@ -331,8 +428,10 @@ def browser_open(ctx, url, new_tab=False, show=False):
             p.wait_for_load_state("networkidle", timeout=4000)
         except Exception:
             pass
-        return B.snapshot(owner)
-    return _go(ctx, go)
+        note, B.note = B.note, ""
+        where = f"[In your own {B.user_name} (signed in as you).]\n" if B.kind == "mine" else ""
+        return where + B.snapshot(owner) + (("\n" + note) if note else "")
+    return _go(ctx, go, timeout=240)
 
 
 @tool("browser_snapshot", "Re-read the current page: interactive elements and visible text.", "browser",
@@ -355,6 +454,8 @@ def browser_click(ctx, ref):
         p.wait_for_timeout(700)
         if len(B.ctx.pages) > before_n:                  # opened a tab: that tab becomes this agent's
             B.pages[owner] = B.ctx.pages[-1]
+            if B.kind == "mine":
+                B.opened.add(B.pages[owner])
         snap = B.snapshot(owner)
         moved = B.pages[owner].url != before_url
         env = action_results.make("browser_isolated", verified=True if moved else None,

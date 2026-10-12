@@ -185,8 +185,9 @@ class Advisor:
         args = build_args(path, cfg, ADVISOR_PORT) + ["--jinja"]
         if supports("--reasoning"):
             args += ["--reasoning", "off"]
-        if supports("--reasoning-format"):
-            args += ["--reasoning-format", "none"]
+        # no "--reasoning-format none": with it, b11501 runs the template's empty <think></think> through the JSON
+        # grammar and rejects every request ("Unexpected empty grammar stack after accepting piece: <think>"), so the
+        # advisor failed three times and every tune fell back to the built-in policy (measured, Qwen3-1.7B)
         if supports("--reasoning-budget"):
             args += ["--reasoning-budget", "0"]     # decisions only: no thinking tokens
         env = None

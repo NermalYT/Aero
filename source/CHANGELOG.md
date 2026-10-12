@@ -1,13 +1,10 @@
 # Changelog
 
-## Aero 1.2.0 (2026-10-12)
+## Aero 1.2.1 (2026-10-12)
 
-Aero becomes an all-in-one workstation: other projects' functions built into Aero in workspaces, autonomy modes for
-chats and forever-loops, models bigger than your GPU, a faster router, and an installer that can be tested anywhere.
-Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MODELS.md`,
-`docs/V1.2_PERFORMANCE_REPORT.md`, `docs/V1.2_TEST_MATRIX.md`, `docs/V1.2_TOOL_CALLING.md`.
-
-### Quality of life (1.2.0 re-release)
+A quality-of-life release for 1.2: requests that need doing get done (on screen, in your own signed-in browser),
+tool calling is tuned for each model, any model on Hugging Face loads at the size that fits, and every integration
+comes installed. Details: `docs/V1.2_TOOL_CALLING.md`.
 
 - **Requests that need an action get one.** A request like "look at my GitHub notifications" or "check my emails and
   look for any meetings this week" is recognised without a model call (`intents.py`): Aero shows the plan above the
@@ -48,12 +45,41 @@ Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MO
 - **Tidier UI:** no Compact button (compaction is automatic at 75 %); themed text fields; workspace cards and the Big
   models panel open with arrows (what it does, things to ask, its tools, what it needs); the Workspaces group in the
   sidebar folds away; a plan chip shows what Aero understood; the tuning screen shows the tool-calling exam.
+- **Your own browser, signed in already.** Aero's browser tools now work in your default browser (Chrome, Edge,
+  Brave or Vivaldi, read from the system's default-browser setting on Windows, macOS and Linux) instead of always
+  Edge. With the browser's remote-debugging switch on (`chrome://inspect/#remote-debugging`, Chrome 144 and later;
+  Settings → Tools copies the address), Aero connects to the browser you already use, with your sign-ins: the browser
+  asks you to Allow the connection, Aero works in tabs it opens itself, never lists or reads your other tabs, closes
+  only its own tabs when done and never closes your browser. Nothing is copied or decrypted. Without the switch,
+  with strict offline on, or for a request that says "in the background", Aero uses its own profile as before and
+  says how to switch.
+- **Sign-in pauses:** answering the card no longer crashes the turn (the answer is the choice's text), a skipped site
+  isn't asked again for every page of it, a signed-out Outlook.com (which redirects to a Microsoft 365 page) counts
+  as a sign-in page, and the card reads "Aero asks" instead of an internal id. The banner says "on screen" when the
+  browser is visible.
+- **The tuning advisor works again.** Its server ran with `--reasoning-format none`, which llama.cpp b11501 rejects
+  together with a JSON grammar ("Unexpected empty grammar stack after accepting piece: <think>"), so every tune had
+  fallen back to the built-in policy after three errors. Measured after the fix: the advisor chose 6 of 10 trials.
+- **The window never runs an older UI against a newer Aero:** the page names its scripts and styles with the version
+  (`app.js?v=1.2.1`) and the UI files are revalidated on every load.
+- **Gemma's tool calls** (`print(default_api.tool(...))` in a `tool_code` or `python` block) run instead of
+  showing as code; the tool exam caps answers at 256 tokens and shows its progress.
+- **Sturdier setup:** pip installs into Aero's own environments retry (a 3 GB PyTorch download dropped once in
+  testing), llama.cpp's converter is fetched file by file and checked against its git hashes, and the importance
+  matrix learns from real text (Aero's docs and source) instead of word lists.
+
+## Aero 1.2.0 (2026-10-12)
+
+Aero becomes an all-in-one workstation: other projects' functions built into Aero in workspaces, autonomy modes for
+chats and forever-loops, models bigger than your GPU, a faster router, and an installer that can be tested anywhere.
+Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MODELS.md`,
+`docs/V1.2_PERFORMANCE_REPORT.md`, `docs/V1.2_TEST_MATRIX.md`.
 
 ### Workspaces and integrations
 
 - **Workspaces** in the sidebar: Code, Mobile apps, Create, Diagrams, Review & test, Debug & reverse, Finance, Library,
-  Memory+, Big models. Each is a panel beside the chat with what is installed (everything is set up with Aero; see
-  Quality of life above), the pack's live state and its results. A request that needs one opens it by itself: patterns per pack,
+  Memory+, Big models. Each is a panel beside the chat with what is installed (Install buttons that ask first and show
+  the size), the pack's live state and its results. A request that needs one opens it by itself: patterns per pack,
   no model call, a few milliseconds (`integrations.context`); the pack's tools are added for that turn and its
   skills named, while the router's own catalog stays at 53 tools.
 - **15 integration packs** (`aero/integrations/`), each with its source and licence in the workspace and in
@@ -84,9 +110,8 @@ Details: `docs/V1.2_INTEGRATIONS.md`, `docs/V1.2_AUTONOMY.md`, `docs/V1.2_BIG_MO
   - *Library*: awesome-python and the-book-of-secret-knowledge bundled as data, awesome-selfhosted downloaded on
     request; `library_search` with tags (e.g. "Communication - IRC"); risky one-liners tagged and never run.
   - *Memory+*: Hindsight in its own environment on 127.0.0.1 with Aero's model; Aero starts its PostgreSQL itself,
-    loopback only, with the data in Aero's folder; reflect's forced tool calls are answered by a loopback adapter
-    with a grammar-forced call (`integrations/llm_adapter.py`), because llama-server reads a named `tool_choice` as
-    "auto" and doesn't enforce "required".
+    loopback only, with the data in Aero's folder; reflect's forced tool calls go through a loopback adapter
+    (`integrations/llm_adapter.py`), because llama-server reads a named `tool_choice` as "auto".
   - *Big models*: see below.
 - `integration_install` lets the model install what a pack needs (permission *setup*, ask by default).
 - Processes a pack started (Hindsight and its database, a Flutter preview, a debugging session) stop when Aero quits.

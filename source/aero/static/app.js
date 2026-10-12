@@ -1862,7 +1862,7 @@ function stopControl() {
 function questionCard(m, chat) {
   const q = m.question || {};
   const answered = q.status === 'answered';
-  const who = q.owner ? `${q.owner} (subagent)` : (S.st?.engine.model?.name || 'The local model');
+  const who = q.context === 'sign-in' ? 'Aero' : q.owner ? `${q.owner} (subagent)` : (S.st?.engine.model?.name || 'The local model');
   const wait = h('span', { class: 'qwait muted' }, answered ? '' : ' · the rest of the task keeps going');
   const card = h('div', { class: 'qcard' + (answered ? ' done' : ''), 'data-qid': q.id },
     h('div', { class: 'qh' }, h('span', { class: 'ico', html: I.ask }), h('b', {}, `${who} asks`), wait),
@@ -2675,7 +2675,8 @@ async function openSettings(start = 'General') {
         toggle('strict_background', s.strict_background, 'Strict Background Only: never use my real mouse and keyboard, not even when I allow it'),
         h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 12px' }, 'Background control (UI Automation, window messages, Aero\'s browser) keeps working. Anything that would need your input stops and says so instead.'),
         field('Aero\'s browser', select('browser_mode', s.browser_mode || 'visible', [['visible', 'On screen: you watch every page it opens'], ['background', 'In the background: no window, nothing on screen']]),
-          'Either way it is Aero\'s own browser profile, not your browser. Saying "in the background" in a request keeps that one out of sight. When a page needs your sign-in, Aero shows it and waits for you.'),
+          'On screen it works in your own browser when that is connected (below), else in Aero\'s own profile. Saying "in the background" in a request uses Aero\'s hidden profile for that one. When a page needs your sign-in, Aero shows it and waits for you.'),
+        browserSessionField(s),
         toggle('show_work', s.show_work !== false, 'Show the apps Aero works in: bring each window to the front while it is used (unless the request says background)'),
         field('Mail accounts to check', h('textarea', { 'data-k': 'mail_accounts', 'data-lines': '1', rows: 3, placeholder: 'one inbox address per line, e.g. https://mail.google.com/mail/u/1/' }, (s.mail_accounts || []).join('\n')),
           'Checked first for "check my email" requests. Gmail and Outlook are always included.'),
@@ -2756,6 +2757,23 @@ async function openSettings(start = 'General') {
   const body = h('div', {}, h('div', { class: 'set-layout' }, nav, pane), h('div', { style: 'display:flex;justify-content:flex-end;gap:8px;margin-top:14px;border-top:1px solid var(--line);padding-top:14px' }, h('button', { class: 'btn ghost', onclick: () => { closeModal(); applyTheme(); } }, 'Cancel'), saveBtn));
   modal('Settings', body, true);
   show(SECTIONS.includes(start) ? start : 'General');
+}
+
+/** Settings > Tools: work in the user's own signed-in browser (its remote-debugging switch), or Aero's own profile. */
+function browserSessionField(s) {
+  const status = h('small', { class: 'muted' }, 'Checking your browser…');
+  const box = h('div', { class: 'field' }, h('label', {}, 'Which browser Aero works in'),
+    select('browser_session', s.browser_session || 'mine', [['mine', 'Your own browser, already signed in to your accounts'], ['aero', 'Aero\'s own browser profile (you sign in to each site there once)']]),
+    status);
+  api('/api/browser/session').then(st => {
+    if (!st.supported) { status.textContent = 'Your default browser isn\'t Chrome, Edge, Brave or Vivaldi, so Aero uses its own profile.'; return; }
+    status.innerHTML = '';
+    status.append(st.connected ? `Connected to your ${st.name}. ` : st.switch_on ? `${st.name} is ready: it asks you to Allow when Aero connects. ` :
+      `To let Aero work in your signed-in ${st.name}, open `, st.connected || st.switch_on ? '' : h('code', {}, st.inspect_url),
+      st.connected || st.switch_on ? '' : ` in ${st.name} and switch on remote debugging. ${st.name} asks you to Allow each time Aero connects; Aero opens its own tabs there and closes only those. `,
+      st.connected || st.switch_on ? '' : h('button', { class: 'btn ghost sm', onclick: async e => { try { await navigator.clipboard.writeText(st.inspect_url); e.target.textContent = 'Copied: paste it in the address bar'; } catch { e.target.textContent = st.inspect_url; } } }, 'Copy the address'));
+  }).catch(() => { status.textContent = ''; });
+  return box;
 }
 
 function privacySection(s) {

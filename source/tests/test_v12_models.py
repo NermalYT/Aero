@@ -136,6 +136,24 @@ class MadeFiles(unittest.TestCase):
         self.assertEqual(c.get("/api/made/../../etc").status_code, 404)
         self.assertEqual(c.get("/api/made/" + "f" * 16).status_code, 404)
 
+    def test_ui_files_revalidate(self):
+        """After an update the window must not run an older app.js against the new server."""
+        from fastapi.testclient import TestClient
+
+        from aero import server
+        c = TestClient(server.app)
+        r = c.get("/app.js")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["cache-control"], "no-cache")
+        for path in ("/", "/index.html"):
+            page = c.get(path)
+            self.assertEqual(page.headers["cache-control"], "no-cache")
+            v = server.VERSION
+            for asset in ("app.js", "workspaces.js", "app.css", "vendor/marked.js"):
+                self.assertIn(f'"{asset}?v={v}"', page.text, (path, asset))   # a new version = new URLs
+            self.assertIn('href="#cloud"', page.text)                            # in-page refs untouched
+        self.assertEqual(c.get("/app.js?v=x").status_code, 200)
+
 
 class Bundle(unittest.TestCase):
     def setUp(self):
@@ -189,6 +207,91 @@ class Bundle(unittest.TestCase):
             self.installed.clear()
             self.assertEqual(bundle.run(background=True), (0, 0))            # left for the user (or Retry)
             self.assertEqual(bundle.run(), (0, 1))                           # the installer's run still tries
+
+
+class DefaultBrowser(unittest.TestCase):
+    """Aero's browser and its window use the user's default browser when it is Chromium-based (owner: "mine is
+    literally set to chrome", and Aero opened Edge)."""
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows registry")
+    def test_windows_user_choice(self):
+        import winreg
+
+        from aero import osinfo
+        d = Path(tempfile.mkdtemp())
+        chrome = d / "chrome.exe"
+        chrome.write_bytes(b"")
+        firefox = d / "firefox.exe"
+        firefox.write_bytes(b"")
+        choice = r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice"
+        vals = {}
+
+        class K:
+            def __init__(self, path):
+                self.path = path
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        def open_key(root, path):
+            if path not in vals:
+                raise OSError(path)
+            return K(path)
+
+        def query(k, name):
+            return vals[k.path][name], 1
+        with mock.patch.object(winreg, "OpenKey", open_key), mock.patch.object(winreg, "QueryValueEx", query):
+            vals.update({choice: {"ProgId": "ChromeHTML"},
+                         r"ChromeHTML\shell\open\command": {"": f'"{chrome}" --single-argument %1'}})
+            self.assertEqual(osinfo.default_browser(), str(chrome))
+            self.assertEqual(osinfo.find_browser(), ([str(chrome)], False))
+            vals.update({choice: {"ProgId": "FirefoxURL"},
+                         r"FirefoxURL\shell\open\command": {"": f'"{firefox}" -osint -url "%1"'}})
+            self.assertIsNone(osinfo.default_browser())                    # not Chromium: the usual search instead
+
+    def test_own_signed_in_browser_or_a_clear_fallback(self):
+        """Aero works in the user's running browser through its remote-debugging switch; without the switch, or when
+        the user declines, it says why and uses its own profile. (Connect/close against a real Chrome: live test.)"""
+        from aero import osinfo
+        from aero.tools import browser
+        d = Path(tempfile.mkdtemp())
+        fake = {"exe": "chrome.exe", "user_data": str(d), "inspect_url": "chrome://inspect/#remote-debugging",
+                "name": "Chrome"}
+        b = browser._Browser()
+        with mock.patch.object(osinfo, "user_browser", lambda: fake):
+            self.assertIsNone(b._connect_mine())                                   # switch off: no port file
+            self.assertIn("chrome://inspect/#remote-debugging", b.note)
+            (d / "DevToolsActivePort").write_text("9\n/devtools/browser/x", encoding="utf-8")
+            b.pw = mock.Mock()
+            b.pw.chromium.connect_over_cdp.side_effect = RuntimeError("user clicked Deny")
+            self.assertIsNone(b._connect_mine())
+            self.assertIn("didn't accept the connection", b.note)
+            b.pw.chromium.connect_over_cdp.assert_called_with("ws://127.0.0.1:9/devtools/browser/x", timeout=120000)
+            b.pw.chromium.connect_over_cdp.side_effect = None
+            ctx = mock.Mock()
+            b.pw.chromium.connect_over_cdp.return_value = mock.Mock(contexts=[ctx])
+            self.assertIs(b._connect_mine()[0], ctx)
+        b.mine_failed = 0
+        with mock.patch("aero.config.load_settings", lambda: {"browser_session": "aero"}):
+            self.assertFalse(b._mine_wanted())
+        with mock.patch("aero.config.load_settings", lambda: {}), \
+                mock.patch("aero.localonly.strict", lambda: True):
+            self.assertFalse(b._mine_wanted())                                    # can't police another browser
+
+    def test_signin_pages(self):
+        from aero.tools import browser
+        for u in ("https://accounts.google.com/v3/signin/identifier", "https://login.microsoftonline.com/common/oauth2",
+                  "https://github.com/login?return_to=%2Fnotifications",
+                  "https://outlook.live.com/mail/?prompt=select_account&deeplink=mail%2F0%2F",
+                  "https://www.microsoft.com/en-us/microsoft-365/outlook/email-and-calendar-software-microsoft-outlook"
+                  "?deeplink=%2Fmail%2F0%2F&sdf=0"):
+            self.assertTrue(browser._SIGNIN.search(u), u)
+        for u in ("https://github.com/notifications", "https://mail.google.com/mail/u/0/#inbox",
+                  "https://www.microsoft.com/en-us/microsoft-365/outlook"):
+            self.assertFalse(browser._SIGNIN.search(u), u)
 
 
 if __name__ == "__main__":

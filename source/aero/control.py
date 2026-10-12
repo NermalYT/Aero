@@ -94,8 +94,8 @@ def phrase(by, what, mode):
     by = by or "Aero"
     if mode == "FOREGROUND_CONSENT_REQUIRED":
         return f"{by} is controlling {what} with your mouse and keyboard"
-    if mode == "BROWSER_ISOLATED":
-        return f"{by} is using {what} in the background"
+    if mode == "BROWSER_ISOLATED":                # its own window, never your mouse or keyboard
+        return f"{by} is using {what} " + ("on screen" if _browser_shown() else "in the background")
     if mode == "LAUNCH":
         return f"{by} is opening {what}"
     if mode in ("ACCESSIBILITY_BACKGROUND", "WINDOW_MESSAGE_BACKGROUND"):
@@ -103,15 +103,23 @@ def phrase(by, what, mode):
     return f"{by} is controlling {what}"
 
 
+def _browser_shown():
+    """Aero's browser window is (or is about to be) on screen: the running one's state, else the setting."""
+    try:
+        from .tools.browser import B
+        if B.headed is not None:
+            return bool(B.headed)
+        from .config import load_settings
+        return load_settings().get("browser_mode", "visible") != "background"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def on_screen(name, mode):
     """Whether the on-screen banner makes sense: over an app window being driven, or across the screen while the
     real input is in use. Aero's background browser has no window to put it on."""
     if mode == "BROWSER_ISOLATED":
-        try:
-            from .tools.browser import B
-            return bool(B.headed)
-        except Exception:
-            return False
+        return _browser_shown()
     return mode != "LAUNCH"
 
 

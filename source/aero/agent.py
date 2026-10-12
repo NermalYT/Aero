@@ -903,15 +903,29 @@ async def signin_pause(turn, res, lane="local"):
     except Exception:  # noqa: BLE001
         url = browser.page_url(owner)
     site = (urlparse(url).hostname or "this site").removeprefix("www.")
+    skipped = root.__dict__.setdefault("skipped_signins", set())
+    if site in skipped:                     # asked once already this request: don't ask again for every page
+        res["text"] = (f"The user already skipped signing in to {site}. Don't open {site} again in this request; "
+                       "go on without it and say so in your answer.")
+        return
+    hint = ""
+    try:
+        from . import osinfo
+        ub = osinfo.user_browser()
+        if ub and browser.B.kind != "mine":       # the sign-ins the user already has could be used instead
+            hint = (f" (Already signed in to {site} in your {ub['name']}? Let Aero work there instead: "
+                    "Settings > Tools > Which browser Aero works in.)")
+    except Exception:  # noqa: BLE001
+        pass
     q, created = clarifications.ask(root.chat_id, f"Please sign in to {site} in the Aero browser window that just "
-                                    "opened, then press \"I've signed in\". Aero never types your password.",
+                                    "opened, then press \"I've signed in\". Aero never types your password." + hint,
                                     ["I've signed in", "Skip this site"], kind="choice", allow_free=False,
                                     owner=owner, context="sign-in")
     if created:
         yield {"t": "question", "question": clarifications.public(q), "lane": lane}
     yield {"t": "waiting", "question_id": q["id"]}
     ans = await clarifications.wait(q["id"], turn.cancel, timeout=1800)
-    value = str((ans or {}).get("value") or "")
+    value = str((ans.get("value") if isinstance(ans, dict) else ans) or "")      # clarifications store the text
     if value.startswith("I've signed in"):
         try:
             snap = await asyncio.to_thread(browser.resnapshot, owner)
@@ -921,6 +935,7 @@ async def signin_pause(turn, res, lane="local"):
         if SIGNIN_MARK in snap:
             res["text"] += "\nIt still shows a sign-in page: tell the user, then go on without this site."
     elif value:
+        skipped.add(site)
         res["text"] = f"The user skipped signing in to {site}: go on without it (say so in your answer)."
     else:
         res["text"] += "\nNobody signed in (no answer): go on without this site and say so."

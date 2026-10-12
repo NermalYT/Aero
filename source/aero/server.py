@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import (advisor, agent, agents, app_registry, attachments, autonomy, bench, claude_code, clarifications, cloud, experience, fit,
@@ -41,7 +41,14 @@ async def _same_origin_only(request: Request, call_next):
         origin = (request.headers.get("origin") or "").rstrip("/").lower()
         if (origin and origin not in {f"http://{h}" for h in _OWN_HOSTS}) or                 request.headers.get("sec-fetch-site") == "cross-site":
             return JSONResponse({"detail": "Cross-site request refused"}, status_code=403)
-    return await call_next(request)
+    resp = await call_next(request)
+    if not request.url.path.startswith("/api/") and "cache-control" not in resp.headers:
+        # the UI's own files: revalidate every load (a 304 when unchanged), so the window never runs an older
+        # app.js against an updated server (seen in testing: no header meant heuristic caching)
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 class _Engine:
     """The model server Aero talks to on its model port: llama-server, or AirLLM's layer-streaming server for a
     full-precision checkpoint (integrations/models.py). Same interface either way; use() switches."""
@@ -1794,6 +1801,18 @@ def integrations_overview():
     return {"workspaces": integrations.overview()}
 
 
+@app.get("/api/browser/session")
+def browser_session():
+    """Settings > Tools: can Aero work in the user's own signed-in browser?"""
+    from .tools import browser
+    ub = osinfo.user_browser()
+    if not ub:
+        return {"supported": False, "default": osinfo.default_browser()}
+    on = (Path(ub["user_data"]) / "DevToolsActivePort").exists()
+    return {"supported": True, "name": ub["name"], "inspect_url": ub["inspect_url"], "switch_on": on,
+            "connected": browser.B.kind == "mine", "setting": load_settings().get("browser_session", "mine")}
+
+
 @app.get("/api/integrations/bundle")
 def integrations_bundle():
     from .integrations import bundle
@@ -2278,6 +2297,19 @@ async def _startup():
     if load_settings().get("bundle_integrations", True):        # every integration ships with Aero (bundle.py)
         from .integrations import bundle
         bundle.start_background(busy=lambda: _job["busy"])
+
+
+_ASSET_RE = re.compile(r'((?:src|href)=")((?:vendor/)?[\w.-]+\.(?:js|css))"')
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+def ui_page():
+    """index.html with the version on its scripts and styles (app.js?v=1.2.1): after an update the window loads the
+    new files even if it still holds older ones in its cache (a reload only revalidates the page itself)."""
+    html = (PKG_DIR / "static" / "index.html").read_text(encoding="utf-8")
+    html = _ASSET_RE.sub(lambda m: f'{m.group(1)}{m.group(2)}?v={VERSION}"', html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/", StaticFiles(directory=str(PKG_DIR / "static"), html=True), name="static")

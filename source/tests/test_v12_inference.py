@@ -141,6 +141,37 @@ class ForcedFirstAction(unittest.TestCase):
         done = [e["message"] for e in ev if e["t"] == "assistant_done"]
         self.assertEqual(done[0]["forced"], "intent")
 
+    def test_signin_pause_skip(self):
+        """A sign-in page: Aero shows it and asks; the answer comes back as the choice's text (live 1.2.1 test
+        crashed on that with AttributeError)."""
+        from aero import agent, clarifications
+        from aero.tools import browser
+
+        def run(name, args, ctx):
+            self.ran.append((name, args, getattr(ctx, "visible", None)))
+            return {"text": "URL: https://github.com/login\nTitle: Sign in to GitHub\n" + browser.SIGNIN_NOTE}
+        seen = {}
+
+        async def wait(qid, cancel=None, timeout=0):
+            seen["q"] = clarifications.get(qid)
+            seen["asked"] = seen.get("asked", 0) + 1
+            return "Skip this site"
+        model = Model([("I don't have access to your GitHub.", []),
+                       ("", [("browser_open", {"url": "https://github.com/pulls"})]),     # same site again
+                       ("I couldn't check GitHub: you skipped signing in.", [])])
+        with mock.patch.object(tools, "run", run), mock.patch.object(clarifications, "wait", wait), \
+                mock.patch.object(browser, "show_for_signin", lambda owner: "https://github.com/login"), \
+                mock.patch.object(forced_call, "ask", lambda *a, **k: ("browser_open", {"url": "https://github.com/notifications"})):
+            ev = run_turn(model, settings(), text="check my github notifications", chat_id="v12-signin")
+        self.assertEqual(seen["q"]["context"], "sign-in")
+        self.assertIn("github.com", seen["q"]["text"])
+        self.assertFalse([e for e in ev if e["t"] == "error"])
+        r = results(ev, "browser_open")
+        self.assertIn("skipped signing in to github.com", r[0]["content"])
+        self.assertIn("already skipped", r[1]["content"])
+        self.assertEqual(seen["asked"], 1)                                  # one card per site, not per page
+        self.assertTrue(agent.SIGNIN_MARK)
+
     def test_no_forcing_for_plain_chat(self):
         model = Model([("Hello! I'm doing well.", [])])
         with mock.patch.object(forced_call, "ask", side_effect=AssertionError("must not force")):

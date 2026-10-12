@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2**](#whats-new-in-12) ·
+[**What's new in 1.2.1**](#whats-new-in-121) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -86,8 +86,11 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
-## What's new in 1.2
+## What's new in 1.2.1
 
+- **Works in your own browser.** Aero uses your default browser (Chrome, Edge, Brave, Vivaldi), and with its
+  remote-debugging switch on it works right in the browser you're signed in to: no second profile to sign in to.
+  It opens its own tabs, never touches yours, and your browser asks before it connects.
 - **Asks become actions.** Aero recognises requests that need doing ("look at my GitHub", "check my emails and look
   for meetings this week"), shows its plan, works on screen, pauses for you to sign in when a site needs it, and
   makes the first move itself when a small model would rather say "I can't".
@@ -98,6 +101,8 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
   places the parts that don't fit (Gemma-3-27B Q8 with 98k context on a 16 GB card).
 - **Everything comes installed:** Hindsight, AirLLM, image generation, Flutter and the code tools are set up with
   Aero, not later.
+
+1.2.0 brought the workspaces, autonomy modes, models bigger than your GPU and the faster router:
 - **Workspaces with other projects built in.** Flutter apps with a live preview inside Aero, code checks for
   Python / JS / TS / Rust / Go, local image generation, diagrams, code review, end-to-end testing, a debugger,
   finance skills, curated libraries and memory banks. ([details](source/docs/V1.2_INTEGRATIONS.md))
@@ -255,7 +260,12 @@ unless you trust the model.
   whenever you like.
 - **Watch it work:** apps and Aero's browser are on screen while the model uses them. Say "in the background" to keep
   a request out of sight. When a site needs a sign-in, Aero shows the page and waits (*I've signed in* / *Skip this
-  site*); it never types your passwords. Aero's browser is its own profile, so you sign in to each site once.
+  site*); it never types your passwords.
+- **Your browser, your sign-ins:** Aero works in your default browser. To let it use the one you're already signed in
+  to, open `chrome://inspect/#remote-debugging` in Chrome (Edge: `edge://…`, Brave: `brave://…`) and switch on remote
+  debugging; Settings → Tools → *Which browser Aero works in* copies the address. Your browser asks you to **Allow**
+  each time Aero connects; Aero opens its own tabs there, never reads or closes yours, and lets go when it's done.
+  Without the switch, Aero uses its own profile of that browser, where you sign in to each site once.
 </details>
 
 ### Workspaces

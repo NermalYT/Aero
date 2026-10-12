@@ -297,7 +297,7 @@ clicks it, and moves to the bottom of the window when the model needs the spot i
 box stops that chat's task; Stop on the header and on the banner stops every running task. Stopping denies the
 pending approvals of what it stops (and only those), releases the windows and input it held, closes its browser tab,
 and the chat lists what finished and what didn't. In 1.1 the text says how the model works: "… in the background", "… with your mouse and keyboard" (only after
-you allowed it), "… is using Aero's browser in the background" (no banner over your screen), "… is opening …".
+you allowed it), "… is using Aero's browser on screen" (1.2.1; "in the background" for a hidden one), "… is opening …".
 
 ### Apps by name
 
@@ -510,9 +510,12 @@ and tool calls, review verdicts, ChatGPT and Claude usage and spending today, an
   permission of *auto* counts as standing permission). Aero waits until you stop typing, never lets two agents use
   them at once, and puts your window back afterwards. **Strict Background Only** in Settings → Tools refuses them
   completely. Slam the real mouse into a screen corner to abort pyautogui.
-- **The browser** is Aero's own profile (`C:\Aero\data\browser-profile`), in the background by default (Settings →
-  Tools → Aero's browser); a visible window opens when you ask to watch or need to sign in. Each agent has its own
-  tab.
+- **The browser** (1.2.1) is your default browser when it is Chrome, Edge, Brave, Vivaldi or Chromium, on screen. With
+  its remote-debugging switch on (`chrome://inspect/#remote-debugging`, Chrome 144+), Aero connects to the browser
+  you are using, with your sign-ins: the browser asks you to Allow, Aero opens its own tabs, never lists or closes
+  yours, and disconnects when the request is done (Settings → Tools → *Which browser Aero works in*). Otherwise, with
+  strict offline on, or for a request that says "in the background", it uses Aero's own profile
+  (`C:\Aero\data\browser-profile`). Each agent has its own tab.
 
 ## Folders
 
