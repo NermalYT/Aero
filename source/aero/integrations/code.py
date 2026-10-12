@@ -352,15 +352,30 @@ def parse_cargo(out, root):
     return res
 
 
+_GO_POS = re.compile(r"^\s*(?:\.[\\/])?(.+?\.go):(\d+)(?::(\d+))?:\s*(.+)$")
+
+
 def parse_go_test(out, root):
-    res, logs = [], {}
+    res, logs, build = [], {}, {}
     for ln in (out or "").splitlines():
         try:
             j = json.loads(ln)
         except ValueError:
             continue
         key = (j.get("Package"), j.get("Test"))
-        if j.get("Action") == "output":
+        if j.get("Action") == "build-output":                 # the package didn't compile (go vet runs as part of it)
+            build.setdefault(j.get("ImportPath"), []).append(j.get("Output", ""))
+        elif j.get("Action") == "build-fail":
+            lines = "".join(build.get(j.get("ImportPath"), [])).splitlines()
+            pos = [m for m in map(_GO_POS.match, lines) if m]
+            for m in pos:
+                res.append({"tool": "go test", "file": m.group(1).replace("\\", "/"), "line": int(m.group(2)),
+                            "col": int(m.group(3)) if m.group(3) else None, "severity": "error", "code": "build failed",
+                            "message": m.group(4)})
+            if not pos:
+                res.append({"tool": "go test", "file": j.get("ImportPath"), "line": None, "col": None,
+                            "severity": "error", "code": "build failed", "message": "\n".join(lines)[-400:]})
+        elif j.get("Action") == "output":
             logs.setdefault(key, []).append(j.get("Output", ""))
         elif j.get("Action") == "fail" and j.get("Test"):
             res.append({"tool": "go test", "file": j.get("Package"), "line": None, "col": None, "severity": "error",

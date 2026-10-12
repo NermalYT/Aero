@@ -8,14 +8,18 @@ RAD Debugger (Windows x64, alpha):
                                                     breakpoints, run, step, state, evaluate). The debugger's own window
                                                     opens on the desktop: RAD Debugger has no headless engine, and
                                                     Aero shows the state it reads back in the Debug workspace.
-  IPC safety: raddbg's listener has no authentication. Aero starts it on a random port bound to 127.0.0.1
-  (--ipc_addr) and checks that nothing else listens on that port before it sends a command.
+  IPC safety: raddbg's IPC listener has no authentication and binds every network interface (INADDR_ANY in
+  src/win32/socket/win32_socket.c; --ipc_addr only applies to the sending side). Aero runs a session only while
+  Windows Firewall keeps the network away from raddbg.exe (firewall on in every profile, incoming connections blocked
+  by default, no rule letting raddbg.exe in), checks that again before every command, and talks to it over
+  127.0.0.1, which the firewall doesn't filter. Aero never changes firewall rules itself.
 
 rea (npm `rea-agents`): a reverse-engineering MCP server (JavaScript/Electron apps, .NET, APKs, HAR files, WASM,
 native binaries through Ghidra/Hopper/IDA when the user has them). Installing it registers it as an MCP server in
 data/mcp.json, so its tools appear as mcp_rea_* with Aero's MCP permission; the reverse-engineer-anything skill
 comes with it.
 """
+import os
 import random
 import re
 import socket
@@ -32,7 +36,17 @@ from ..tools import tool
 STATE = DATA / "integrations" / "debug"
 RAD = tc.ROOT / "raddbg" / "raddbg.exe"
 MAGIC = 0x72726300
-_session = {"proc": None, "port": None, "target": None, "log": []}
+_session = {"proc": None, "port": None, "target": None, "log": [], "fw_at": 0.0}
+EXPOSED = ("RAD Debugger's control port has no authentication and listens on every network interface, so Aero only "
+           "runs a session while Windows Firewall keeps the network away from it: ")
+FIREWALL_PS = (
+    "$ErrorActionPreference='Stop';"
+    "$open=@(Get-NetFirewallProfile | Where-Object { $_.Enabled -ne 'True' -or $_.DefaultInboundAction -eq 'Allow' })"
+    ".Count;"
+    "$allow=@(Get-NetFirewallApplicationFilter -All | Where-Object { "
+    "[Environment]::ExpandEnvironmentVariables($_.Program) -eq $env:AERO_RADDBG } | Get-NetFirewallRule | "
+    "Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' }).Count;"
+    "Write-Output \"$open $allow\"")
 
 
 def install_rad(emit=None, cancel=None):
@@ -78,10 +92,43 @@ def unframe(data):
     return out
 
 
-def ipc(cmd, timeout=10):
+def firewall_closed():
+    """(True, "") when Windows Firewall keeps other machines away from raddbg.exe's listener; else (False, why)."""
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", FIREWALL_PS],
+                           capture_output=True, text=True, timeout=30, creationflags=tc.NO_WINDOW,
+                           env={**os.environ, "AERO_RADDBG": str(RAD)})
+        open_profiles, allow = (int(x) for x in r.stdout.split()[-2:])
+    except Exception:  # noqa: BLE001
+        return False, "Aero couldn't read the Windows Firewall settings"
+    if open_profiles:
+        return False, "Windows Firewall is off, or lets incoming connections in by default, in at least one profile"
+    if allow:
+        return False, ("Windows Firewall has a rule letting raddbg.exe accept incoming connections (usually from "
+                       "choosing Allow when Windows asked). Remove it in Windows Security > Firewall & network "
+                       "protection > Allow an app through firewall, or in an administrator PowerShell: "
+                       f"Get-NetFirewallApplicationFilter -Program '{RAD}' | Get-NetFirewallRule | "
+                       "Remove-NetFirewallRule")
+    return True, ""
+
+
+def _guard():
+    """Re-check the firewall (at most every 2 s) and end the session when the debugger became reachable."""
+    if time.time() - _session.get("fw_at", 0) < 2:
+        return
+    ok, why = firewall_closed()
+    if not ok:
+        stop()
+        raise RuntimeError(EXPOSED + why + ". Aero ended the session.")
+    _session["fw_at"] = time.time()
+
+
+def ipc(cmd, timeout=10, check=True):
     port = _session.get("port")
     if not port:
         raise RuntimeError("No debugging session (debug_start first).")
+    if check:
+        _guard()
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
         s.sendall(frame(cmd))
         s.settimeout(timeout)
@@ -142,21 +189,19 @@ def start(target, args=(), breakpoints=(), cancel=None):
     if not RAD.exists():
         raise RuntimeError("RAD Debugger isn't installed (integration_install raddebugger).")
     stop()
+    ok, why = firewall_closed()
+    if not ok:
+        raise RuntimeError(EXPOSED + why + ".")
     port = _free_port()
     STATE.mkdir(parents=True, exist_ok=True)
     proj = STATE / "aero.raddbg_project"
-    cmd = [str(RAD), f"--ipc_addr=127.0.0.1:{port}", f"--ipc_port={port}", f"--project:{proj}",
+    cmd = [str(RAD), f"--ipc_port={port}", f"--project:{proj}",
            f"--user:{STATE / 'aero.raddbg_user'}", str(target), *map(str, args)]
     p = subprocess.Popen(cmd, cwd=str(Path(target).parent), creationflags=0)
-    _session.update(proc=p, port=port, target=str(target), log=[])
+    _session.update(proc=p, port=port, target=str(target), log=[], fw_at=time.time())
     for _ in range(50):
         time.sleep(0.2)
-        addr = _listen_addr(port)
-        if addr:
-            if addr not in ("127.0.0.1", "[::1]"):
-                stop()
-                raise RuntimeError(f"RAD Debugger listened on {addr}:{port} (reachable from the network, no "
-                                   "authentication); Aero closed it.")
+        if _listen_addr(port):
             break
     else:
         stop()
@@ -170,7 +215,7 @@ def stop():
     p = _session.get("proc")
     if p and p.poll() is None:
         try:
-            ipc("exit", timeout=3)
+            ipc("exit", timeout=3, check=False)
         except Exception:  # noqa: BLE001
             pass
         time.sleep(0.5)
@@ -350,14 +395,16 @@ register(Pack("raddebugger", "RAD Debugger", "debug",
                      "debug_eval", "debug_stop"],
               requirements=[Requirement("raddbg", "RAD Debugger (Windows x64, about 5 MB)", _rad_ok,
                                         install=install_rad, size_mb=5)],
-              panel=_panel,
+              panel=_panel, stop=stop,
               notes="RAD Debugger is alpha and Windows-only; its window opens on the desktop during a session (there is "
-                    "no headless engine), Aero reads the state back."))
+                    "no headless engine), Aero reads the state back. Its control port listens on every network "
+                    "interface without authentication: sessions run only while Windows Firewall blocks raddbg.exe "
+                    "from the network (if Windows asks when it starts, choose Cancel)."))
 register(Pack("rea", "rea", "debug", "Reverse engineering over MCP: JS/Electron apps, .NET, APKs, HAR, WASM, binaries",
               "https://github.com/morluto/rea", "MIT",
               triggers=[r"\b(reverse[- ]engineer\w*|decompil\w*|disassembl\w*|\.apk|\.asar|electron app|har file|wasm|"
                         r"\.net assembly|how does .{1,40} (work|implement))\b"],
-              tools=["use_skill"], skills=["reverse-engineer-anything"],
+              tools=["use_skill"], skills=["reverse-engineer-anything"], mcp_server="rea",
               requirements=[Requirement("node", "Node.js 22.19+", lambda: tc.node_ok(22),
                                         how="install Node.js (Code workspace: toolchain node)"),
                             Requirement("rea", "rea-agents MCP server (npm)", _rea_ok, install=install_rea, size_mb=150)],

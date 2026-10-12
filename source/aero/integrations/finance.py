@@ -10,8 +10,10 @@ Aero adds the checks the skills call for, working on the user's files:
                   circular references (no Excel needed)
   xlsx_recalc     recalculate a workbook with LibreOffice when it is installed (the repository's recalc.py is missing)
   dcf_validate    the dcf-model skill's validate_dcf.py (terminal growth vs WACC, TV share of EV, errors)
-  deck_numbers    the ib-check-deck skill's extract_numbers.py on a .pptx (numbers that disagree across slides)
+  deck_numbers    the ib-check-deck skill's extract_numbers.py on a .pptx, then numbers of the same category and
+                  unit that disagree across slides (the skill's own check mixes units)
 """
+import json
 import re
 import shutil
 import tempfile
@@ -186,6 +188,29 @@ def dcf_validate(ctx, path):
     return {"text": (out or err)[:20000], "error": rc != 0 and not out}
 
 
+def deck_conflicts(numbers, tol=0.01):
+    """Numbers of the same category and unit whose values differ by more than tol: [(category, unit, groups)].
+    (The skill's own --check groups across units, so "$120.5M" vs "23%" was flagged while $120.5M vs $118.0M,
+    2 % apart, was not.)"""
+    by = defaultdict(list)
+    for n in numbers:
+        if n.get("category") not in (None, "other") and isinstance(n.get("normalized"), (int, float)):
+            by[(n["category"], n.get("unit") or "")].append(n)
+    out = []
+    for (cat, unit), ns in by.items():
+        groups = []
+        for n in ns:
+            g = next((g for g in groups if abs(n["normalized"] - g[0]["normalized"])
+                      <= tol * max(abs(g[0]["normalized"]), 1e-9)), None)
+            if g is None:
+                groups.append([n])
+            else:
+                g.append(n)
+        if len(groups) > 1:
+            out.append((cat, unit, sorted(groups, key=len, reverse=True)))
+    return out
+
+
 @tool("deck_numbers", "Find numbers that disagree across a presentation (the ib-check-deck skill's extract_numbers): "
       "pass a .pptx or a Markdown export of the deck.", "integrations", {"path": {"type": "string"}}, ["path"],
       summary=lambda a: a.get("path", ""))
@@ -202,8 +227,22 @@ def deck_numbers(ctx, path):
                     md.append(sh.text_frame.text)
         src = Path(tempfile.mkdtemp(prefix="aero-deck-")) / (p.stem + ".md")
         src.write_text("\n".join(md), encoding="utf-8")
-    rc, out, err = _script("ib-check-deck/scripts/extract_numbers.py", [src, "--check"])
-    return {"text": (out or err)[:20000], "error": rc != 0 and not out}
+    rc, out, err = _script("ib-check-deck/scripts/extract_numbers.py", [src])
+    try:
+        j = json.loads(out)
+    except ValueError:
+        return {"text": (out or err)[:20000], "error": rc != 0}
+    conflicts = deck_conflicts(j.get("numbers") or [])
+    lines = [f"{p.name}: {j.get('total_numbers', len(j.get('numbers') or []))} numbers, {len(conflicts)} groups that "
+             "disagree (same category and unit, more than 1% apart; different periods also land here, so check the "
+             "context)"]
+    for cat, unit, groups in conflicts[:40]:
+        lines.append(f"- {cat} ({unit}): " + " vs ".join(
+            f"{g[0]['value']} (slide {', '.join(str(s) for s in sorted({n['slide'] for n in g}))})" for g in groups))
+    lines.append("Numbers by slide:")
+    lines += [f"- slide {n.get('slide')}: {n.get('value')} ({n.get('category')}) in \"{(n.get('context') or '')[:80]}\""
+              for n in (j.get("numbers") or [])[:200]]
+    return "\n".join(lines)[:20000]
 
 
 for _n in ("xlsx_audit", "dcf_validate", "deck_numbers"):

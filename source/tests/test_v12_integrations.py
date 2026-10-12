@@ -193,6 +193,28 @@ class CodeParsers(unittest.TestCase):
         self.assertIn("rust", info["kinds"])
         self.assertEqual(info["commands"]["test"], "npm run test")
 
+    def test_go_build_failure_is_reported(self):
+        # go test runs vet checks while compiling; a failed build has no test events (seen live with Go 1.27)
+        out = "\n".join(json.dumps(x) for x in (
+            {"ImportPath": "demo [demo.test]", "Action": "build-output", "Output": "# demo\n"},
+            {"ImportPath": "demo [demo.test]", "Action": "build-output",
+             "Output": ".\\m.go:7:27: fmt.Printf format %d has arg \"x\" of wrong type string\n"},
+            {"ImportPath": "demo [demo.test]", "Action": "build-fail"},
+            {"Action": "fail", "Package": "demo", "FailedBuild": "demo [demo.test]"}))
+        d = code.parse_go_test(out, ".")
+        self.assertEqual(len(d), 1)
+        self.assertEqual((d[0]["file"], d[0]["line"], d[0]["col"], d[0]["code"]), ("m.go", 7, 27, "build failed"))
+
+    def test_aeros_rust_is_found_by_its_proxies(self):
+        d = Path(tempfile.mkdtemp())
+        with mock.patch.object(toolchain, "ROOT", d):
+            # a user's own rustup stays in charge until Aero has its own
+            self.assertNotEqual(toolchain.env().get("RUSTUP_HOME"), str(d / "rust" / "rustup"))
+            (d / "rust" / "cargo").mkdir(parents=True)
+            e = toolchain.env()
+        self.assertEqual(e["RUSTUP_HOME"], str(d / "rust" / "rustup"))
+        self.assertEqual(e["CARGO_HOME"], str(d / "rust" / "cargo"))
+
 
 class OtherParsers(unittest.TestCase):
     def test_flutter_machine_outputs(self):
@@ -239,6 +261,18 @@ class OtherParsers(unittest.TestCase):
         self.assertIn("0xc0000005", st["stop_event"])
         self.assertFalse(debug.SAFE_CMDS.match("launch_and_run C:/evil.exe"))
         self.assertTrue(debug.SAFE_CMDS.match("step_over"))
+
+    def test_deck_conflicts_compare_like_with_like(self):
+        nums = [{"value": "$120.5M", "normalized": 120.5e6, "unit": "USD_M", "category": "revenue", "slide": 1},
+                {"value": "23%", "normalized": 23.0, "unit": "%", "category": "revenue", "slide": 1},
+                {"value": "$118.0M", "normalized": 118e6, "unit": "USD_M", "category": "revenue", "slide": 2},
+                {"value": "23%", "normalized": 23.0, "unit": "%", "category": "revenue", "slide": 2},
+                {"value": "$120.5M", "normalized": 120.5e6, "unit": "USD_M", "category": "revenue", "slide": 3}]
+        c = finance.deck_conflicts(nums)
+        self.assertEqual(len(c), 1)
+        cat, unit, groups = c[0]
+        self.assertEqual((cat, unit), ("revenue", "USD_M"))
+        self.assertEqual([g[0]["value"] for g in groups], ["$120.5M", "$118.0M"])
 
     def test_xlsx_audit(self):
         import openpyxl
@@ -307,6 +341,11 @@ class BigModelPlanner(unittest.TestCase):
         info = self._info()
         info["meta"].update(arch="llama", name="Llama 3.3 70B Instruct")
         self.assertEqual(bigmodel.draft_for(info, root)[2], str(draft))
+        other = Path(tempfile.mkdtemp())                   # a copy the user downloaded elsewhere is used too
+        (other / "big").mkdir()
+        mine = other / "big" / "Llama-3.2-1B-Instruct-Q8_0.gguf"
+        mine.write_bytes(b"\0")
+        self.assertEqual(bigmodel.draft_for(info, other)[2], str(mine))
         with mock.patch.object(bigmodel.gguf, "kv_mb", lambda meta, ctx, kv="q8_0": 1600.0):
             plain = bigmodel.plan(info, 12000, 64000)
             with_d = bigmodel.plan(info, 12000, 64000, draft_path=str(draft))
@@ -322,6 +361,35 @@ class BigModelPlanner(unittest.TestCase):
             a = engine.build_args("m.gguf", {"ctx": 4096, "ngl": 999, "ot": [bigmodel.ffn_override(range(3))]}, 8181)
         i = a.index("-ot")
         self.assertEqual(a[i + 1], "blk\\.(0|1|2)\\.ffn_(up|down|gate)\\.weight=CPU")
+
+    def test_image_engine_vram_budget(self):
+        from aero.integrations import create
+        self.assertEqual(create.vram_budget_gb(15000), 6.0)       # big card: the fastest measured budget
+        self.assertEqual(create.vram_budget_gb(3500), 2.2)        # a 4 GB card with the desktop on it
+        self.assertEqual(create.vram_budget_gb(1000), 2.0)        # never below what worked
+        with mock.patch("aero.hardware.gpus", lambda: [{"unified": True, "free_mb": 30000}]):
+            self.assertIsNone(create.vram_budget_gb())
+
+    def test_helper_models_are_not_chat_models(self):
+        from aero import models
+        root = Path(tempfile.mkdtemp())
+        for rel in ("user/chat-Q4_K_M.gguf", "_drafts/x/Llama-3.2-1B-Q8_0.gguf", "_create/y/z_image_turbo-Q4_K.gguf",
+                    "_router/r/MiniCPM5-2B-Q4_K_M.gguf"):
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_bytes(b"GGUF")
+        with mock.patch.object(models, "models_dir", lambda: root), \
+                mock.patch.object(models, "read_store", lambda name, d: {}), \
+                mock.patch.object(models, "write_store", lambda name, v: None):
+            names = [m["name"] for m in models.all_models()]
+        self.assertEqual(names, ["chat-Q4_K_M"])
+
+    def test_airllm_layer_files_are_kept_per_model(self):
+        from aero.integrations import models as bm
+        a, b = bm.shard_dir("C:\\m\\Qwen2.5-7B-Instruct"), bm.shard_dir("C:\\m\\Qwen2.5-32B-Instruct")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, bm.shard_dir("C:\\m\\Qwen2.5-7B-Instruct\\"))
+        self.assertTrue(bm.shard_dir("Qwen/Qwen2.5-32B-Instruct").name.startswith("Qwen2.5-32B-Instruct-"))
+        self.assertEqual(a.parent, bm.SHARDS)
 
 
 class Toolchain(unittest.TestCase):
@@ -356,6 +424,195 @@ class Toolchain(unittest.TestCase):
     def test_install_reports_what_needs_the_user(self):
         done = integrations.install("xtool", "apple")
         self.assertIn("needs the user", done[0][1])
+
+    def test_shutdown_stops_what_packs_started(self):
+        calls = []
+        with mock.patch.object(integrations.PACKS["hindsight"], "stop", lambda: calls.append("hindsight")), \
+                mock.patch.object(integrations.PACKS["flutter"], "stop", lambda: 1 / 0):
+            stopped = integrations.stop_all()
+        self.assertEqual(calls, ["hindsight"])
+        self.assertIn("hindsight", stopped)
+        self.assertNotIn("flutter", stopped)                    # a failing stop doesn't stop the others
+
+
+class RadDebuggerExposure(unittest.TestCase):
+    """raddbg's IPC listener binds every interface: sessions only while the firewall keeps the network out."""
+
+    def fw(self, stdout="", exc=None):
+        def run(*a, **k):
+            if exc:
+                raise exc
+            return mock.Mock(stdout=stdout, returncode=0)
+        return mock.patch.object(debug.subprocess, "run", run)
+
+    def test_firewall_verdicts(self):
+        with self.fw("0 0\n"):
+            self.assertEqual(debug.firewall_closed(), (True, ""))
+        with self.fw("0 2\n"):
+            ok, why = debug.firewall_closed()
+            self.assertFalse(ok)
+            self.assertIn("Remove-NetFirewallRule", why)
+        with self.fw("1 0\n"):
+            self.assertFalse(debug.firewall_closed()[0])
+        with self.fw("", OSError("no powershell")):
+            self.assertFalse(debug.firewall_closed()[0])     # unknown means refused
+
+    def test_session_refused_before_launch(self):
+        with mock.patch.object(debug, "RAD", mock.Mock(exists=lambda: True)), \
+                mock.patch.object(debug, "firewall_closed", lambda: (False, "rule allows raddbg.exe")), \
+                mock.patch.object(debug.subprocess, "Popen") as popen:
+            with self.assertRaises(RuntimeError) as e:
+                debug.start(Path("C:/x/app.exe"))
+        popen.assert_not_called()
+        self.assertIn("every network interface", str(e.exception))
+
+    def test_command_ends_the_session_when_it_became_reachable(self):
+        debug._session.update(port=45000, proc=None, fw_at=0)
+        try:
+            with mock.patch.object(debug, "firewall_closed", lambda: (False, "rule allows raddbg.exe")), \
+                    mock.patch.object(debug.socket, "create_connection") as conn:
+                with self.assertRaises(RuntimeError):
+                    debug.ipc("run")
+            conn.assert_not_called()
+            self.assertIsNone(debug._session["port"])
+        finally:
+            debug._session.update(port=None, proc=None)
+
+
+class McpSchemas(unittest.TestCase):
+    def test_refs_into_defs_are_resolved(self):
+        from aero.tools import mcp_client
+        s = {"type": "object", "required": ["procedure"],
+             "properties": {"procedure": {"$ref": "#/$defs/__schema0", "description": "which one"},
+                            "items": {"type": "array", "items": {"$ref": "#/definitions/Item"}},
+                            "tree": {"$ref": "#/$defs/Node"}},
+             "$defs": {"__schema0": {"type": "string", "enum": ["a", "b"]},
+                       "Node": {"type": "object", "properties": {"child": {"$ref": "#/$defs/Node"}}}},
+             "definitions": {"Item": {"type": "integer"}}}
+        out = mcp_client.inline_refs(s)
+        self.assertEqual(out["properties"]["procedure"],
+                         {"type": "string", "enum": ["a", "b"], "description": "which one"})
+        self.assertEqual(out["properties"]["items"]["items"], {"type": "integer"})
+        self.assertNotIn("$ref", json.dumps(out))                       # recursion cut, nothing left unresolved
+        self.assertNotIn("$defs", out)
+
+
+class ToolBudget(unittest.TestCase):
+    """A big MCP server (rea: 170 tools, ~100k tokens) must never push a request past the context window."""
+
+    def setUp(self):
+        from aero.tools import Tool
+        self.names = []
+        big = {f"p{i}": {"type": "string", "description": "x" * 400} for i in range(30)}     # ~3.5k tokens each
+        for i in range(40):
+            n = f"mcp_fake_tool{i}"
+            t = Tool(n, f"[MCP fake] reverse engineer native function {i}", big, "mcp", lambda ctx, **a: "", [])
+            t.server, t.pack = "fake", "rea"
+            tools.REGISTRY[n] = t
+            self.names.append(n)
+
+    def tearDown(self):
+        for n in self.names:
+            tools.REGISTRY.pop(n, None)
+
+    def turn(self, ctx=8192, exposed=None):
+        from aero import agent
+        t = mock.Mock(spec=["settings", "exposed", "ctx_size", "blocked"])
+        t.settings, t.exposed, t.ctx_size, t.blocked = config.load_settings(), exposed, ctx, ()
+        return agent, t
+
+    def test_everything_exposed_still_fits(self):
+        agent, t = self.turn()
+        sch = agent.current_schemas(t)
+        cost = sum(agent._schema_cost(s) for s in sch)
+        self.assertLessEqual(cost, agent.tool_budget(t))
+        names = [s["function"]["name"] for s in sch]
+        self.assertIn("load_tools", names)
+        self.assertFalse(any(n in names for n in self.names))            # Aero's own tools came first
+        self.assertIn("read_file", names)
+
+    def test_load_tools_refuses_what_does_not_fit(self):
+        agent, t = self.turn(exposed=["read_file"])
+        msg = agent._do_load_tools(t, {"names": ["mcp"]})
+        self.assertIn("too large", msg)
+        self.assertLessEqual(sum(agent._schema_cost(s) for s in agent.current_schemas(t)), agent.tool_budget(t))
+
+    def test_pack_mcp_tools_stay_out_of_the_router_and_come_by_relevance(self):
+        cat = [c[0] for c in pipeline.tool_catalog(config.load_settings(), router=True)]
+        self.assertFalse(any(n in cat for n in self.names))
+        avail = [c[0] for c in pipeline.tool_catalog(config.load_settings())]
+        small = self.names[0]
+        tools.REGISTRY[small].params = {"address": {"type": "string"}}
+        picked = integrations.mcp_pick("fake", "reverse engineer this native function", avail)
+        self.assertEqual(picked, [small])                                 # the others are too big for a local context
+
+
+class ForcedToolAdapter(unittest.TestCase):
+    """llama-server reads a named tool_choice as "auto"; the adapter turns it into "required" with that tool only."""
+
+    def test_rewrite(self):
+        from aero.integrations import llm_adapter
+        tools_ = [{"type": "function", "function": {"name": n, "parameters": {}}} for n in ("recall", "done")]
+        b = llm_adapter.rewrite({"tools": tools_, "tool_choice": {"type": "function", "function": {"name": "done"}}})
+        self.assertEqual(b["tool_choice"], "required")
+        self.assertEqual([t["function"]["name"] for t in b["tools"]], ["done"])
+        same = {"tools": tools_, "tool_choice": "auto"}
+        self.assertIs(llm_adapter.rewrite(same), same)
+
+    def test_round_trip(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        import httpx
+
+        from aero.integrations import llm_adapter
+        seen = {}
+
+        class Upstream(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                seen["path"] = self.path
+                seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                out = json.dumps({"ok": True}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+        up = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        threading.Thread(target=up.serve_forever, daemon=True).start()
+        try:
+            base = llm_adapter.url(f"http://127.0.0.1:{up.server_address[1]}/v1")
+            self.assertTrue(base.startswith("http://127.0.0.1:") and base.endswith("/v1"))
+            r = httpx.post(base + "/chat/completions", timeout=10, json={
+                "tools": [{"type": "function", "function": {"name": "done"}}],
+                "tool_choice": {"type": "function", "function": {"name": "done"}}})
+            self.assertEqual(r.json(), {"ok": True})
+            self.assertEqual(seen["path"], "/v1/chat/completions")
+            self.assertEqual(seen["body"]["tool_choice"], "required")
+        finally:
+            up.shutdown()
+
+
+class HindsightDatabase(unittest.TestCase):
+    def test_database_in_aeros_folder_on_loopback(self):
+        from aero.integrations import memory
+        seen = {}
+
+        def run(cmd, **k):
+            seen["cmd"] = cmd
+            return {"rc": 0, "out": "postgresql://hindsight:hindsight@127.0.0.1:5433/hindsight\n", "err": ""}
+        with mock.patch.object(memory.tc, "run", run):
+            uri = memory.database()
+        self.assertTrue(uri.startswith("postgresql://"))
+        self.assertIn(str(memory.HOME / "pg0"), seen["cmd"])
+        self.assertIn("listen_addresses", memory.PG_START)
+        with mock.patch.object(memory.tc, "run", lambda cmd, **k: {"rc": 1, "out": "", "err": "boom"}):
+            with self.assertRaises(RuntimeError):
+                memory.database()
+        memory._srv["db"] = False
 
 
 class Endpoints(unittest.TestCase):

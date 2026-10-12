@@ -17,7 +17,7 @@ from pathlib import Path
 from .osinfo import IS_LINUX, IS_MAC, IS_WIN  # noqa: F401  (re-exported for the other modules)
 
 APP_NAME = "Aero"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 REPO = "NermalYT/Aero"            # GitHub repository the updater reads releases from
 
 PKG_DIR = Path(__file__).resolve().parent

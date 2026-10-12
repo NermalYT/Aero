@@ -1194,6 +1194,8 @@ def shutdown():
     ENGINE.stop()
     router.stop()
     mcp_client.stop_all()
+    from . import integrations
+    integrations.stop_all()
     threading.Timer(0.3, lambda: os._exit(0)).start()
     return {"ok": True}
 

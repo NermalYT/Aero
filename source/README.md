@@ -356,7 +356,7 @@ projects whose functions are built into Aero (sources, licences and what is not 
 | Create | images made on your GPU (Z-Image-Turbo with stable-diffusion.cpp) with a gallery |
 | Diagrams | 44 diagram types as self-contained HTML/SVG (diagram-design), imports from Mermaid, draw.io and Excalidraw, SVG/PNG export |
 | Review & test | code review of your changes with open-code-review on your local model; end-to-end tests and "explore my site and find bugs" with e2e |
-| Debug & reverse | RAD Debugger sessions the model drives (breakpoints, stepping, state, evaluate) and debug-info tools; reverse engineering through rea |
+| Debug & reverse | RAD Debugger sessions the model drives (breakpoints, stepping, state, evaluate; only while Windows Firewall blocks `raddbg.exe` from the network, because its control port has no authentication: if Windows asks when it starts, choose Cancel) and debug-info tools; reverse engineering through rea |
 | Finance | 48 skills from Anthropic's financial-services (DCF, LBO, comps, IC memos, GL recon …) plus spreadsheet audits; drafts for professional review, never advice or trades |
 | Library | search awesome-python, awesome-selfhosted (e.g. *Communication - IRC*) and the-book-of-secret-knowledge |
 | Memory+ | Hindsight memory banks per project |

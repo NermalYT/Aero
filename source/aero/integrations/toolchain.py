@@ -49,6 +49,8 @@ def env(extra=None):
     e = dict(os.environ)
     e.update(TELEMETRY_OFF)
     e["PATH"] = os.pathsep.join([str(p) for p in bin_dirs()] + [e.get("PATH", "")])
+    if (ROOT / "rust" / "cargo").is_dir():               # Aero's own rustup: its proxies need to know where it lives
+        e["RUSTUP_HOME"], e["CARGO_HOME"] = str(ROOT / "rust" / "rustup"), str(ROOT / "rust" / "cargo")
     e.update(extra or {})
     return e
 

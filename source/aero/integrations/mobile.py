@@ -67,6 +67,9 @@ def install(emit=None, cancel=None):
     f = flutter()
     tc.run([f, "--disable-analytics"], timeout=600, cancel=cancel)
     tc.run([f, "config", "--no-analytics", "--no-cli-animations"], timeout=600, cancel=cancel)
+    # Flutter 3.47's own switches leave the shared Dart/Flutter telemetry file (%APPDATA%\.dart-tool) reporting;
+    # dart's switch turns it off (measured). Every run also has FLUTTER_SUPPRESS_ANALYTICS (toolchain.TELEMETRY_OFF).
+    tc.run([dart(), "--disable-analytics"], timeout=600, cancel=cancel)
     r = tc.run([f, "--version", "--machine"], timeout=900, cancel=cancel, network=True)
     tc.mark("flutter", version=rel["version"])
     return f"Flutter {rel['version']} (Dart {json.loads(r['out'][r['out'].index('{'):]).get('dartSdkVersion') if '{' in r['out'] else '?'})"
@@ -353,8 +356,11 @@ def _wsl(cmd, timeout=600, cancel=None):
     return tc.run(["wsl", "-e", "bash", "-lc", cmd], timeout=timeout, cancel=cancel)
 
 
+WSL_XTOOL = "~/.local/bin/xtool"          # called by path: a fresh WSL account doesn't have ~/.local/bin on PATH
+
+
 def xtool_cmd(args):
-    return (["wsl", "-e", "bash", "-lc", "xtool " + " ".join(args)] if IS_WIN else ["xtool", *args])
+    return (["wsl", "-e", "bash", "-lc", WSL_XTOOL + " " + " ".join(args)] if IS_WIN else ["xtool", *args])
 
 
 def _xtool_ok():
@@ -373,7 +379,7 @@ def install_xtool(emit=None, cancel=None):
     tc.require_online("download xtool")
     rel = tc.github_release("xtool-org/xtool")
     a = next(a for a in rel["assets"] if a["name"] == "xtool-x86_64.AppImage")
-    r = _wsl(f"mkdir -p ~/.local/bin && curl -fsSL -o /tmp/xtool.AppImage '{a['url']}' && "
+    r = _wsl(f"mkdir -p ~/.local/bin ~/.local/share && curl -fsSL -o /tmp/xtool.AppImage '{a['url']}' && "
              f"echo '{a.get('digest') or ''}  /tmp/xtool.AppImage' | (test -z '{a.get('digest') or ''}' || sha256sum -c -) && "
              "cd /tmp && chmod +x xtool.AppImage && ./xtool.AppImage --appimage-extract >/dev/null && "
              "rm -rf ~/.local/share/xtool && mv squashfs-root ~/.local/share/xtool && "
@@ -400,7 +406,8 @@ def xtool_tool(ctx, args, path="."):
     a = [re.sub(r"[^\w@./:=+-]", "", x) for x in args]
     cwd = ctx.path(path)
     if IS_WIN:
-        r = tc.run(["wsl", "--cd", str(cwd), "-e", "bash", "-lc", "xtool " + " ".join(a)], timeout=3600, cancel=ctx.cancel)
+        r = tc.run(["wsl", "--cd", str(cwd), "-e", "bash", "-lc", WSL_XTOOL + " " + " ".join(a)], timeout=3600,
+                   cancel=ctx.cancel)
     else:
         r = tc.run(["xtool", *a], cwd=cwd, timeout=3600, cancel=ctx.cancel)
     return {"text": (r["out"] + r["err"])[-6000:], "error": r["rc"] != 0}
@@ -445,7 +452,7 @@ register(Pack("flutter", "Flutter", "mobile", "One Dart codebase for Android, iO
                                         size_mb=1950),
                             Requirement("git", "Git", lambda: (bool(tc.which("git")), tc.which("git") or "not installed"),
                                         how="install Git from git-scm.com")],
-              panel=_panel,
+              panel=_panel, stop=preview_stop,
               notes="Android builds need the Android SDK (flutter doctor says what is missing); iOS builds of Flutter "
                     "apps need a Mac with Xcode. The in-app preview is the web build; emulators open their own windows."))
 register(Pack("xtool", "xtool", "mobile", "iOS apps (SwiftPM) built, signed and installed without a Mac",

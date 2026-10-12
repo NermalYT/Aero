@@ -69,12 +69,12 @@ INTEGRATION_CATEGORIES = ("integrations", "dev", "setup", "create")
 def tool_catalog(settings, router=False):
     """[(name, category, description)] of every enabled tool, in registry order (stable prompt prefix). router=True
     leaves out the integration packs' tools: they come with their pack when a request matches it (integrations.context),
-    which keeps the router's catalog small."""
+    which keeps the router's catalog small; so do the tools of MCP servers a pack installed (rea has 170)."""
     from . import localonly
     pol = settings.get("tool_policy", {})
     return [(t.name, t.category, t.description) for t in tools.REGISTRY.values()
             if pol.get(t.category, "ask") != "off" and localonly.tool_allowed(t.category, settings)
-            and not (router and t.category in INTEGRATION_CATEGORIES)]
+            and not (router and (t.category in INTEGRATION_CATEGORIES or getattr(t, "pack", None)))]
 
 
 def _schema_tokens(settings, names=None):

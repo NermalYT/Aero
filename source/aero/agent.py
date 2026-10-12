@@ -880,7 +880,9 @@ def load_tools_schema(turn, all_schemas):
             rest.setdefault(cat, []).append(n)
     if not rest:
         return None
-    listing = "; ".join(f"{c}: {', '.join(ns)}" for c, ns in rest.items())
+    # names per category, a few for big ones (an MCP server can bring 170 tools); kept under ~300 tokens
+    listing = "; ".join(f"{c}: {', '.join(ns[:6])}" + (f" and {len(ns) - 6} more" if len(ns) > 6 else "")
+                        for c, ns in rest.items())[:1100]
     return {"type": "function", "function": {
         "name": "load_tools",
         "description": "Load more tools for this task when the ones you have are not enough. Not loaded yet: "
@@ -889,34 +891,106 @@ def load_tools_schema(turn, all_schemas):
                        "required": ["names"]}}}
 
 
+TOOL_SHARE = 0.35        # the most of the context window tool definitions may take
+# what a turn without a router decision keeps first when not every tool fits (with the request's capability hints)
+ESSENTIAL = {"web_search", "fetch_url", "read_file", "write_file", "edit_file", "find_files", "run_command"}
+
+
+def _schema_cost(s):
+    return len(json.dumps(s)) / 3.6
+
+
+def tool_budget(turn):
+    return int((getattr(turn, "ctx_size", 0) or 32768) * TOOL_SHARE)
+
+
+def fit_tools(turn, schemas):
+    """The tool definitions that fit tool_budget, Aero's own tools first, then integration tools, then MCP tools, in
+    registry order (a stable prompt prefix). Before, every tool went out when no router decision existed, and one MCP
+    server (rea: 170 tools) made a 230,000-token request for an 8,192-token context."""
+    from . import pipeline
+    budget = tool_budget(turn) - 400                     # room for load_tools
+    if sum(_schema_cost(s) for s in schemas) <= budget + 400:
+        return schemas
+
+    from . import capabilities
+    names = [s["function"]["name"] for s in schemas]
+    first = set(capabilities.hint_tools(_last_user_text(getattr(turn, "history", None) or []), names)) | ESSENTIAL
+
+    def rank(i):
+        t = tools.REGISTRY.get(names[i])
+        cat = t.category if t else "other"
+        return (0 if names[i] in first else 3 if cat == "mcp" else 2 if cat in pipeline.INTEGRATION_CATEGORIES
+                else 1), i
+    keep, used = set(), 0.0
+    for i in sorted(range(len(schemas)), key=rank):
+        c = _schema_cost(schemas[i])
+        if used + c <= budget:
+            keep.add(i)
+            used += c
+    return [s for i, s in enumerate(schemas) if i in keep]
+
+
+def bare_tool_call(text, settings):
+    """(name, args, (start, end)) of the first {"name": <an enabled tool>, "parameters"|"arguments": {...}} in text."""
+    enabled = {s["function"]["name"] for s in tools.schemas(settings)}
+    dec = json.JSONDecoder()
+    for m in re.finditer(r'\{\s*"name"\s*:', text):
+        try:
+            obj, end = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if not isinstance(obj, dict) or obj.get("name") not in enabled:
+            continue
+        args = obj.get("parameters", obj.get("arguments", {}))
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                continue
+        if isinstance(args, dict):
+            return obj["name"], args, (m.start(), end)
+    return None
+
+
 def current_schemas(turn):
     if not turn.settings.get("tools_enabled", True):
         return []
     blocked = getattr(turn, "blocked", None) or ()
     allv = [x for x in tools.schemas(turn.settings) if x["function"]["name"] not in blocked]
-    if turn.exposed is None:
+    sel = allv if turn.exposed is None else [s for s in allv if s["function"]["name"] in set(turn.exposed)]
+    fitted = fit_tools(turn, sel)
+    if turn.exposed is None and len(fitted) == len(allv):
         return allv
-    keep = set(turn.exposed)
-    sel = [s for s in allv if s["function"]["name"] in keep]
+    turn.exposed = [s["function"]["name"] for s in fitted]
     lt = load_tools_schema(turn, allv)
-    return sel + ([lt] if lt else [])
+    return fitted + ([lt] if lt else [])
 
 
 def _do_load_tools(turn, args):
     allv = {s["function"]["name"]: s for s in tools.schemas(turn.settings)}
     want = [str(x) for x in (args or {}).get("names") or []]
-    added = []
+    added, too_big = [], []
+    used = sum(_schema_cost(allv[n]) for n in turn.exposed or [] if n in allv)
+    budget = tool_budget(turn)
     for w in want:
         for n in allv:
             cat = tools.REGISTRY[n].category if n in tools.REGISTRY else ""
             if (n == w or cat == w) and n not in (turn.exposed or []):
+                c = _schema_cost(allv[n])
+                if used + c > budget:                    # would crowd the conversation out of the context window
+                    too_big.append(n)
+                    continue
                 turn.exposed.append(n)
                 added.append(n)
+                used += c
     known = set(turn.exposed or [])
     turn.exposed = [n for n in allv if n in known]          # keep registry order (stable prefix)
+    note = (f" Not loaded, too large for the room tools have in this context ({budget:,} tokens): "
+            + ", ".join(too_big[:20]) + ("..." if len(too_big) > 20 else "") + ".") if too_big else ""
     if not added:
-        return f"Nothing new loaded. Valid names: {', '.join(allv)}"
-    return "Loaded: " + ", ".join(added) + ". They are available from your next step."
+        return (f"Nothing new loaded.{note} Valid names: {', '.join(allv)}")[:6000]
+    return "Loaded: " + ", ".join(added) + ". They are available from your next step." + note
 
 
 # ------------------------------------------------------------------------------------------------ local loop
@@ -930,6 +1004,8 @@ async def run_local(turn, lane="local", max_steps=None):
     compact_at = 0 if getattr(turn, "is_sub", False) else float(settings.get("auto_compact_at") or 0)
     overflow = 0
     tools_rejected = False
+    force_text = False           # after an empty reply: ask once more with tool_choice "none" (that request only)
+    empty_retried = False
     if not getattr(turn, "is_sub", False):
         async for ev in run_decided(turn, lane):      # actions approved after the last turn ended run first
             yield ev
@@ -955,6 +1031,9 @@ async def run_local(turn, lane="local", max_steps=None):
         if schemas:
             body["tools"] = schemas
             body["parallel_tool_calls"] = True
+            if force_text:
+                body["tool_choice"] = "none"
+                force_text = False
 
         msg = {"role": "assistant", "content": "", "reasoning": "", "id": uuid.uuid4().hex[:10], "lane": lane,
                "model": turn.model_name}
@@ -1038,6 +1117,18 @@ async def run_local(turn, lane="local", max_steps=None):
             if calls:
                 msg["content"] = TOOL_CALL_RE.sub("", msg["content"]).strip()
 
+        # fallback: a bare JSON call ({"name": ..., "parameters" or "arguments": {...}}), which Llama 3.x prints when
+        # the tool it wants wasn't offered (llama-server drops such a structured call, hence force_text above). A
+        # real, enabled Aero tool runs as a normal call (its permission applies as always) and stays loaded.
+        if not calls and schemas and '"name"' in msg["content"]:
+            found = bare_tool_call(msg["content"], turn.settings)
+            if found:
+                name, args, (a, b) = found
+                calls[0] = {"id": None, "name": name, "args": json.dumps(args)}
+                msg["content"] = (msg["content"][:a] + msg["content"][b:]).strip()
+                if turn.exposed is not None and name not in turn.exposed:
+                    turn.exposed.append(name)
+
         if msg["reasoning"] == "" and "<think>" in msg["content"]:
             m = re.search(r"<think>(.*?)(</think>|$)", msg["content"], re.S)
             msg["reasoning"] = m.group(1).strip()
@@ -1050,6 +1141,14 @@ async def run_local(turn, lane="local", max_steps=None):
                                "function": {"name": c["name"], "arguments": c["args"] or "{}"}})
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        if not tool_calls and not msg["content"].strip() and not msg["reasoning"].strip() and schemas \
+                and not empty_retried and not turn.cancel.is_set():
+            # Nothing came back: llama-server drops a tool call it can't match to an offered tool (seen live: Llama
+            # 3.3 called web_search while it wasn't offered, and the reply was empty). Ask once more for an answer.
+            force_text = empty_retried = True
+            yield {"t": "notice", "text": "The model's reply came back empty (a tool call that matched none of the "
+                                          "offered tools); asking it to answer directly."}
+            continue
         dt = time.time() - t0
         msg["stats"] = {
             "tg": round(timings.get("predicted_per_second") or 0, 1),

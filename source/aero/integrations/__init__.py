@@ -15,6 +15,7 @@ what is installed, and the Mobile workspace opens next to the chat. Licences and
 docs/V1.2_INTEGRATIONS.md.
 """
 import importlib
+import json
 import re
 import threading
 import time
@@ -74,6 +75,8 @@ class Pack:
     panel: Callable = None               # () -> dict for the workspace UI
     notes: str = ""                      # what is not built in, said plainly
     skill_hint: Callable = None          # (text) -> skill names this request needs (packs with many skills)
+    stop: Callable = None                # () -> None: end what the pack started (servers, sessions) when Aero quits
+    mcp_server: str = ""                 # an MCP server the pack installs: the request picks a few of its tools
 
     def matches(self, text):
         return sum(1 for t in self.triggers if re.search(t, text or "", re.I))
@@ -126,6 +129,21 @@ def load_all():
         _loaded["done"] = True
 
 
+def stop_all():
+    """End every process a pack started (Hindsight and its database, a Flutter preview, a debugging session)."""
+    if not _loaded["done"]:
+        return []
+    stopped = []
+    for p in PACKS.values():
+        if p.stop:
+            try:
+                p.stop()
+                stopped.append(p.id)
+            except Exception:  # noqa: BLE001
+                pass
+    return stopped
+
+
 def requirement(pack_id, req_id):
     p = PACKS.get(pack_id)
     return next((r for r in (p.requirements if p else []) if r.id == req_id), None)
@@ -151,6 +169,8 @@ def context(text, available):
         missing = [r["label"] + (f" ({r['how']})" if not r["installable"] and r["how"] else "")
                    for r in st["requirements"] if not r["ok"] and not r["optional"]]
         tools_here = [t for t in p.tools if t in available]
+        if p.mcp_server:
+            tools_here += mcp_pick(p.mcp_server, text, available)
         want += tools_here
         bit = f"{p.name} ({p.summary})"
         if tools_here:
@@ -171,6 +191,30 @@ def context(text, available):
     line = "Integrations for this request (built into Aero, shown in the " + \
            WS_NAME.get(hits[0][0].workspace, hits[0][0].workspace) + " workspace):\n" + "\n".join(lines)
     return line, list(dict.fromkeys(want)), hits[0][0].workspace, [p.id for p, _ in hits]
+
+
+_STOP = {"the", "and", "for", "with", "this", "that", "from", "into", "what", "how", "does", "can", "you", "use",
+         "please", "about", "make", "want", "need", "have", "are", "its", "app", "tool"}
+
+
+def mcp_pick(server, text, available, limit=8, max_tokens=3000):
+    """The tools of a pack's MCP server that fit this request best: shared word stems with the tool's name (twice the
+    weight) and description, each small enough for a local context. Never all of them: rea has 170 tools, about
+    100,000 tokens of definitions; the rest stay reachable through load_tools."""
+    from ..tools import REGISTRY
+
+    def stems(s):
+        return {w[:5] for w in re.findall(r"[a-z]{3,}", (s or "").lower().replace("_", " ")) if w not in _STOP}
+    want = stems(text)
+    scored = []
+    for n in available:
+        t = REGISTRY.get(n)
+        if not t or getattr(t, "server", None) != server or len(json.dumps(t.params)) / 3.6 > max_tokens:
+            continue
+        s = 2 * len(want & stems(n)) + len(want & stems(t.description))
+        if s:
+            scored.append((-s, n))
+    return [n for _, n in sorted(scored)[:limit]]
 
 
 WS_NAME = {w["id"]: w["name"] for w in WORKSPACES}

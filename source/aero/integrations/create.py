@@ -5,9 +5,10 @@ storytold/artcraft (MIT/Apache-2.0) is the reference for the workspace (a prompt
 generations with their settings); its own generation goes to paid cloud services and some of its clients scrape
 web apps, so none of that code is used. Here everything runs on this PC.
 
-Model: Z-Image-Turbo (Tongyi-MAI, Apache-2.0), 8 steps, runs on GPUs with 4 GB of VRAM (stable-diffusion.cpp's
---offload-to-cpu). Files: the diffusion model as GGUF (leejet/Z-Image-Turbo-GGUF, Q4_K, 3.6 GB), its VAE
-(Comfy-Org/z_image_turbo, 320 MB) and Qwen3-4B-Instruct-2507 as the text encoder (2.4 GB, the same file Aero's
+Model: Z-Image-Turbo (Tongyi-MAI, Apache-2.0), 8 steps. Weights stay in RAM (--offload-to-cpu) and Aero gives the
+engine a VRAM budget (--max-vram) from the GPU's free memory, so it fits a 4 GB card (see vram_budget_gb).
+Files: the diffusion model as GGUF (leejet/Z-Image-Turbo-GGUF, Q4_K, 3.6 GB), its VAE (Comfy-Org/z_image_turbo,
+320 MB) and Qwen3-4B-Instruct-2507 as the text encoder (2.4 GB, the same file Aero's
 authority model uses). The engine is stable-diffusion.cpp's Vulkan build (NVIDIA, AMD and Intel GPUs), Metal on
 macOS, CPU otherwise.
 """
@@ -98,6 +99,20 @@ def _models_ok():
     return not missing, "Z-Image-Turbo ready" if not missing else "missing: " + ", ".join(missing)
 
 
+def vram_budget_gb(free_mb=None):
+    """stable-diffusion.cpp's --max-vram (GiB) for the first GPU's free memory: free minus 1.2 GB (the process needs
+    about that on top of the budget), between 2 and 6. Measured on an RTX 5080, 1024 x 1024, 8 steps (VRAM the process
+    used / time): no budget 8.8 GB / 16 s, 6 GiB 4.5 GB / 14 s, 2.5 GiB 3.7 GB / 39 s, 2 GiB 3.2 GB / 57 s; 1.5 GiB
+    fails. None when there is no discrete GPU to budget (unified memory, CPU)."""
+    if free_mb is None:
+        from .. import hardware
+        g = [x for x in hardware.gpus() if not x.get("unified")]
+        if not g:
+            return None
+        free_mb = g[0].get("free_mb") or 0
+    return round(max(2.0, min(6.0, free_mb / 1024 - 1.2)), 1)
+
+
 def generate(prompt, width=1024, height=1024, steps=8, seed=-1, cancel=None):
     b = engine_bin()
     if not b:
@@ -112,12 +127,16 @@ def generate(prompt, width=1024, height=1024, steps=8, seed=-1, cancel=None):
     cmd = [str(b), "--diffusion-model", str(_local("diffusion")), "--vae", str(_local("vae")), "--llm",
            str(_local("llm")), "-p", prompt[:2000], "--cfg-scale", "1.0", "--steps", str(max(1, min(50, int(steps)))),
            "-W", str(w), "-H", str(h), "--seed", str(int(seed)), "--offload-to-cpu", "--diffusion-fa", "-o", str(out)]
+    budget = vram_budget_gb()
+    if budget:
+        cmd[-2:-2] = ["--max-vram", str(budget)]
     t0 = time.time()
     r = tc.run(cmd, cwd=b.parent, timeout=1800, cancel=cancel)
     if r["rc"] != 0 or not out.exists():
         raise RuntimeError("stable-diffusion.cpp failed: " + (r["err"] or r["out"])[-800:])
     meta = {"prompt": prompt, "width": w, "height": h, "steps": steps, "seed": seed, "model": "Z-Image-Turbo Q4_K",
-            "seconds": round(time.time() - t0, 1), "engine": tc.installed().get("sdcpp", {}).get("build")}
+            "seconds": round(time.time() - t0, 1), "engine": tc.installed().get("sdcpp", {}).get("build"),
+            "vram_budget_gb": budget}
     out.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
     return out, meta
 

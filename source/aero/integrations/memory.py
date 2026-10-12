@@ -7,9 +7,11 @@ is the deeper, per-project memory the model can use when a task needs it.
 
 Aero installs `hindsight-api-slim[embedded-db,local-onnx]` into its own virtual environment (data/toolchains/
 hindsight/venv, so its pinned dependencies never touch Aero's), starts `hindsight-api` bound to 127.0.0.1 on its
-own port with the embedded PostgreSQL (pg0) under data/toolchains/hindsight, ONNX embeddings on the CPU, the RRF
-reranker (no torch), and Aero's own llama.cpp server as its LLM (OpenAI-compatible, strict JSON schema for small
-models). First start downloads the small embedding model (intfloat/multilingual-e5-small) from Hugging Face.
+own port, ONNX embeddings on the CPU, the RRF reranker (no torch), and Aero's own llama.cpp server as its LLM
+(OpenAI-compatible, strict JSON schema for small models). Aero starts Hindsight's embedded PostgreSQL (pg0, pgvector
+included) itself, on 127.0.0.1 only, with its data in data/toolchains/hindsight/pg0 (Hindsight's pg0:// URLs can't
+move the data folder; pg0 keeps the PostgreSQL program in ~/.pg0/installation). First start downloads the small
+embedding model (intfloat/multilingual-e5-small) from Hugging Face.
 """
 import json
 import subprocess
@@ -18,7 +20,7 @@ import time
 
 import httpx
 
-from . import Pack, Requirement, register, toolchain as tc
+from . import Pack, Requirement, llm_adapter, register, toolchain as tc
 from .. import action_results, capabilities
 from ..config import IS_WIN, LLAMA_PORT
 from ..tools import tool
@@ -27,7 +29,16 @@ HOME = tc.ROOT / "hindsight"
 VENV = HOME / "venv"
 PORT = LLAMA_PORT + 707
 URL = f"http://127.0.0.1:{PORT}"
-_srv = {"proc": None}
+PG_NAME = "aero-hindsight"
+PG_START = """import sys
+from pg0 import Pg0
+pg = Pg0(name=sys.argv[1], username="hindsight", password="hindsight", database="hindsight", data_dir=sys.argv[2],
+         config={"listen_addresses": "127.0.0.1"})
+info = pg.info()
+print((info if info.running else pg.start()).uri)
+"""
+PG_STOP = "import sys\nfrom pg0 import Pg0\nPg0(name=sys.argv[1]).stop()\n"
+_srv = {"proc": None, "db": False}
 
 
 def _py():
@@ -71,21 +82,33 @@ def running():
         return False
 
 
+def database():
+    """Start Hindsight's PostgreSQL (pg0) on 127.0.0.1 with its data in Aero's folder; returns its postgresql:// URL."""
+    r = tc.run([str(_py()), "-I", "-c", PG_START, PG_NAME, str(HOME / "pg0")], timeout=300)
+    uri = (r["out"].strip().splitlines() or [""])[-1].strip()
+    if r["rc"] != 0 or not uri.startswith("postgresql://"):
+        raise RuntimeError("Hindsight's database didn't start: " + (r["err"] or r["out"]).strip()[-800:])
+    _srv["db"] = True
+    return uri
+
+
 def start(timeout=240):
     if running():
         return URL
     if not _exe().exists():
         raise RuntimeError("Hindsight isn't installed (integration_install hindsight).")
     base, ok = tc.local_model()
+    if ok:
+        base = llm_adapter.url(base)              # reflect forces named tools, which llama-server alone ignores
+    HOME.mkdir(parents=True, exist_ok=True)
     env = {"HINDSIGHT_API_HOST": "127.0.0.1", "HINDSIGHT_API_PORT": str(PORT),
-           "HINDSIGHT_API_DATABASE_URL": f"pg0://aero?data_dir={(HOME / 'pg0').as_posix()}",
+           "HINDSIGHT_API_DATABASE_URL": database(),
            "HINDSIGHT_API_LLM_PROVIDER": "openai" if ok else "none", "HINDSIGHT_API_LLM_BASE_URL": base,
            "HINDSIGHT_API_LLM_API_KEY": "aero-local", "HINDSIGHT_API_LLM_MODEL": "local",
            "HINDSIGHT_API_LLM_STRICT_SCHEMA": "true", "HINDSIGHT_API_LLM_TIMEOUT": "600",
            "HINDSIGHT_API_LLM_MAX_CONCURRENT": "2", "HINDSIGHT_API_EMBEDDINGS_PROVIDER": "onnx",
            "HINDSIGHT_API_RERANKER_PROVIDER": "rrf", "HINDSIGHT_API_OTEL_TRACES_ENABLED": "false",
            "HF_HOME": str(HOME / "hf")}
-    HOME.mkdir(parents=True, exist_ok=True)
     _srv["proc"] = tc.start([str(_exe())], cwd=HOME, env_extra=env, log=HOME / "server.log")
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -103,6 +126,9 @@ def stop():
     if p and p.poll() is None:
         tc.kill(p)
     _srv["proc"] = None
+    if _srv.get("db"):
+        tc.run([str(_py()), "-I", "-c", PG_STOP, PG_NAME], timeout=60)
+        _srv["db"] = False
 
 
 def _bank(b):
@@ -182,6 +208,6 @@ register(Pack("hindsight", "Hindsight", "memory",
               tools=["hindsight_retain", "hindsight_recall", "hindsight_reflect"],
               requirements=[Requirement("hindsight", "Hindsight server (own Python environment, a few hundred MB)",
                                         _ok, install=install, size_mb=600)],
-              panel=_panel,
+              panel=_panel, stop=stop,
               notes="Retain and reflect make calls to the local model; quality and speed with small models are not "
                     "benchmarked by the project (its results use hosted models)."))

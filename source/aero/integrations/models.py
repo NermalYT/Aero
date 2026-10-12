@@ -12,7 +12,9 @@ Two engines:
                      runs in its own virtual environment (torch, transformers) behind an OpenAI-compatible shim
                      (airllm_shim.py) on Aero's model port, so the whole agent works with it unchanged.
 """
+import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +25,7 @@ from . import Pack, Requirement, register, toolchain as tc
 from .. import bigmodel, capabilities
 from ..config import IS_WIN, models_dir
 from ..engine import LlamaServer
+from ..models import _parts
 from ..tools import tool
 
 HOME = tc.ROOT / "airllm"
@@ -59,8 +62,9 @@ def install(emit=None, cancel=None):
         raise RuntimeError("PyTorch install failed: " + (r["err"] or r["out"])[-800:])
     if emit:
         emit({"type": "log", "text": "Installing AirLLM and transformers…"})
-    r = tc.run([str(_py()), "-m", "pip", "install", "--disable-pip-version-check", "-q", *PACKAGES], timeout=3600,
-               cancel=cancel, network=True)
+    extra = ["bitsandbytes"] if _nvidia() else []         # AirLLM's 4-bit / 8-bit layer compression (CUDA only)
+    r = tc.run([str(_py()), "-m", "pip", "install", "--disable-pip-version-check", "-q", *PACKAGES, *extra],
+               timeout=3600, cancel=cancel, network=True)
     if r["rc"] != 0:
         raise RuntimeError("AirLLM install failed: " + (r["err"] or r["out"])[-800:])
     v = tc.run([str(_py()), "-c", "import importlib.metadata as m, torch; print(m.version('airllm'), torch.__version__, "
@@ -76,6 +80,14 @@ def _ok():
     return bool(v), (f"airllm, torch, CUDA: {v}" if v else "environment exists, packages missing")
 
 
+def shard_dir(model):
+    """AirLLM writes a model's per-layer files to <folder>/splitted_model[.compression]; one folder per model, so a
+    second model never picks up the first one's layers."""
+    key = str(model).rstrip("/\\")
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", key.replace("\\", "/").split("/")[-1])[:60]
+    return SHARDS / f"{name or 'model'}-{hashlib.sha1(key.encode()).hexdigest()[:8]}"
+
+
 class AirServer(LlamaServer):
     """llama-server's interface (start/wait_ready/running/stop/log_tail/url) over the AirLLM shim."""
 
@@ -86,9 +98,10 @@ class AirServer(LlamaServer):
     def launch(self, model, compression="none", max_seq=4096):
         self.stop()
         self.spec = {"model": model, "compression": compression, "max_seq": max_seq}
-        SHARDS.mkdir(parents=True, exist_ok=True)
+        shards = shard_dir(model)
+        shards.mkdir(parents=True, exist_ok=True)
         logf = open(self.log_path, "w", encoding="utf-8", errors="replace")
-        cmd = [str(_py()), "-I", str(SHIM), "--model", str(model), "--port", str(self.port), "--shards", str(SHARDS),
+        cmd = [str(_py()), "-I", str(SHIM), "--model", str(model), "--port", str(self.port), "--shards", str(shards),
                "--compression", compression, "--max-seq", str(max_seq), "--hf-home", str(HOME / "hf")]
         logf.write("ARGS: " + " ".join(cmd) + "\n")
         logf.flush()
@@ -148,6 +161,8 @@ def _panel():
     ev = Path(__file__).resolve().parent.parent.parent / "docs" / "evidence"
     out["measured"] = []
     for f in sorted(ev.glob("bigmodel_*.json")) if ev.exists() else []:
+        if "before_fix" in f.name:                      # superseded by the corrected planner's runs
+            continue
         try:
             out["measured"].append(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError):
@@ -159,7 +174,8 @@ def _panel():
         extra_part = "-000" in f.name and "-00001-" not in f.name
         if hidden or extra_part or "mmproj" in f.name.lower():
             continue
-        gg.append({"path": str(f), "name": f.name, "gb": round(f.stat().st_size / 2**30, 1)})
+        size = sum(x.stat().st_size for x in _parts(f) if x.exists())      # every part of a split GGUF
+        gg.append({"path": str(f), "name": f.name, "gb": round(size / 2**30, 1)})
     out["ggufs"] = gg[:200]
     return out
 

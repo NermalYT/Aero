@@ -288,5 +288,42 @@ class RouterForm(unittest.TestCase):
         self.assertNotIn("none", a)
 
 
+class EmptyReply(unittest.TestCase):
+    """llama-server drops a tool call that matches no offered tool, so the reply arrives empty (seen with Llama 3.3
+    on an 8k context): the step is asked once more with tool_choice "none" and the user gets an answer."""
+
+    def test_empty_reply_is_retried_once_for_text(self):
+        _reset()
+        model = Model([("", []), ("Sunlight scatters off air molecules; blue scatters most.", [])])
+        ev = run_turn(model, settings(), text="why is the sky blue?", chat_id="v12-empty")
+        self.assertEqual(len(model.bodies), 2)
+        self.assertNotIn("tool_choice", model.bodies[0])
+        self.assertEqual(model.bodies[1].get("tool_choice"), "none")
+        self.assertTrue(any(e["t"] == "notice" and "empty" in e["text"] for e in ev))
+        done = [e["message"] for e in ev if e["t"] == "assistant_done"]
+        self.assertEqual(done[-1]["content"], "Sunlight scatters off air molecules; blue scatters most.")
+
+    def test_printed_json_call_runs_the_real_tool(self):
+        # seen live with Llama 3.3: empty reply, then the call printed as text after tool_choice "none"
+        _reset()
+        d = tempfile.mkdtemp()
+        Path(d, "notes.txt").write_text("hi", encoding="utf-8")
+        printed = 'I will look. {"name": "list_dir", "parameters": {"path": ' + json.dumps(d) + '}}'
+        model = Model([("", []), (printed, []), ("There is one file, notes.txt.", [])])
+        ev = run_turn(model, settings(), text="what is in that folder?", chat_id="v12-bare")
+        ran = results(ev, "list_dir")
+        self.assertEqual(len(ran), 1)
+        self.assertIn("notes.txt", json.dumps(ran[0]))
+        self.assertEqual(len(model.bodies), 3)
+        self.assertNotIn("tool_choice", model.bodies[2])                 # tools are back after the one retry
+        self.assertNotIn('"name"', [e for e in ev if e["t"] == "assistant_done"][1]["message"]["content"])
+
+    def test_a_second_empty_reply_ends_the_turn(self):
+        _reset()
+        model = Model([("", []), ("", [])])
+        run_turn(model, settings(), text="hello there friend", chat_id="v12-empty2")
+        self.assertEqual(len(model.bodies), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

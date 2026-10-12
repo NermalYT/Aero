@@ -56,9 +56,14 @@ def draft_for(info, models_root):
     if not fam or info["total"] < 6 * 2**30:          # small models gain little and the draft costs VRAM
         return None
     repo, quant = DRAFTS[fam]
-    d = Path(models_root) / DRAFT_DIR
-    hits = [p for p in d.rglob("*.gguf") if quant.lower() in p.name.lower() and repo.split("/")[1].lower().replace(
-        "-gguf", "") in str(p).lower().replace("__", "/")] if d.exists() else []
+    name = repo.split("/")[1].lower().replace("-gguf", "")
+    root = Path(models_root)
+    hits = []
+    for d in (root / DRAFT_DIR, root):                 # Aero's draft folder first, then a copy the user already has
+        if d.exists():
+            hits = [p for p in d.rglob("*.gguf") if quant.lower() in p.name.lower() and name in p.name.lower()]
+        if hits:
+            break
     return repo, quant, (str(hits[0]) if hits else None)
 
 

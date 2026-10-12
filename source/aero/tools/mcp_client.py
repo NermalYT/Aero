@@ -440,15 +440,41 @@ def _make_fn(server, tool_name):
     return fn
 
 
+def inline_refs(schema):
+    """An MCP tool's schema with its $ref pointers into its own $defs / definitions resolved in place. Only the
+    properties are passed on to the model, so an unresolved "#/$defs/X" made llama-server refuse the whole request
+    ("cannot resolve $ref", seen with rea's tools). A reference to a definition that is already being expanded
+    (a recursive type) becomes {} (any value): expanding it even a few levels multiplied rea's schemas past 200,000
+    tokens."""
+    defs = {**(schema.get("definitions") or {}), **(schema.get("$defs") or {})}
+
+    def walk(x, open_refs):
+        if isinstance(x, list):
+            return [walk(v, open_refs) for v in x]
+        if not isinstance(x, dict):
+            return x
+        ref = x.get("$ref")
+        if isinstance(ref, str) and ref.startswith(("#/$defs/", "#/definitions/")):
+            rest = {k: v for k, v in x.items() if k != "$ref"}
+            key = ref.rsplit("/", 1)[1]
+            if key not in defs or key in open_refs:
+                return walk(rest, open_refs) if rest else {}
+            return walk({**defs[key], **rest}, open_refs | {key})
+        return {k: walk(v, open_refs) for k, v in x.items() if k not in ("$defs", "definitions")}
+    return walk(schema, frozenset())
+
+
 def _register(name, srv):
     for k in [k for k, t in REGISTRY.items() if t.category == "mcp" and getattr(t, "server", None) == name]:
         del REGISTRY[k]
+    pack = (read_config().get("mcpServers", {}).get(name) or {}).get("aero_pack")
     for t in srv.tools:
-        schema = t.get("inputSchema") or {"type": "object", "properties": {}}
+        schema = inline_refs(t.get("inputSchema") or {"type": "object", "properties": {}})
         tn = _tool_name(name, t["name"])
         tool = Tool(tn, f"[MCP {name}] {t.get('description') or t.get('title') or t['name']}"[:1024],
                     schema.get("properties", {}), "mcp", _make_fn(name, t["name"]), schema.get("required", []))
         tool.server = name
+        tool.pack = pack              # a server an integration pack installed: its tools come with the pack
         REGISTRY[tn] = tool
 
 
