@@ -103,7 +103,7 @@ HELDOUT = [
 ]
 
 
-def run(model, tree, out, threads, prompts=None):
+def run(model, tree, out, threads, prompts=None, gpu=False):
     sys.path.insert(0, str(Path(tree).resolve()))
     from aero import config, pipeline, router, tools
     from aero.engine import LlamaServer
@@ -112,9 +112,12 @@ def run(model, tree, out, threads, prompts=None):
     s["local_only"] = False
     catalog = pipeline.tool_catalog(s)
     srv = LlamaServer(config.ROUTER_PORT + 30, "router-bench")
-    args = router.server_args(model, threads, router.physical_cores())
+    import inspect
+    if gpu and "gpu" not in inspect.signature(router.server_args).parameters:
+        raise SystemExit("This Aero version's router has no GPU option.")
+    args = router.server_args(model, threads, router.physical_cores(), **({"gpu": True} if gpu else {}))
     args[args.index("--port") + 1] = str(srv.port)          # its own port, so a running Aero is not disturbed
-    srv.start(args, {"CUDA_VISIBLE_DEVICES": "-1", "GGML_VK_VISIBLE_DEVICES": ""})
+    srv.start(args, {} if gpu else {"CUDA_VISIBLE_DEVICES": "-1", "GGML_VK_VISIBLE_DEVICES": ""})
     ok, why = srv.wait_ready(180)
     if not ok:
         raise SystemExit("router server: " + why + srv.log_tail(10))
@@ -124,7 +127,11 @@ def run(model, tree, out, threads, prompts=None):
     for text, need in prompts or PROMPTS:
         t0 = time.time()
         try:
-            d, info = router.decide([{"role": "user", "content": text}], catalog, [])
+            hist = [{"role": "user", "content": text}]
+            if hasattr(router, "trivial") and router.trivial(hist):     # 1.2: greetings skip the router (pipeline.route)
+                d, info = router.trivial_decision(hist)
+            else:
+                d, info = router.decide(hist, catalog, [])
             err = None
         except Exception as e:  # noqa: BLE001
             d, info, err = {}, {}, f"{type(e).__name__}: {e}"
@@ -138,7 +145,8 @@ def run(model, tree, out, threads, prompts=None):
             apps_line = pipeline.app_context(turn, text)
             exposed = turn.exposed
         rows.append({"text": text, "need": need, "ms": ms, "router_ms": info.get("ms"), "prompt_n": info.get("prompt_n"),
-                     "cached_n": info.get("cached_n"), "tools": d.get("tools"), "exposed": exposed,
+                     "cached_n": info.get("cached_n"), "gen_n": info.get("gen_n"), "tg": info.get("tg"),
+                     "skipped": info.get("skipped"), "tools": d.get("tools"), "exposed": exposed,
                      "complexity": d.get("complexity"), "error": err, "apps": apps_line})
         print(f"{ms:>6} ms  {len(exposed):>2} tools  {text[:70]}", flush=True)
     srv.stop()
@@ -146,6 +154,7 @@ def run(model, tree, out, threads, prompts=None):
              "catalog_chars": len(router.catalog(catalog, [])),
              "schema_chars": len(json.dumps(router.schema([c[0] for c in catalog])))}
     res = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "tree": str(tree), "model": Path(model).name, "threads": threads,
+           "device": "gpu" if gpu else "cpu",
            "sizes": sizes, "rows": rows}
     Path(out).write_text(json.dumps(res, indent=1), encoding="utf-8")
 
@@ -166,12 +175,14 @@ def score(files):
             ms.append(r["ms"])
             n_tools.append(len(r["exposed"] or []))
         ms.sort()
-        print(f"\n{f}: {d['model']} · {d['threads']} threads · catalog {d['sizes']['catalog_tools']} tools, "
+        gens = [r["gen_n"] for r in d["rows"] if r.get("gen_n")]
+        print(f"\n{f}: {d['model']} · {d.get('device', 'cpu')} · {d['threads']} threads · catalog {d['sizes']['catalog_tools']} tools, "
               f"{d['sizes']['catalog_chars'] + d['sizes']['rules_chars']:,} prompt chars, schema "
               f"{d['sizes']['schema_chars']:,} chars")
         print(f"  routed well: {ok}/{len(d['rows'])}  ·  decision p50 {statistics.median(ms):.0f} ms, "
               f"p95 {ms[int(len(ms) * 0.95) - 1]:.0f} ms, max {ms[-1]} ms  ·  tools exposed median "
-              f"{statistics.median(n_tools):.0f}")
+              f"{statistics.median(n_tools):.0f}" + (f"  ·  generated tokens median {statistics.median(gens):.0f}"
+                                                         if gens else ""))
         for m in misses:
             print("  missed:", m)
 
@@ -184,8 +195,9 @@ if __name__ == "__main__":
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--score", nargs="*")
     ap.add_argument("--heldout", action="store_true", help="the 25 held-out requests instead of the 50")
+    ap.add_argument("--gpu", action="store_true", help="run the router with every layer on the GPU (1.2 and later)")
     a = ap.parse_args()
     if a.score:
         score(a.score)
     else:
-        run(a.model, a.tree, a.out, a.threads, HELDOUT if a.heldout else PROMPTS)
+        run(a.model, a.tree, a.out, a.threads, HELDOUT if a.heldout else PROMPTS, gpu=a.gpu)

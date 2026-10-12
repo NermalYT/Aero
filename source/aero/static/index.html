@@ -115,6 +115,8 @@
       <button class="sb-mem" id="memoryBtn" title="What Aero remembers across chats (facts and lessons)"><span class="ico-mem"></span><span>Memory</span><small id="memCount"></small></button>
       <button class="sb-mem" id="labBtn" title="Profiles, tuning and benchmarks measured on this PC"><span class="ico-lab"></span><span>Performance Lab</span></button>
       <button class="sb-mem" id="modsBtn" title="Change Aero itself: describe the change, a model edits a copy of Aero, you check it and apply or undo it"><span class="ico-mod"></span><span>Mod Aero</span><small id="modCount"></small></button>
+      <div class="sb-label">Workspaces</div>
+      <div id="wsList" class="ws-side"></div>
       <div class="sb-label">Recent</div>
       <div id="chatList" class="chat-list client"></div>
       <div class="sb-bottom">
@@ -177,6 +179,7 @@
       </div>
       </div>
     </main>
+    <aside id="ws" class="glass hidden"></aside>
     <aside id="dash" class="glass"></aside>
   </section>
 
@@ -233,6 +236,7 @@
 <script src="vendor/highlight.min.js"></script>
 <script src="scene.js"></script>
 <script src="app.js"></script>
+<script src="workspaces.js"></script>
 <script src="lab.js"></script>
 </body>
 </html>

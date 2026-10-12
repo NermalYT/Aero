@@ -804,6 +804,7 @@ function renderItem(ctx, m) {
     case 'notice': appendNotice(ctx, m); break;
     case 'subagent': placeSub(ctx, subBlock(m, false)); break;
     case 'question': placeQuestion(ctx, m, S.chat); break;
+    case 'queue': placeQueue(ctx, m, S.chat); break;
   }
 }
 
@@ -913,8 +914,8 @@ function attachToolResult(ctx, m) {
   }
   $(':scope > .approve', card)?.remove();
   const st = $(':scope > .tool-head .tstat', card);
-  st.className = 'tstat ' + (m.denied || m.error ? 'err' : 'ok');
-  st.textContent = m.denied ? 'denied' : m.error ? 'error' : 'done';
+  st.className = 'tstat ' + (m.queued ? 'queued' : m.denied || m.error ? 'err' : 'ok');
+  st.textContent = m.queued ? 'queued for your OK' : m.denied ? 'denied' : m.error ? 'error' : 'done';
   const body = $(':scope > .tool-body', card);
   $$('.res', body).forEach(x => x.remove());
   body.append(h('div', { class: 'lbl res' }, 'Output'), h('pre', { class: 'res' }, m.content || ''));
@@ -925,7 +926,11 @@ function attachToolResult(ctx, m) {
         : ['warn', 'not verified', 'Sent, but the result could not be checked'];
     st.after(h('span', { class: 'vbadge ' + v[0], 'data-tip': v[2] + (m.mode ? ` · ${m.mode.toLowerCase().replace(/_/g, ' ')}` : '') }, v[1]));
   }
-  if (m.image && !$('img.shot', card)) card.append(h('img', { class: 'shot', src: '/api/uploads/' + m.image, onclick: () => viewImage('/api/uploads/' + m.image) }));
+  $(':scope > .tool-head .abadge', card)?.remove();
+  if (m.authority) authorityBadge(card, m.authority);
+  else if (m.approved_batch) st.after(h('span', { class: 'abadge ok', 'data-tip': 'You approved this in the queue' }, 'approved'));
+  if (m.preview && typeof wsPreview === 'function') wsPreview(card, m.preview);
+  else if (m.image && !$('img.shot', card)) card.append(h('img', { class: 'shot', src: '/api/uploads/' + m.image, onclick: () => viewImage('/api/uploads/' + m.image) }));
   if (m.error && !m.denied) card.classList.add('open');
 }
 
@@ -1353,7 +1358,10 @@ async function runAgent(loop) {
 
   try {
     await sseFetch('/api/chat', { chat_id: chat.id, messages: chat.messages, carry: chat.carry || null, title: chat.title || '', opts, agent: chat.agent || null }, ev => {
-      if (typeof ev.sub === 'string') return subEvent(subs, ev, chat);
+      if (typeof ev.sub === 'string') {
+        if (ev.t === 'queued') { queueAdd(ctx, chat, push, ev.item); return; }    // a subagent's queued action: the chat's queue card
+        return subEvent(subs, ev, chat);
+      }
       switch (ev.t) {
         case 'router_start': routerEl = routerPending(); ctx.el.append(routerEl); S.activeLane = 'router'; scrollBottom(); break;
         case 'router': {
@@ -1465,6 +1473,11 @@ async function runAgent(loop) {
         case 'question': { const m = { role: 'question', id: uid(), question: ev.question, ts: Date.now() / 1000 }; push(m); placeQuestion(ctx, m, chat); scrollBottom(); break; }
         case 'waiting': { const c = $(`.qcard[data-qid="${CSS.escape(ev.question_id)}"] .qwait`, ctx.el); if (c) c.textContent = ' · Aero is waiting for this answer'; break; }
         case 'foreground_request': { const card = findCard(ctx.el, ev.call_id); if (card) askForeground(card, ev, chat); break; }
+        case 'queued': queueAdd(ctx, chat, push, ev.item); scrollBottom(); break;
+        case 'batch_wait': queueWaiting(ctx, chat, push, ev.items, true); scrollBottom(); break;
+        case 'queue': queueWaiting(ctx, chat, push, ev.items, false); break;
+        case 'authority': { const card = findCard(ctx.el, ev.call_id); if (card) authorityBadge(card, ev); break; }
+        case 'workspace': if (typeof wsOnEvent === 'function') wsOnEvent(ev); break;
         case 'task': taskProgress(ctx, ev); break;
         case 'review': {
           push(ev.message); closeLane(ctx); S.activeLane = null;
@@ -1637,6 +1650,7 @@ function subEvent(subs, ev, chat) {
     chat.messages.push(m); sb.el.classList.remove('folded'); sb.body.append(questionCard(m, chat)); return scrollBottom();
   }
   if (ev.t === 'foreground_request') { const card = findCard(sb.body, ev.call_id); if (card) { sb.el.classList.remove('folded'); askForeground(card, ev, chat, sb.rec.name); } return; }
+  if (ev.t === 'authority') { const card = findCard(sb.body, ev.call_id); if (card) authorityBadge(card, ev); return; }
   if (ev.t === 'task') return;
   const flush = () => {
     sb.raf = 0; const c = sb.cur; if (!c) return;
@@ -1813,6 +1827,133 @@ function askForeground(card, ev, chat, who) {
   notify('Aero needs your mouse and keyboard', `${toolInfo(ev.name).name} ${ev.label || ''}`);
 }
 
+// ---------------------------------------------------------------- v1.2: autonomy (autonomy.py)
+// "Collect and keep working": actions that need an OK are queued in one card per chat turn; approve or deny them in
+// one go. "Full auto": an authority model decides; its verdict and reason show on the tool card.
+const MODE_WORD = { ask: 'ask each time', batch: 'collect, keep working', auto: 'full auto (authority model)' };
+function authorityBadge(card, v) {
+  const st = $(':scope > .tool-head .tstat', card);
+  $(':scope > .tool-head .abadge', card)?.remove();
+  const ok = v.decision === 'allow';
+  st?.after(h('span', { class: 'abadge ' + (ok ? 'ok' : 'bad'), 'data-tip': `Authority model${v.model ? ' (' + v.model + ')' : ''}: ${v.reason || ''}${v.ms ? ` · ${v.ms} ms` : ''}` }, ok ? 'authority: allowed' : 'authority: denied'));
+}
+function queueMsg(ctx, chat, push) {
+  if (ctx.queueMsg) return ctx.queueMsg;
+  const m = { role: 'queue', id: uid(), items: [], ts: Date.now() / 1000 };
+  push(m); ctx.queueMsg = m; ctx.queueCard = placeQueue(ctx, m, chat);
+  return m;
+}
+function queueAdd(ctx, chat, push, item) {
+  const m = queueMsg(ctx, chat, push);
+  if (!m.items.some(x => x.id === item.id)) m.items.push(item);
+  renderQueue(ctx.queueCard, m, chat);
+  notify('Aero queued an action for your OK', item.label || item.name);
+}
+function queueWaiting(ctx, chat, push, items, waiting) {
+  const m = queueMsg(ctx, chat, push);
+  for (const it of items || []) { const i = m.items.findIndex(x => x.id === it.id); if (i >= 0) m.items[i] = it; else m.items.push(it); }
+  m.waiting = waiting;
+  renderQueue(ctx.queueCard, m, chat);
+}
+function placeQueue(ctx, m, chat) {
+  const card = h('div', { class: 'qcard queue', 'data-qid': m.id });
+  (ctx.lane?.el || ctx.el).append(card);
+  renderQueue(card, m, chat);
+  if (!S.streaming && (m.items || []).some(x => x.status === 'pending')) refreshQueue(card, m, chat);
+  return card;
+}
+async function refreshQueue(card, m, chat) {
+  try {
+    const r = await api('/api/autonomy?chat_id=' + encodeURIComponent(chat.id));
+    const live = new Map((r.queue || []).map(x => [x.id, x]));
+    for (const it of m.items) { const x = live.get(it.id); it.status = x ? x.status : (it.status === 'pending' ? 'expired' : it.status); }
+    renderQueue(card, m, chat);
+  } catch { }
+}
+const QWORD = { pending: 'waiting for you', approved: 'approved', denied: 'denied', done: 'done', failed: 'failed', cancelled: 'stopped', expired: 'expired (Aero restarted)' };
+function renderQueue(card, m, chat) {
+  card.innerHTML = '';
+  const items = m.items || [], open = items.filter(x => x.status === 'pending');
+  card.classList.toggle('done', !open.length);
+  card.append(h('div', { class: 'qh' }, h('span', { class: 'ico', html: I.ask }),
+    h('b', {}, open.length ? `${open.length} action${open.length > 1 ? 's' : ''} queued for your OK` : 'Queued actions'),
+    h('span', { class: 'qwait muted' }, open.length ? (m.waiting ? ' · Aero is waiting for your decision' : ' · the rest of the task keeps going') : '')));
+  const list = h('div', { class: 'qlist' });
+  const picks = new Map();
+  for (const it of items) {
+    const row = h('label', { class: 'qitem ' + it.status },
+      it.status === 'pending' ? h('input', { type: 'checkbox', checked: true, onchange: e => picks.set(it.id, e.target.checked) }) : h('span', { class: 'qn' }, '#' + it.n),
+      h('span', {}, it.status === 'pending' ? `#${it.n} ` : '', h('b', { 'data-tool': it.name }, toolInfo(it.name).name), ' ', it.label || '',
+        it.physical ? h('small', { class: 'muted' }, ' · uses your mouse and keyboard') : null,
+        it.by ? h('small', { class: 'muted' }, ` · ${it.by}`) : null),
+      h('small', { class: 'muted qst' }, QWORD[it.status] || it.status));
+    list.append(row);
+    if (it.status === 'pending') picks.set(it.id, true);
+  }
+  card.append(list);
+  if (!open.length) return;
+  const decide = async mode => {
+    const decisions = {};
+    for (const it of open) decisions[it.id] = mode === 'deny' ? 'deny' : mode === 'all' || picks.get(it.id) ? 'approve' : 'deny';
+    $$('button, input', card).forEach(x => x.disabled = true);
+    try {
+      const r = await api('/api/autonomy/decide', { method: 'POST', json: { chat_id: chat.id, decisions } });
+      const live = new Map((r.queue || []).map(x => [x.id, x]));
+      for (const it of m.items) { const x = live.get(it.id); if (x) it.status = x.status; }
+      m.waiting = false; renderQueue(card, m, chat);
+      if (S.chat === chat) await saveChat(); else await api('/api/chats/' + chat.id, { method: 'PUT', json: chat }).catch(() => { });
+      if (!r.running && S.chat === chat && !S.streaming) {
+        const ok = open.filter(x => decisions[x.id] === 'approve').map(x => '#' + x.n), no = open.filter(x => decisions[x.id] === 'deny').map(x => '#' + x.n);
+        $('#input').value = (ok.length ? `I approved ${ok.join(', ')}.` : '') + (no.length ? ` I denied ${no.join(', ')}.` : '') + ' Continue.';
+        send();
+      }
+    } catch (e) { toast(e.message, true); $$('button, input', card).forEach(x => x.disabled = false); }
+  };
+  card.append(h('div', { class: 'qa' },
+    h('button', { class: 'btn sm', onclick: () => decide('picked') }, open.length > 1 ? 'Approve selected' : 'Approve'),
+    open.length > 1 ? h('button', { class: 'btn ghost sm', onclick: () => decide('all') }, 'Approve all') : null,
+    h('button', { class: 'btn danger sm', onclick: () => decide('deny') }, open.length > 1 ? 'Deny all' : 'Deny')));
+}
+function autonomySection(s) {
+  const wrap = h('div', {}, h('p', { class: 'muted' }, 'Loading…'));
+  const modes = [['ask', 'Ask me each time (a card per action)'], ['batch', 'Collect them and keep working: I approve the list'], ['auto', 'Full auto: an authority model decides, nobody is asked']];
+  const out = [
+    h('p', { class: 'sec-intro' }, 'What happens when the model wants to do something that needs your OK (the "ask" permissions in Tools, and anything that uses your real mouse and keyboard). Strict Background Only, strict offline and password fields stay off-limits in every mode.'),
+    h('div', { class: 'row2' },
+      field('In chats', select('approval_mode', s.approval_mode || 'ask', modes)),
+      field('In forever-loops', select('loop_approval_mode', s.loop_approval_mode || 'ask', modes), 'Loop rounds never wait: queued actions run at the start of the next round after you approve them.')),
+    field('Wait at the end of a reply (s)', num('batch_wait_s', s.batch_wait_s ?? 600, 10), 'Collect mode: how long a finished reply waits for your decision so it can use the results. After that, approving continues the chat.'),
+    field('Authority model (.gguf)', h('input', { type: 'text', 'data-k': 'authority_model', value: s.authority_model || '', placeholder: 'empty = the best installed small model' }), 'Runs on the CPU. Full auto never allows an action when it can\'t get an answer from it.'),
+    wrap];
+  (async () => {
+    let r; try { r = await api('/api/autonomy'); } catch (e) { wrap.innerHTML = `<div class="err-msg">${esc(e.message)}</div>`; return; }
+    wrap.innerHTML = '';
+    const a = r.authority || {};
+    const res = h('div');
+    const line = h('div', { class: 'callout' }, h('b', {}, a.model || 'No authority model installed'), ' · ',
+      a.model ? (a.shared_with_router ? 'shares the router\'s server' : a.ready ? 'running on the CPU' : 'starts on its first decision') : 'install the recommended one below',
+      a.error ? h('div', { class: 'err-msg' }, a.error) : null);
+    const btns = h('div', { style: 'display:flex;gap:8px;margin:8px 0 12px;flex-wrap:wrap' },
+      h('button', { class: 'btn ghost sm', onclick: async e => {
+        e.target.disabled = true; e.target.textContent = 'Downloading…';
+        try { const x = await api('/api/autonomy/install', { method: 'POST' }); toast('Installed ' + (x.authority?.model || '')); } catch (err) { toast(err.message, true); }
+        e.target.disabled = false; e.target.textContent = `Install ${(r.candidates || [])[0] || 'the recommended model'}`;
+      } }, `Install ${(r.candidates || [])[0] || 'the recommended model'}`),
+      h('button', { class: 'btn ghost sm', disabled: !a.model, onclick: async e => {
+        e.target.disabled = true; e.target.textContent = 'Testing…'; res.innerHTML = '';
+        try {
+          const x = await api('/api/autonomy/exam', { method: 'POST' });
+          res.append(h('div', { class: 'callout' }, `${x.score} of ${x.total} decisions right · ${x.false_allow} wrongly allowed · ${x.false_deny} wrongly denied · median ${x.ms_median} ms`),
+            h('div', { class: 'logbox' }, ...x.rows.filter(y => y.got !== y.want).map(y => h('div', {}, `${y.want} expected, ${y.got}: ${y.task} → ${y.action} (${y.reason})`))));
+        } catch (err) { toast(err.message, true); }
+        e.target.disabled = false; e.target.textContent = 'Test it (32 decisions)';
+      } }, 'Test it (32 decisions)'));
+    const log = h('div', { class: 'logbox' }, ...(r.log || []).slice(0, 25).map(x => h('div', {}, `${new Date(x.ts * 1000).toLocaleString()} · ${x.decision === 'allow' ? 'allowed' : 'denied'} ${x.tool} ${x.label || ''} · ${x.reason || ''}`)));
+    wrap.append(line, btns, res, h('h4', { class: 'sub-h' }, 'Recent authority decisions'), (r.log || []).length ? log : h('p', { class: 'muted' }, 'None yet.'));
+  })();
+  return out;
+}
+
 // ---------------------------------------------------------------- v1.1: the task's steps, live
 function taskProgress(ctx, ev) {
   const n = ev.node; if (!n) return;
@@ -1977,6 +2118,7 @@ function renderLoop() {
   bar.innerHTML = '';
   bar.append(...[h('span', { class: 'inf' }, '∞'),
     h('span', {}, h('b', {}, 'Forever-loop'), ` · round ${L.iteration}${max ? ' of ' + max : ''} · ${status}${mins >= 1 ? ` · ${mins} min` : ''}`),
+    h('span', { class: 'chip', 'data-tip': 'What happens when an action needs your OK (Settings > Autonomy)' }, MODE_WORD[S.settings?.loop_approval_mode || 'ask']),
     h('span', { class: 'grow' }),
     S.settings?.loop_journal !== false && L.base?.content ? h('button', { class: 'btn ghost sm', title: 'What the model learned in earlier rounds: what worked, what didn\'t, its next step', onclick: () => openJournal(L.base.content) }, 'Journal') : null,
     L.waitUntil ? h('button', { class: 'btn ghost sm', onclick: () => { S.loop.waitUntil = Date.now(); } }, 'Run now') : null,
@@ -2344,7 +2486,7 @@ async function loadCloud() {
 }
 
 // ---------------------------------------------------------------- settings
-const SECTIONS = ['General', 'Router', 'Claude', 'ChatGPT', 'GitHub', 'Plugins & MCP', 'Skills', 'Model & tuning', 'Tools', 'Apps', 'Privacy & offline', 'Memory', 'Appearance', 'Hugging Face', 'Updates', 'About'];
+const SECTIONS = ['General', 'Autonomy', 'Router', 'Claude', 'ChatGPT', 'GitHub', 'Plugins & MCP', 'Skills', 'Model & tuning', 'Tools', 'Apps', 'Privacy & offline', 'Memory', 'Appearance', 'Hugging Face', 'Updates', 'About'];
 async function openSettings(start = 'General') {
   if (typeof start !== 'string') start = 'General';
   const s = await api('/api/state').then(r => r.settings);
@@ -2370,6 +2512,7 @@ async function openSettings(start = 'General') {
       toggle('loop_journal', s.loop_journal !== false, 'Forever-loop journal: after each round the model writes down what worked and what didn\'t, and the next round starts from it'),
       toggle('auto_load_last', s.auto_load_last, 'On startup, load the last used model automatically'),
     ],
+    'Autonomy': () => autonomySection(s),
     'Router': () => routerSection(s),
     'Claude': () => claudeSection(s),
     'ChatGPT': () => chatgptSection(s),
@@ -2566,6 +2709,7 @@ function routerSection(s) {
     h('div', { class: 'row3' },
       field('Minimum tools', num('router_tools_min', s.router_tools_min, 1), 'The main model always gets at least this many (it can load more).'),
       field('Threads', num('router_threads', s.router_threads, 1), '0 = the benchmarked best'),
+      field('Runs on', select('router_device', s.router_device || 'cpu', [['cpu', 'CPU (no VRAM)'], ['gpu', 'GPU: about 5x faster decisions, about 1.5 GB of VRAM']]), 'On the GPU it moves back to the CPU while Remote Mode is on.'),
       field('Custom router .gguf', h('input', { type: 'text', 'data-k': 'router_model', value: s.router_model, placeholder: 'empty = the one chosen below' }))),
     wrap,
   ];

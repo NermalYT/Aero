@@ -41,6 +41,7 @@ LLAMA_PORT = int(os.environ.get("AERO_LLAMA_PORT", "8181"))
 TRIAL_PORT = LLAMA_PORT + 1
 ADVISOR_PORT = LLAMA_PORT + 2
 ROUTER_PORT = LLAMA_PORT + 3
+AUTHORITY_PORT = LLAMA_PORT + 4
 
 _PROMPT = """You are Aero, an autonomous AI agent running locally on the user's own computer ({os}). You are not a chatbot that describes what could be done: you have real tools, and when a task needs them you use them and finish the job. You can read, write and search files, run {shell} commands, {screen_line} run a real web browser, search the web, use connected MCP servers (GitHub and others), load skills, and remember things across chats.
 
@@ -172,10 +173,18 @@ DEFAULTS = {
         "skills": "auto",
         "agents": "auto",
         "ask": "auto",
+        "integrations": "auto",    # v1.2 integrations: lookups and status (library search, project info, previews)
+        "dev": "ask",              # v1.2 integrations that build, test, check, review or run code and apps
+        "setup": "ask",            # v1.2: installing an integration's SDK, toolchain or model into Aero's folder
+        "create": "auto",          # v1.2: images and diagrams written into Aero's own folders
         "mods": "off",             # mod_check: only switched on inside a "Mod Aero" chat (see mods.py)
     },
     "work_dir": str(Path.home()),
     "strict_background": False,    # never use the real mouse/keyboard (pyautogui, input="real"), not even with consent
+    "approval_mode": "ask",        # what needs an OK in a chat: ask (a card each) | batch (queue, keep working) | auto
+    "loop_approval_mode": "ask",   # the same for forever-loop rounds
+    "batch_wait_s": 600,           # batch: how long a reply waits at its end for your decision (loop rounds don't wait)
+    "authority_model": "",         # auto: the small model that decides ("" = best installed, else the router's)
     "browser_mode": "background",  # background (no window, Aero's own profile) | visible (a window you can watch)
     "app_scan_hours": 24,          # re-scan installed apps after this long (also after installs, or on request)
     "screenshot_max_side": 1568,
@@ -192,6 +201,7 @@ DEFAULTS = {
     "router_enabled": True,
     "router_model": "",            # path to the router .gguf ("" = the one chosen by the updater)
     "router_threads": 0,           # 0 = the benchmarked best
+    "router_device": "cpu",        # "gpu": all layers on the GPU (much faster decisions, about 1.5 GB of VRAM)
     "router_plan": True,           # let the router add a short plan for complex requests
     "router_tools_min": 4,         # never give the main model fewer tools than this (it can load_tools for more)
     # --- cloud review (Claude Fable 5.1 reviews; Claude Opus 5.5 takes over on major problems)

@@ -145,7 +145,17 @@ _BY_CATEGORY = {
     "files_write": _c(["filesystem.modify"], "local_write", locks=["file"]),
     "shell": _c(["terminal.execute"], "local_write", cancel=False),
     "memory": _c(["memory.recall"], "local_read"),
+    # v1.2 integrations (integrations/*): each pack registers exact entries for its tools with register()
+    "integrations": _c(["integration.read"], "local_read"),
+    "dev": _c(["integration.run"], "local_write", cancel=True, cost="medium"),
+    "setup": _c(["integration.install"], "local_write", "internet", cost="high"),
+    "create": _c(["integration.create"], "local_write", cost="medium"),
 }
+
+
+def register(name, caps, side="none", net="local", locks=(), verify="", cost="low"):
+    """Capability metadata for a tool defined outside this table (integration packs)."""
+    TOOL_CAPS[name] = _c(caps, side, net, locks=locks, verify=verify, cost=cost)
 _UNKNOWN = _c([], "external_write")
 # MCP tools whose name says they only read
 _READ_WORDS = ("get", "list", "search", "read", "fetch", "find", "query", "view", "show", "describe", "status")

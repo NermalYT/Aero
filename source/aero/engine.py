@@ -208,6 +208,8 @@ def build_args(model, cfg, port, mmproj=None, final=False, settings=None, spec=N
          "-c", str(cfg["ctx"]), "-ngl", str(cfg.get("ngl", 999)), "-np", "1"]
     if cfg.get("ncmoe"):
         a += ["--n-cpu-moe", str(cfg["ncmoe"])]
+    for o in cfg.get("ot") or ():                 # bigmodel.py: tensors kept in RAM (e.g. feed-forward of some layers)
+        a += ["-ot", str(o)]
     if cfg.get("threads"):
         a += ["-t", str(cfg["threads"])]
     if cfg.get("ub"):

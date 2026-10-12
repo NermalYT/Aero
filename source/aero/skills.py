@@ -23,7 +23,8 @@ _cache = {"t": 0.0, "v": []}
 def _roots():
     home = Path.home()
     s = load_settings()
-    roots = [("aero", SKILLS_DIR, 2), ("builtin", Path(__file__).resolve().parent / "skills_builtin", 2),
+    builtin = Path(__file__).resolve().parent / "skills_builtin"
+    roots = [("aero", SKILLS_DIR, 2), ("builtin", builtin, 2), ("pack", builtin / "packs", 2),
              ("claude", home / ".claude" / "skills", 2),
              ("claude-plugin", home / ".claude" / "plugins", 9), ("codex", home / ".codex" / "skills", 2)]
     wd = Path(str(s.get("work_dir") or "")).expanduser()

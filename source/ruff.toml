@@ -1,0 +1,2 @@
+# Vendored upstream skill files keep their own style (see skills_builtin/packs/*/UPSTREAM.md).
+extend-exclude = ["aero/skills_builtin/packs"]
