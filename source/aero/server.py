@@ -2294,7 +2294,8 @@ async def _startup():
     app_registry.scan_async()
     task_graph.prune()
     vram_policy_runner().start()
-    if load_settings().get("bundle_integrations", True):        # every integration ships with Aero (bundle.py)
+    if load_settings().get("bundle_integrations", True) and os.environ.get("AERO_BUNDLE") != "0":
+        # every integration ships with Aero (bundle.py); test copies (Mod Aero, the update check) set AERO_BUNDLE=0
         from .integrations import bundle
         bundle.start_background(busy=lambda: _job["busy"])
 
