@@ -270,11 +270,14 @@ def handoff(root: Path, headless=False):
     log = LOGS / "update.log"
     if osinfo.IS_WIN:
         bat = root / "Update-Aero.bat"
-        args = ["cmd", "/c", str(bat), "--auto"]
+        args = ["cmd", "/c", str(bat), "--auto"] + (["--headless"] if headless else [])
         flags = subprocess.CREATE_NEW_CONSOLE | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        # the folder this copy is installed in (C:\Aero normally). An environment variable rather than an argument:
+        # cmd /c drops the quotes around a second quoted path
+        env = dict(os.environ, AERO_INSTALL_DIR=str(ROOT))
 
         def go():
-            subprocess.Popen(args, cwd=str(root), creationflags=flags, close_fds=True)
+            subprocess.Popen(args, cwd=str(root), creationflags=flags, close_fds=True, env=env)
         return go
     args = ["sh", str(root / "install.sh"), "--update", "--yes", "--dir", str(ROOT)]
     if headless:
