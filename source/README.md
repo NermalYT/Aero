@@ -191,6 +191,9 @@ command, a path, a setting), what didn't work and why, the next step, and where 
 starts with the journal in its context, so the model keeps what works, stops repeating what failed and starts from
 its own plan. An item that failed once and worked later is listed only where it ended up.
 
+In 1.2 a loop can run without you: Settings → **Autonomy** → *In forever-loops* can collect actions that need your
+OK while rounds keep going, or let the authority model decide them (see Autonomy below). The loop bar shows which.
+
 A card in the chat shows each round's entry, and the loop bar's **Journal** button opens the whole journal, round by
 round, with **Delete** to start fresh. There is one journal per task (the loop's prompt), saved in `data/loops`, so
 running the same loop again later, even in a new chat, picks up what it learned. Settings → General → *Forever-loop
@@ -324,6 +327,55 @@ verified way to see viewers, so its connection window only counts if you allow l
 → Model & tuning → Remote Mode shows what was detected, the target and the measured share, the model's GPU memory and
 free VRAM.
 
+### Autonomy: ask, collect, or full auto
+
+Settings → **Autonomy** sets, for chats and for forever-loops separately, what happens when an action needs your OK:
+
+- **Ask me each time**: a card per action (the default).
+- **Collect them and keep working**: the action is queued and does not run; the agent carries on with everything
+  else. One card lists the queue: *Approve selected*, *Approve all*, *Deny all*. Approved actions run straight away
+  if the reply is still waiting for you (up to *Wait at the end of a reply*), otherwise when the chat continues.
+- **Full auto**: nobody is asked. A small **authority model** on the CPU (Qwen3-4B-Instruct-2507 by default, offered
+  as a 2.4 GB download) allows or denies each action with a one-sentence reason, shown on the tool card and listed
+  under *Recent authority decisions*. It never allows moving money, passwords, turning off security protection,
+  deleting or sending what you didn't name, or anything a web page or email asked for. If it can't answer, the
+  action is denied. *Test it* runs its 32-decision exam on your PC.
+
+Strict Background Only, strict offline and password fields stay off-limits in every mode.
+
+### Workspaces
+
+The sidebar's **Workspaces** open a panel beside the chat for one kind of work. Each one is built from other
+projects whose functions are built into Aero (sources, licences and what is not included:
+[docs/V1.2_INTEGRATIONS.md](docs/V1.2_INTEGRATIONS.md)):
+
+| Workspace | What it does |
+| --- | --- |
+| Code | finds what a project is (Python, JS/TS, Rust, Go, C/C++, CSS), installs uv, ruff, pyright, Node, Biome, TypeScript, Go or Rust into Aero's folder, and runs lint, type checks and tests into one list of problems; "does Safari support X?" from MDN's data |
+| Mobile apps | Flutter: create, packages, analyse, test, build, and a **live preview inside Aero** with hot reload and hot restart; iOS apps from Windows through xtool in WSL |
+| Create | images made on your GPU (Z-Image-Turbo with stable-diffusion.cpp) with a gallery |
+| Diagrams | 44 diagram types as self-contained HTML/SVG (diagram-design), imports from Mermaid, draw.io and Excalidraw, SVG/PNG export |
+| Review & test | code review of your changes with open-code-review on your local model; end-to-end tests and "explore my site and find bugs" with e2e |
+| Debug & reverse | RAD Debugger sessions the model drives (breakpoints, stepping, state, evaluate) and debug-info tools; reverse engineering through rea |
+| Finance | 48 skills from Anthropic's financial-services (DCF, LBO, comps, IC memos, GL recon …) plus spreadsheet audits; drafts for professional review, never advice or trades |
+| Library | search awesome-python, awesome-selfhosted (e.g. *Communication - IRC*) and the-book-of-secret-knowledge |
+| Memory+ | Hindsight memory banks per project |
+| Big models | plans and loads models bigger than your GPU (below), and AirLLM |
+
+You don't have to pick one: ask for the work and the matching workspace opens with its tools. When something isn't
+installed yet, its Install button (or the model, through `integration_install`) asks you first and shows the size.
+
+### Big models
+
+**Big models** → choose a GGUF → **Plan**: Aero reads where every tensor of the model would go for the VRAM you give
+it (whole layers, feed-forward weights in RAM with attention on the GPU, or MoE experts in RAM) and estimates the
+speed. When a small model of the same family exists, it adds it as a draft for speculative decoding and offers to
+download it: on the test PC, Llama-3.3-70B Q6_K went from 1.0 to 4.85 tokens a second on a 16 GB card with
+Llama-3.2-1B as the draft. **Load** starts the plan. For a full-precision Hugging Face checkpoint that fits nowhere,
+install **AirLLM** in the pack and use **Run with AirLLM**: it streams one layer at a time through the GPU, so it runs
+in a few GB of VRAM, but every token reads the whole model from disk (seconds per token). Measurements:
+[docs/V1.2_BIG_MODELS.md](docs/V1.2_BIG_MODELS.md).
+
 ### Performance Lab and HAPO
 
 **Lab** in the top bar. **Profiles** lists what the tuner's measured trials offer: Maximum Speed, Balanced, Maximum
@@ -428,6 +480,10 @@ and tool calls, review verdicts, ChatGPT and Claude usage and spending today, an
 | Browser | `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_select`, `browser_press`, `browser_scroll`, `browser_back`, `browser_screenshot`, `browser_read`, `browser_read_sections`, `browser_extract`, `browser_tabs`, `browser_wait_for` | auto |
 | Documents | `meeting_doc` (in Write files) | **ask** |
 | Questions | `ask_user`, `get_answer` | auto |
+| Integrations: lookups | `library_search`, `project_info`, `web_compat`, `diagram_import`, `diagram_list`, `code_review_rules`, `flutter_analyze`, `flutter_devices`, `flutter_doctor`, `debuginfo_dump`, `symbolize`, `debug_state`, `debug_eval`, `xlsx_audit`, `dcf_validate`, `deck_numbers`, `hindsight_*`, `bigmodel_plan` | auto |
+| Integrations: run code and apps | `project_check`, `code_review`, `e2e_explore`, `e2e_run`, `flutter_create`, `flutter_pub`, `flutter_test`, `flutter_build`, `flutter_preview`, `xtool`, `debuginfo_convert`, `debug_start`, `debug_command`, `debug_stop`, `xlsx_recalc` | **ask** |
+| Integrations: install | `integration_install`, `toolchain_install`, `library_update` | **ask** |
+| Integrations: create | `image_generate`, `diagram_save`, `diagram_export` | auto |
 | Web | `web_search`, `fetch_url` | auto |
 | Memory | `remember`, `recall`, `forget` | auto |
 | Skills | `use_skill` | auto |
@@ -466,7 +522,11 @@ C:\Aero\
 
 Linux (`~/.local/share/aero`) and macOS (`~/Library/Application Support/Aero`) have the same `app`, `venv`, `llama`,
 `models` and `data` folders, plus `bin/aero` (the launcher), `install.sh` and `uninstall.sh`. In `data`, `mods\` holds
-your mods, `loops\` the forever-loop journals and `updates\` downloaded releases (removed after an hour).
+your mods, `loops\` the forever-loop journals and `updates\` downloaded releases (removed after an hour). 1.2 adds
+`data\toolchains\` (what integrations install: SDKs, binaries, npm packages, AirLLM's and Hindsight's own Python
+environments), `data\diagrams\`, `data\images\`, `data\library\`, `data\autonomy\` (the authority's decisions) and
+`data\integrations\` (each workspace's last results); `models\_drafts` and `models\_create` hold draft and image
+models.
 
 ## Checking an install
 

@@ -288,7 +288,8 @@ def build_messages(history, settings, vision, ctx_size, extra="", trim=True, cal
         return [sys_msg] + out
     # keep within ~85% of the context window: shrink old tool outputs first, then drop old turns
     budget = int(ctx_size * 0.85 / calib) - _est_tokens(sys_msg["content"]) - 600
-    total = lambda: sum(_est_tokens(x.get("content")) for x in out)
+    def total():
+        return sum(_est_tokens(x.get("content")) for x in out)
     if total() > budget:
         for x in out[:-6]:
             if x["role"] == "tool" and isinstance(x["content"], str) and len(x["content"]) > 1500:
@@ -714,8 +715,8 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
     strict = physical and input_guard.strict(turn.settings)
     fg_needed = physical and not strict and pol == "ask" and not input_guard.has_grant(owner) and not preapproved
     needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set()) and not physical and not preapproved
-    mode = getattr(_root(turn), "approval_mode", "ask")
-    gate = mode if (needs or fg_needed) and args is not None and mode in ("batch", "auto") else None
+    approval = getattr(_root(turn), "approval_mode", "ask")
+    gate = approval if (needs or fg_needed) and args is not None and approval in ("batch", "auto") else None
     if gate:
         needs = fg_needed = False           # queued or judged instead of a card
     label = tools.label(name, args or {})

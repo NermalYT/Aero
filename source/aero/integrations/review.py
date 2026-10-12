@@ -15,11 +15,10 @@ import sys
 import time
 from pathlib import Path
 
-import httpx
 
 from . import Pack, Requirement, register, toolchain as tc
 from .. import action_results, capabilities
-from ..config import DATA, IS_WIN, LLAMA_PORT
+from ..config import DATA, IS_WIN
 from ..tools import tool
 
 STATE = DATA / "integrations" / "review"
@@ -32,21 +31,6 @@ EXT_RULE = {".py": "python", ".go": "go", ".rs": "rust", ".java": "java", ".kt":
             ".swift": "swift", ".rb": "default", ".sol": "solidity", ".tf": "terraform", ".yaml": "yaml", ".yml": "yaml",
             ".json": "json", ".proto": "protobuf", ".graphql": "graphql", ".zig": "zig", ".nim": "nim",
             ".dart": "default", ".m": "objc", ".scala": "default", ".r": "r", ".jl": "julia", ".hs": "haskell"}
-
-
-def local_llm():
-    """Aero's own model server: (OpenAI-compatible base URL, running?)."""
-    url = f"http://127.0.0.1:{LLAMA_PORT}"
-    import socket
-    with socket.socket() as s:                   # Windows takes ~2 s to refuse a closed port: probe briefly first
-        s.settimeout(0.3)
-        if s.connect_ex(("127.0.0.1", LLAMA_PORT)) != 0:
-            return url + "/v1", False
-    try:
-        ok = httpx.get(url + "/health", timeout=2).status_code == 200
-    except httpx.HTTPError:
-        ok = False
-    return url + "/v1", ok
 
 
 def ocr_bin():
@@ -83,7 +67,7 @@ def review(path, mode="workspace", commit=None, frm=None, to=None, background=""
     exe = ocr_bin()
     if not exe:
         raise RuntimeError("open-code-review isn't installed (integration_install open-code-review).")
-    url, ok = (model_url, True) if model_url else local_llm()
+    url, ok = (model_url, True) if model_url else tc.local_model()
     if not ok:
         raise RuntimeError("No local model is loaded, and open-code-review uses Aero's model. Load a model first.")
     out = Path(STATE) / f"review-{int(time.time())}.json"
@@ -204,7 +188,7 @@ def _git_ok():
 
 
 def _model_ok():
-    url, ok = local_llm()
+    url, ok = tc.local_model()
     return ok, "Aero's model is loaded" if ok else "load a model first (open-code-review uses it)"
 
 

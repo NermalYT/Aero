@@ -140,11 +140,6 @@ def infer(text, limit=4):
     return hits[:limit]
 
 
-def workspace_for(text):
-    hits = infer(text, 1)
-    return hits[0][0].workspace if hits else None
-
-
 def context(text, available):
     """For the pipeline: (turn-context line, tools to add, workspace id, pack ids). Deterministic, no model call."""
     hits = infer(text)

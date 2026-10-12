@@ -489,7 +489,6 @@ async def load(req: Request):
         s = load_settings()
         unload()
         h = hw(force=True)
-        ver = server_version()
         spec = spec_args(m["path"], s)
         key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
         entry = None if retune else tuner.cached(key)

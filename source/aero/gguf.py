@@ -126,7 +126,8 @@ def summarize(path) -> dict:
 
 def summarize_kv(kv: dict, size=0, n_parts=1, fallback_name="") -> dict:
     arch = kv.get("general.architecture", "llama")
-    g = lambda k, d=0: kv.get(f"{arch}.{k}", d)
+    def g(k, d=0):
+        return kv.get(f"{arch}.{k}", d)
     n_layer = int(g("block_count", 32))
     n_embd = int(g("embedding_length", 4096))
     n_head = int(_first(g("attention.head_count", 32), 32))

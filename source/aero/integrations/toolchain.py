@@ -275,5 +275,27 @@ def npm_bin(name, program):
     return None
 
 
-def fmt_mb(n):
-    return f"{n / 2**20:,.0f} MB"
+def run_python(script, args, timeout=180):
+    """A vendored helper script under `python -I` (isolated: no user site, no current folder on sys.path).
+    Returns (exit code, stdout, stderr)."""
+    import sys
+    r = subprocess.run([sys.executable, "-I", str(script), *map(str, args)], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=timeout, creationflags=NO_WINDOW)
+    return r.returncode, r.stdout or "", r.stderr or ""
+
+
+def local_model():
+    """Aero's own model server: (OpenAI-compatible base URL, running?). The integrations that need an LLM (code
+    review, e2e, Hindsight) are pointed at it."""
+    import socket
+    from ..config import LLAMA_PORT
+    url = f"http://127.0.0.1:{LLAMA_PORT}"
+    with socket.socket() as s:                   # Windows takes ~2 s to refuse a closed port: probe briefly first
+        s.settimeout(0.3)
+        if s.connect_ex(("127.0.0.1", LLAMA_PORT)) != 0:
+            return url + "/v1", False
+    try:
+        ok = httpx.get(url + "/health", timeout=2).status_code == 200
+    except httpx.HTTPError:
+        ok = False
+    return url + "/v1", ok

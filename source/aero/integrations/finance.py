@@ -14,8 +14,6 @@ Aero adds the checks the skills call for, working on the user's files:
 """
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
 from collections import defaultdict
 from pathlib import Path
@@ -177,9 +175,7 @@ def xlsx_recalc(ctx, path):
 
 
 def _script(rel, args, timeout=180):
-    r = subprocess.run([sys.executable, "-I", str(SKILLS / rel), *map(str, args)], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=timeout, creationflags=tc.NO_WINDOW)
-    return r.returncode, r.stdout, r.stderr
+    return tc.run_python(SKILLS / rel, args, timeout)
 
 
 @tool("dcf_validate", "Check a DCF model workbook with the dcf-model skill's validator: formula errors, terminal growth "

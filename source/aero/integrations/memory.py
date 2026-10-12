@@ -19,7 +19,6 @@ import time
 import httpx
 
 from . import Pack, Requirement, register, toolchain as tc
-from .review import local_llm
 from .. import action_results, capabilities
 from ..config import IS_WIN, LLAMA_PORT
 from ..tools import tool
@@ -77,7 +76,7 @@ def start(timeout=240):
         return URL
     if not _exe().exists():
         raise RuntimeError("Hindsight isn't installed (integration_install hindsight).")
-    base, ok = local_llm()
+    base, ok = tc.local_model()
     env = {"HINDSIGHT_API_HOST": "127.0.0.1", "HINDSIGHT_API_PORT": str(PORT),
            "HINDSIGHT_API_DATABASE_URL": f"pg0://aero?data_dir={(HOME / 'pg0').as_posix()}",
            "HINDSIGHT_API_LLM_PROVIDER": "openai" if ok else "none", "HINDSIGHT_API_LLM_BASE_URL": base,

@@ -57,9 +57,8 @@ def _slug(name):
 
 
 def _script(name, args, timeout=120):
-    r = subprocess.run([sys.executable, "-I", str(SCRIPTS / name), *map(str, args)], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=timeout, creationflags=toolchain.NO_WINDOW)
-    return r.returncode, (r.stdout or "") + (("\n" + r.stderr) if r.stderr.strip() else "")
+    rc, out, err = toolchain.run_python(SCRIPTS / name, args, timeout)
+    return rc, out + (("\n" + err) if err.strip() else "")
 
 
 def gallery():

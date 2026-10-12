@@ -1,6 +1,6 @@
 {
  "at": "2026-10-11 20:01:23",
- "tree": "C:\\Users\\Dom\\AeroTest\\v110\\source",
+ "tree": "<test folder>\\v110\\source",
  "model": "MiniCPM5-2B-Q4_K_M.gguf",
  "threads": 10,
  "device": "cpu",

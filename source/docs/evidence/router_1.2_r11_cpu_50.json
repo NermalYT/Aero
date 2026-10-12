@@ -1,6 +1,6 @@
 {
  "at": "2026-10-11 19:58:50",
- "tree": "C:\\Users\\Dom\\AeroTest\\v110\\source",
+ "tree": "<test folder>\\v110\\source",
  "model": "MiniCPM5-2B-Q4_K_M.gguf",
  "threads": 10,
  "device": "cpu",
@@ -39,7 +39,7 @@
    ],
    "complexity": "simple",
    "error": null,
-   "apps": "Apps: Roblox (installed; opens through Bloxstrap.exe; related: Bloxstrap; best via protocol; app_launch \"roblox\") \u00b7 Bloxstrap (installed; related: Roblox; best via protocol; app_launch \"bloxstrap\")"
+   "apps": "Apps: Roblox (installed; opens through Bloxstrap.exe; related: Bloxstrap; best via protocol; app_launch \"roblox\") · Bloxstrap (installed; related: Roblox; best via protocol; app_launch \"bloxstrap\")"
   },
   {
    "text": "Check my Gmail for meetings this week and make me a document with everything I need.",

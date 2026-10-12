@@ -67,7 +67,8 @@ def recommend(files, key, gpu=True):
     then MoE expert offload (still fast), then full GPU with 16k+, then low-bit full GPU, then short context,
     then a split.
     F16/BF16 are never recommended: Q8_0 is indistinguishable and half the size."""
-    q = lambda f: f[key]
+    def q(f):
+        return f[key]
     tiers = [
         ([f for f in files if q(f)["fit"] == "gpu" and _bpw(f) >= 3.5], 8.5,
          "best quality that runs fully on your GPU with {ctx} context"),

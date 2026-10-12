@@ -1,6 +1,6 @@
 {
  "at": "2026-10-11 20:04:17",
- "tree": "C:\\Users\\Dom\\AppData\\Roaming\\Claude\\scratch-workspaces\\f16b2223-c80d-4492-a861-19d4b516a938\\88b44bdc-9fbc-4e6a-ae8f-6e775361460c\\scratch-2026-10-09-6fd3fd\\Aero\\source",
+ "tree": "<checkout>\\f16b2223-c80d-4492-a861-19d4b516a938\\88b44bdc-9fbc-4e6a-ae8f-6e775361460c\\scratch-2026-10-09-6fd3fd\\Aero\\source",
  "model": "MiniCPM5-2B-Q4_K_M.gguf",
  "threads": 10,
  "device": "cpu",
@@ -39,7 +39,7 @@
    ],
    "complexity": "simple",
    "error": null,
-   "apps": "Apps: Roblox (installed; opens through Bloxstrap.exe; related: Bloxstrap; best via protocol; app_launch \"roblox\") \u00b7 Bloxstrap (installed; related: Roblox; best via protocol; app_launch \"bloxstrap\")"
+   "apps": "Apps: Roblox (installed; opens through Bloxstrap.exe; related: Bloxstrap; best via protocol; app_launch \"roblox\") · Bloxstrap (installed; related: Roblox; best via protocol; app_launch \"bloxstrap\")"
   },
   {
    "text": "Check my Gmail for meetings this week and make me a document with everything I need.",

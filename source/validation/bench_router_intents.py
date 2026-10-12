@@ -110,9 +110,11 @@ def run(model, tree, out, threads, prompts=None, gpu=False):
     tools.load_all()
     s = config.load_settings()
     s["local_only"] = False
-    catalog = pipeline.tool_catalog(s)
-    srv = LlamaServer(config.ROUTER_PORT + 30, "router-bench")
     import inspect
+    full = pipeline.tool_catalog(s)
+    # what Aero hands the router: 1.2 leaves the integration packs' tools out (they come with their pack)
+    catalog = pipeline.tool_catalog(s, router=True) if "router" in inspect.signature(pipeline.tool_catalog).parameters         else full
+    srv = LlamaServer(config.ROUTER_PORT + 30, "router-bench")
     if gpu and "gpu" not in inspect.signature(router.server_args).parameters:
         raise SystemExit("This Aero version's router has no GPU option.")
     args = router.server_args(model, threads, router.physical_cores(), **({"gpu": True} if gpu else {}))
@@ -138,7 +140,7 @@ def run(model, tree, out, threads, prompts=None, gpu=False):
         ms = round((time.time() - t0) * 1000)
         import inspect
         kw = {"text": text} if "text" in inspect.signature(pipeline.choose_exposure).parameters else {}
-        exposed = pipeline.choose_exposure(d, s, None, [c[0] for c in catalog], **kw) if d else []
+        exposed = pipeline.choose_exposure(d, s, None, [c[0] for c in full], **kw) if d else []
         apps_line = ""
         if hasattr(pipeline, "app_context") and d:          # v1.1: deterministic app hints added at turn time
             turn = type("T", (), {"exposed": list(exposed), "settings": s})()

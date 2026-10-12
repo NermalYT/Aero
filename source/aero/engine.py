@@ -357,11 +357,11 @@ class LlamaServer:
 
 
 def classify_failure(log: str) -> str:
-    l = log.lower()
-    if "out of memory" in l or "cudamalloc failed" in l or "failed to allocate" in l or "unable to allocate" in l:
+    low = log.lower()
+    if any(k in low for k in ("out of memory", "cudamalloc failed", "failed to allocate", "unable to allocate")):
         return "out of memory"
-    if "no kernel image" in l or "unsupported gpu" in l:
+    if "no kernel image" in low or "unsupported gpu" in low:
         return "this llama.cpp build does not support the GPU"
-    if "failed to load model" in l or "error loading model" in l:
+    if "failed to load model" in low or "error loading model" in low:
         return "model failed to load (unsupported architecture or corrupt file)"
     return "server exited"

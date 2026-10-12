@@ -291,10 +291,10 @@ _OLD_PROMPT_HASHES = {"da007051eb78a68a", "1fd67a9e6f73d5db", "ef381fe6be5c58eb"
                       "4d760de7f0a10520", "906b616560e5ca32"}
 
 
-# The same for Aero 1.0's prompt template with this computer's OS name and shell put back as placeholders (Windows,
-# other desktops, no desktop), so an untouched 1.0 prompt is recognised on any OS.
-_OLD_TEMPLATE_HASHES = {"850179e3f9f5c2d2", "74ef2db71e790dde", "ba9ea4a29400438b",       # 1.0
-                        "b832fd7f70420cc4", "8fbc18042f487e5e", "7f8a0013245a027e"}                         # 1.1
+# The same for the 1.0 and 1.1 prompt templates with this computer's OS name and shell put back as placeholders
+# (Windows, other desktops, no desktop), so an untouched older prompt is recognised on any OS.
+_OLD_TEMPLATE_HASHES = {"850179e3f9f5c2d2", "74ef2db71e790dde", "ba9ea4a29400438b",     # 1.0
+                        "b832fd7f70420cc4", "8fbc18042f487e5e", "7f8a0013245a027e"}     # 1.1
 
 
 def _prompt_hash(text):

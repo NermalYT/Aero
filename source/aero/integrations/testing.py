@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 from . import Pack, Requirement, register, toolchain as tc
-from .review import local_llm
 from .. import action_results, capabilities
 from ..config import IS_WIN
 from ..tools import tool
@@ -56,7 +55,7 @@ def _project(url):
     slug = re.sub(r"[^a-z0-9]+", "-", url.lower())[:60].strip("-") or "app"
     d = PROJECTS / slug
     (d / "tests").mkdir(parents=True, exist_ok=True)
-    base, _ = local_llm()
+    base, _ = tc.local_model()
     (d / "e2e.config.ts").write_text(CONFIG.format(url=url, url_js=json.dumps(url), base=json.dumps(base)),
                                      encoding="utf-8")
     pj = d / "package.json"
@@ -90,7 +89,7 @@ def explore(url, goal="", max_steps=6, cancel=None):
     exe = e2e_bin()
     if not exe:
         raise RuntimeError("e2e isn't installed (integration_install e2e).")
-    _, ok = local_llm()
+    _, ok = tc.local_model()
     if not ok:
         raise RuntimeError("No local model is loaded; e2e's agent steps use Aero's model. Load a model first.")
     d = _project(url)

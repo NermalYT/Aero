@@ -461,7 +461,8 @@ class Tuner:
             return pool[0] if pool else None
         b = self.best()
         floor = self.speed_floor()
-        useful = lambda t: t["ok"] and not t.get("retest") and t["tg"] >= floor
+        def useful(t):
+            return t["ok"] and not t.get("retest") and t["tg"] >= floor
         if self.mode == "max_speed":
             order = [("gpu+", b), ("ub+", b)] + ([("ctx+", b)] if b["cfg"]["ctx"] < 32768 else []) + \
                     [("threads+", b), ("threads-", b), ("kv+", b)]
@@ -595,7 +596,8 @@ class Tuner:
         if self.mode == "max_speed":
             return [anchor]
         a, n = self.alpha(), sp.n
-        rel = lambda k: (1 + a * anchor["k"] / n) / (1 + a * k / n)
+        def rel(k):
+            return (1 + a * anchor["k"] / n) / (1 + a * k / n)
         floor = 0.8 if self.mode == "balanced" else 0.5
         opt = anchor
         for c in sp.ctx:
