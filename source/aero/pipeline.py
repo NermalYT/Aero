@@ -597,6 +597,8 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
                   agent.REVIEWER_NAMES and m.get("content")), "") or task
     name = agents.clean_name(meta.get("name")) or agents.name_from_text(first or title)
     agents.start(chat_id, name, title, turn.model_name, task, {**meta, "named": bool(meta.get("name"))})
+    from . import jobs
+    track = jobs.track_start(chat_id, title or name, task, loop=opts.get("loop"), job=opts.get("_job"))
     stats.SESSION["turns"] += 1
     loop = opts.get("loop") or {}
     if loop:
@@ -604,11 +606,14 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
                                  "started": loop.get("started") or time.time(), "chat_id": chat_id}
     ids = {"chat": chat_id}
     failed = False
+    closed = False              # the stream went away while the model worked (window closed, Aero shut down)
+    working = [False]           # only then is the turn unfinished: not while waiting for the model or after the answer
 
     def out(ev):
         agents.note(ids["chat"], ev)
         if ev.get("t") == "compacted" and ev.get("new_chat_id"):
             ids["chat"] = ev["new_chat_id"]
+            jobs.track_rebind(track, ev["new_chat_id"])
         return _sse(ev)
 
     try:
@@ -648,8 +653,10 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
                 turn.memory_text = (turn.memory_text + "\n\n" + turn.experience_text).strip()
         yield out({"t": "lane", "lane": "local", "phase": "work", "model": turn.model_name,
                    "think": turn.think, "tools": len(turn.exposed) if turn.exposed is not None else None})
+        working[0] = True
         async for ev in agent.run_local(turn):
             yield out(ev)
+        working[0] = False
         await save_cache(turn)            # now, before reviews and learning use the server
         if (turn.review or turn.gpt_review) and not turn.cancel.is_set():
             async for ev in review_passes(turn):
@@ -663,6 +670,9 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         if learn:
             async for ev in learn_from_run(turn, task, name, "stopped" if turn.cancel.is_set() else "done"):
                 yield out(ev)
+    except (GeneratorExit, asyncio.CancelledError):
+        closed = working[0]
+        raise
     except httpx.ConnectError:
         failed = True
         yield out({"t": "error", "error": "The model server is not running. Load a model first."})
@@ -695,6 +705,13 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         final = next((m.get("content") for m in reversed(turn.history) if m.get("role") == "assistant"
                       and not m.get("tool_calls") and (m.get("content") or "").strip()), "")
         agents.finish(ids["chat"], "stopped" if stopped else "error" if failed else "done", final)
+        jobs.track_end(track, "interrupted" if closed and not stopped else
+                       "stopped" if stopped else "error" if failed else "done")      # never raises
+        if callable(opts.get("_sink")):                 # a scheduled run (jobs.py) keeps the finished history
+            try:
+                opts["_sink"](turn)
+            except Exception:  # noqa: BLE001
+                pass
 
     if summary and (summary["completed"] or summary["not_completed"]):
         done = "; ".join(summary["completed"][-8:]) or "nothing yet"

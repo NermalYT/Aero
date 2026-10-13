@@ -815,6 +815,112 @@ async function pickProfile(id, name) {
   else { toast('Profile saved: it is used the next time this model loads.'); renderMyModels(); }
 }
 
+// ---------------------------------------------------------------- tasks (1.2.75)
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+/** The sidebar's Tasks count (interrupted work first, else how many schedules are on). */
+async function refreshTaskCount() {
+  let d;
+  try { d = await api('/api/jobs'); } catch { return null; }
+  const n = (d.interrupted || []).length, s = (d.scheduled || []).filter(x => x.enabled !== false).length;
+  $('#taskCount').textContent = n ? `${n} interrupted` : s ? String(s) : '';
+  return d;
+}
+
+/** At startup: work Aero was doing when it closed. One toast that opens Tasks. */
+async function checkInterrupted() {
+  const d = await refreshTaskCount();
+  const n = (d?.interrupted || []).length;
+  if (n) toast(`Aero (or its window) closed while working on ${n === 1 ? `"${d.interrupted[0].title || d.interrupted[0].task.slice(0, 40)}"` : `${n} tasks`}. Open Tasks to resume.`, false, 9000);
+}
+
+async function resumeTask(id) {
+  if (S.st?.engine.status !== 'ready') { toast('Load a model first, then resume.', true); return showLauncher(); }
+  if (S.streaming) return toast('Wait for the current reply to finish.', true);
+  let r;
+  try { r = await api('/api/jobs/resume', { method: 'POST', json: { id } }); } catch (e) { return toast(e.message, true); }
+  $('#tasksOv')?.remove();
+  await openChat(r.chat_id);
+  if (S.chat?.id !== r.chat_id) return toast('That chat could not be opened, so nothing was sent.', true);
+  if (r.loop) {                                   // a forever-loop: start its rounds again with the same prompt and app
+    const last = [...S.chat.messages].reverse().find(m => m.role === 'user' && m.loop);
+    if (last?.target_app) { S.pending.app = last.target_app; renderChips(); }
+    S.loop.armed = true; renderLoop?.();
+    $('#input').value = last?.content || r.task;
+  } else {
+    $('#input').value = r.text;
+  }
+  autosize(); send();
+}
+
+/** Today as YYYY-MM-DD in local time (toISOString would give the UTC day). */
+function localDate(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+
+function scheduleForm(onSave) {
+  const name = h('input', { type: 'text', placeholder: 'Morning check' });
+  const prompt = h('textarea', { rows: 3, placeholder: 'Check my email and GitHub notifications and summarise what needs me today.' });
+  const when = h('select', {}, ...[['daily', 'Every day'], ['weekdays', 'Monday to Friday'], ['weekly', 'Every week'], ['every', 'Every few minutes / hours'], ['once', 'Once']].map(([v, l]) => h('option', { value: v }, l)));
+  const time = h('input', { type: 'time', value: '08:00' });
+  const date = h('input', { type: 'date' });
+  const minutes = h('input', { type: 'number', min: 5, step: 5, value: 60 });
+  const day = h('select', {}, ...WEEKDAYS.map((d, i) => h('option', { value: i }, d)));
+  const same = h('label', { class: 'toggle' }, h('input', { type: 'checkbox' }), ' Continue one chat each time (otherwise a new chat per run)');
+  const show = () => {
+    const w = when.value;
+    time.parentElement.style.display = w === 'every' ? 'none' : '';
+    date.parentElement.style.display = w === 'once' ? '' : 'none';
+    minutes.parentElement.style.display = w === 'every' ? '' : 'none';
+    day.parentElement.style.display = w === 'weekly' ? '' : 'none';
+  };
+  when.onchange = show;
+  const save = h('button', { class: 'btn', onclick: async () => {
+    const w = when.value; let schedule = { type: w };
+    if (w === 'every') schedule.minutes = +minutes.value;
+    else if (w === 'once') { const t = new Date(`${date.value || localDate()}T${time.value}`); schedule.at = t.getTime() / 1000; }
+    else { schedule.time = time.value; if (w === 'weekly') schedule.day = +day.value; }
+    try { await api('/api/jobs/scheduled', { method: 'POST', json: { name: name.value, prompt: prompt.value, schedule, same_chat: $('input', same).checked } }); }
+    catch (e) { return toast(e.message, true); }
+    onSave();
+  } }, 'Schedule it');
+  const box = h('div', { class: 'sched-form' },
+    field('Name', name), field('What Aero should do each time', prompt),
+    h('div', { class: 'row2' }, field('When', when), field('Time', time)),
+    h('div', { class: 'row2' }, field('Date', date), field('Every (minutes)', minutes)), field('Day', day), same,
+    h('small', { class: 'muted' }, 'Runs when Aero is open and a model is loaded, and waits while you are chatting. Actions that need an OK are queued in the chat of that run for you to approve; nobody is asked questions, sign-in pages are skipped, and your mouse and keyboard are never used.'),
+    save);
+  setTimeout(show, 0);
+  return box;
+}
+
+async function openTasks() {
+  $('#tasksOv')?.remove();
+  const body = h('div', { class: 'tasks-body' }, h('p', { class: 'muted' }, 'Loading…'));
+  const ov = h('div', { class: 'overlay', id: 'tasksOv', onclick: e => { if (e.target === ov) ov.remove(); } },
+    h('div', { class: 'gate-card tasks-card' }, h('div', { class: 'rp-head' }, h('h3', {}, 'Tasks'), h('button', { class: 'icon-btn', html: I.x, onclick: () => ov.remove() })), body));
+  document.body.append(ov);
+  const render = async () => {
+    let d;
+    try { d = await api('/api/jobs'); } catch (e) { body.innerHTML = ''; body.append(h('div', { class: 'err-msg' }, e.message)); return; }
+    body.innerHTML = '';
+    if ((d.interrupted || []).length) body.append(wsSec('Interrupted when Aero closed', h('div', {},
+      ...d.interrupted.map(t => h('div', { class: 'task-row' },
+        h('div', { class: 'task-main' }, h('b', {}, t.title || 'Chat'), h('small', { class: 'muted' }, `${t.loop ? 'forever-loop · ' : ''}${new Date(t.started * 1000).toLocaleString()} · ${t.task.slice(0, 120)}`)),
+        h('button', { class: 'btn sm', onclick: () => resumeTask(t.id) }, 'Resume'),
+        h('button', { class: 'btn ghost sm', onclick: async () => { await api('/api/jobs/dismiss', { method: 'POST', json: { id: t.id } }); render(); checkInterrupted(); } }, 'Dismiss')))),
+      { open: true, note: `${d.interrupted.length}` }));
+    const rows = (d.scheduled || []).map(t => h('div', { class: 'task-row' + (t.enabled === false ? ' off' : '') },
+      h('div', { class: 'task-main' }, h('b', {}, t.name), h('small', { class: 'muted' },
+        `${t.when}` + (t.next_run && t.enabled !== false ? ` · next ${new Date(t.next_run * 1000).toLocaleString()}` : '') +
+        (t.last_run ? ` · last ${new Date(t.last_run * 1000).toLocaleString()} (${t.last_status})` : '') + (d.running === t.id ? ' · running now' : ''))),
+      h('label', { class: 'toggle', title: 'On / off' }, h('input', { type: 'checkbox', checked: t.enabled !== false, onchange: async e => { await api(`/api/jobs/scheduled/${t.id}`, { method: 'PUT', json: { enabled: e.target.checked } }); render(); } })),
+      h('button', { class: 'btn ghost sm', onclick: async () => { try { await api(`/api/jobs/scheduled/${t.id}/run`, { method: 'POST' }); toast('Running it now: it shows up in your chats.'); setTimeout(render, 1500); } catch (e) { toast(e.message, true); } } }, 'Run now'),
+      h('button', { class: 'btn ghost sm danger', onclick: async () => { if (confirm(`Delete the scheduled task "${t.name}"?`)) { await api(`/api/jobs/scheduled/${t.id}`, { method: 'DELETE' }); render(); } } }, 'Delete')));
+    body.append(wsSec('Scheduled', h('div', {}, rows.length ? null : h('p', { class: 'muted' }, 'Nothing scheduled. Add one below, or just ask Aero ("every weekday at 8, check my email").'), ...rows), { open: true, note: rows.length ? String(rows.length) : 'none' }),
+      wsSec('New scheduled task', scheduleForm(() => { render(); checkInterrupted(); }), { open: !rows.length }));
+  };
+  render();
+}
+
 /** Select (1.2.6): one click from a search result to a tuned, loaded model. The plan is shown first only when the
  *  model will be slow on this PC (with smaller models of the same family to pick instead). */
 async function selectModel(repo) {
@@ -1350,6 +1456,8 @@ function bindChatUI() {
   $('#newChat').onclick = newChat;
   $('#memoryBtn').onclick = () => openSettings('Memory');
   $('#labBtn').onclick = () => openLab();
+  $('#tasksBtn').onclick = () => openTasks();
+  checkInterrupted();
   $('#modsBtn').onclick = () => openMods();
   $('#settingsBtn').onclick = () => openSettings();
   $('#modelBtn').onclick = () => showLauncher();
@@ -1525,6 +1633,9 @@ async function send() {
   if (!text && S.pending.app) return toast('Say what to do in that app.');
   if (S.pending.atts.some(a => a.loading)) return toast('Still reading attachments…');
   if (S.loop.active) stopLoop('Forever-loop stopped because you sent a new message.');
+  if (S.chat.job) {                                // a scheduled task's chat: a run may have added to it since it was opened
+    try { const f = await api('/api/chats/' + S.chat.id); if ((f.sched_at || 0) > (S.chat.sched_at || 0)) { S.chat = f; renderMessages(); } } catch { }
+  }
   const msg = { role: 'user', content: text, ts: Date.now() / 1000 };
   if (S.pending.pastes.length) msg.pastes = S.pending.pastes.map(p => ({ name: p.name, text: p.text }));
   if (S.pending.atts.length) msg.attachments = S.pending.atts.map(a => ({ id: a.id, name: a.name, kind: a.kind, size: a.size, chars: a.chars }));
@@ -1544,6 +1655,7 @@ async function send() {
   const run = runAgent(msg.loop);
   if (firstTurn && !S.chat.title) makeTitle(text || msg.pastes?.[0]?.text || msg.attachments?.[0]?.name || 'Chat');
   S.lastRun = await run;
+  refreshTaskCount();                              // the model may have scheduled or cancelled a task
   if (S.loop.active) await loopContinue();
 }
 
@@ -1809,7 +1921,7 @@ function askApproval(card, ev, chat, who) {
     api('/api/approve', { method: 'POST', json: { call_id: ev.call_id, decision: d, chat_id: chat.id, category: ev.category } }).catch(() => { });
     ap.remove(); st.className = 'tstat run'; st.textContent = d === 'deny' ? 'denying…' : 'running…';
   };
-  const detail = ev.args?.command || ev.args?.content || ev.args?.text || ev.args?.new_text || ev.args?.new_string || null;
+  const detail = ev.args?.command || ev.args?.content || ev.args?.text || ev.args?.new_text || ev.args?.new_string || ev.args?.prompt || null;
   const by = who ? `subagent ${who}` : ev.lane && ev.lane !== 'local' ? LANE[ev.lane]?.label || ev.lane : '';
   ap.append(...[
     h('div', { class: 'q' }, `Allow `, h('b', { 'data-tool': ev.name }, toolInfo(ev.name).name), ` ${ev.label ? '→ ' + ev.label : ''}?`,

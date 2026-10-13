@@ -594,6 +594,73 @@ def _knob_choices(m, h):
             "rope_scale": [2, 4] if yarn else [], "gpu": bool(h.get("gpus")), "labels": tuner.PIN_KNOBS}
 
 
+# ---- tasks (1.2.75): interrupted work and scheduled tasks ----------------------------------------------------
+
+@app.get("/api/jobs")
+def jobs_list():
+    from . import jobs
+    return {"interrupted": jobs.interrupted(), "scheduled": jobs.scheduled(), **jobs.status()}
+
+
+@app.post("/api/jobs/resume")
+async def jobs_resume(req: Request):
+    """The interrupted record to resume and the continuation to send (the UI sends it in the chat, visibly)."""
+    from . import jobs
+    b = await req.json()
+    rec = jobs.take_for_resume(str(b.get("id") or ""))
+    if not rec:
+        raise HTTPException(404, "Nothing to resume with that id.")
+    return {"chat_id": rec["chat_id"], "loop": bool(rec.get("loop")), "task": rec.get("task") or "",
+            "text": jobs.resume_text(rec)}
+
+
+@app.post("/api/jobs/dismiss")
+async def jobs_dismiss(req: Request):
+    from . import jobs
+    b = await req.json()
+    return {"ok": jobs.dismiss(str(b.get("id") or ""))}
+
+
+@app.post("/api/jobs/scheduled")
+async def jobs_add(req: Request):
+    from . import jobs
+    b = await req.json()
+    try:
+        return jobs.add(b.get("prompt"), b.get("schedule"), b.get("name") or "", bool(b.get("same_chat")))
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/jobs/scheduled/{sid}")
+async def jobs_update(sid: str, req: Request):
+    from . import jobs
+    b = await req.json()
+    try:
+        t = jobs.update(sid, **{k: b[k] for k in ("name", "prompt", "same_chat", "enabled", "schedule") if k in b})
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    if not t:
+        raise HTTPException(404, "No such task")
+    return t
+
+
+@app.delete("/api/jobs/scheduled/{sid}")
+def jobs_delete(sid: str):
+    from . import jobs
+    return {"ok": jobs.remove(sid)}
+
+
+@app.post("/api/jobs/scheduled/{sid}/run")
+def jobs_run_now(sid: str):
+    from . import jobs
+    if STATE["status"] != "ready":
+        raise HTTPException(409, "Load a model first.")
+    why = jobs.run_now(sid)
+    if why:
+        raise HTTPException(409, why)
+    return {"ok": True}
+
+
 @app.get("/api/kvcache")
 def kvcache_info():
     """Settings → Model & tuning: how many chats have a saved prompt cache, and how much disk it takes."""
@@ -868,6 +935,10 @@ async def put_chat(cid: str, req: Request):
     for k in ("compacted_into", "carry", "memorized_n"):     # server-owned fields survive a stale client copy
         if old.get(k) and not c.get(k):
             c[k] = old[k]
+    ran = float(old.get("sched_at") or 0)
+    if ran > float(c.get("sched_at") or 0):                   # a scheduled run wrote this chat after the UI read it:
+        mine = [m for m in c.get("messages") or [] if float(m.get("ts") or 0) > ran]     # keep both, in order
+        c.update(messages=list(old.get("messages") or []) + mine, sched_at=ran, job=old.get("job"))
     _chat_path(cid).write_text(json.dumps(c, ensure_ascii=False), encoding="utf-8")
     return {"ok": True}
 
@@ -1044,6 +1115,9 @@ async def chat(req: Request):
     if STATE["status"] != "ready" and not vram_policy.holding():
         raise HTTPException(409, "No model loaded")
     _last_ping["chat"] = time.time()
+    from . import jobs
+    if jobs.chat_running(body.get("chat_id")):
+        raise HTTPException(409, "A scheduled task is running in this chat. Send your message when it has finished.")
     opts = body.get("opts") or {}
     if (opts.get("loop") or {}).get("stop"):
         stats.SESSION["loop"]["active"] = False
@@ -1057,6 +1131,8 @@ async def chat(req: Request):
 def stop_loop():
     """The UI ended a forever-loop (Stop button, max rounds reached, or an error)."""
     stats.SESSION["loop"]["active"] = False
+    from . import jobs
+    jobs.loop_stopped()                 # nothing to resume after a restart
     return {"ok": True}
 
 
@@ -2496,6 +2572,8 @@ async def _startup():
     except Exception:
         pass
     tools.load_all()
+    from . import jobs
+    jobs.start(STATE, load_settings, asyncio.get_running_loop())        # 1.2.75: interrupted work + schedules
     os.environ.setdefault("AERO_OVERLAY", "1")      # the on-screen cursor, banner and outline belong to the app only
     from . import gpu_lend
     gpu_lend.register(_lend_stop, _lend_restore)

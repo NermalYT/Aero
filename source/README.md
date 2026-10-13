@@ -144,6 +144,18 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Tasks (1.2.75)
+
+The sidebar's **Tasks** has two lists:
+- **Interrupted when Aero closed.** Chat turns and forever-loops that were cut off when Aero closed or crashed.
+  *Resume* continues the chat with what was finished and what wasn't; *Dismiss* forgets it.
+- **Scheduled.** Tasks with a prompt and a schedule (once, every N minutes, daily, weekdays, weekly). Add them in
+  the panel, or ask Aero (the `schedule_task` tool always asks for your OK first and shows the schedule and prompt).
+
+A scheduled run happens when Aero is open with a model loaded and no other chat is running. Actions that need an OK
+are queued in the run's chat (approve them there later); it asks no questions, skips sign-in pages, and never uses
+the real mouse or keyboard.
+
 ### Prompt cache (1.2.70)
 
 *Settings → Model & tuning*:

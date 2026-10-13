@@ -166,7 +166,7 @@ def _run(name, args, ctx):
 
 
 def load_all():
-    from . import files, shell, desktop, apps, app_tools, web, browser, memory_tools, skill_tools, agent_tools, ask_tools, mod_tools, doc_tools  # noqa: F401,E501  (registration side effects)
+    from . import files, shell, desktop, apps, app_tools, web, browser, memory_tools, skill_tools, agent_tools, ask_tools, mod_tools, doc_tools, schedule_tools  # noqa: F401,E501  (registration side effects)
     from .. import integrations
     integrations.load_all()                  # v1.2 integration packs register their tools here
     from . import mcp_client

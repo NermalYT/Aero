@@ -1,5 +1,41 @@
 # Changelog
 
+## Aero 1.2.75 (2026-10-13)
+
+**Tasks**: work survives closing Aero, and tasks can run on a schedule.
+
+- **Interrupted work can be resumed (`jobs.py`).** Every chat turn and forever-loop round is recorded while it runs.
+  When Aero is closed (or crashes) in the middle of one, it shows up under **Tasks → Interrupted when Aero closed**,
+  and a toast says so at the next start.
+  - *Resume* continues the chat on screen. The model is told what the task graph had already finished and what it
+    hadn't, and to check the current state before repeating anything that changes things.
+  - A forever-loop restarts its rounds with the same prompt and app, also when Aero closed between two rounds.
+  - Nothing resumes on its own. Turns cut off before the model started, or after its answer was complete, aren't
+    listed; nor are chats you deleted.
+- **Scheduled tasks.** *Tasks → New scheduled task*, or just ask: "every weekday at 8, check my email and GitHub". The
+  model's new `schedule_task` tool always asks for your OK before creating one, whatever the Tools setting; its card
+  shows the schedule and the prompt. After reading web pages or mail, the authority model (full auto) can't approve
+  it for you, and a scheduled run can't create more schedules.
+  - Schedules: once, every N minutes (at least 5), daily, Monday to Friday, or weekly.
+  - Each run is a chat of its own ("Morning check · Tue 13 Oct 08:00"), or one chat that continues each time.
+  - Runs happen when Aero is open with a model loaded, and wait while you are chatting.
+  - A run that was due while Aero was closed runs once when it's back. A run's next time is set before it starts,
+    so a run that fails or is cut off is never repeated straight away.
+  - Nobody is watching a scheduled run:
+    - actions that need an OK are queued, and the run's chat shows the queue card to approve them later;
+    - questions get no card (the model picks a sensible default and says so);
+    - sign-in pages are skipped and named in the answer;
+    - the real mouse and keyboard are never used.
+  - A run that continues one chat waits while you're working in that chat, and a reply you send there afterwards
+    keeps the run's messages.
+  - *Run now*, on/off and delete are in the list. *Run now* waits while a chat is working.
+- **Live test** (Qwen3-1.7B on this PC):
+  - A scheduled task run with *Run now* produced its chat with the answer, and the task recorded the run.
+  - A turn cut off mid-answer showed up as interrupted after a restart. *Resume* gave the continuation, and a second
+    Resume was refused.
+  - After the review fixes: *Run now* ran a task to its answer and released the runner; a stream dropped mid-answer
+    was listed and resumed once.
+
 ## Aero 1.2.70 (2026-10-13)
 
 **Prompt cache**: long chats stay fast, even after a restart.
