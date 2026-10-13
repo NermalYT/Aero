@@ -135,6 +135,26 @@ def cached(key):
     return read_store("tune_cache.json", {}).get(key)
 
 
+def warm_start(model_path, meta, hw):
+    """A previous tuning to start from (1.2.80): this model file's own (another llama.cpp build, limit, pins or
+    depth), else the newest tuning of a model with the same architecture and layer count on this GPU (another quant
+    of it). Returns (entry, why) or (None, "")."""
+    cache = read_store("tune_cache.json", {})
+    name = Path(model_path).name
+    entries = [e for e in cache.values() if isinstance(e, dict) and e.get("knobs")]
+    own = [e for e in entries if e.get("model_file") == name]
+    if own:
+        e = max(own, key=lambda e: e.get("tuned_at") or "")
+        return e, f"this model's earlier tuning ({e.get('tuned_at')}: {e.get('desc')}, {e.get('tg')} tok/s)"
+    same = [e for e in entries if (e.get("meta") or {}).get("arch") == meta.get("arch")
+            and (e.get("meta") or {}).get("n_layer") == meta.get("n_layer")
+            and (e.get("hw") or {}).get("gpu_name") == hw.get("gpu_name") and (e.get("meta") or {}).get("size_bytes")]
+    if same:
+        e = max(same, key=lambda e: e.get("tuned_at") or "")
+        return e, f"the tuning of {e.get('model_file')} on this PC ({e.get('desc')}, {e.get('tg')} tok/s)"
+    return None, ""
+
+
 def store(key, entry):
     c = read_store("tune_cache.json", {})
     c[key] = entry
@@ -308,6 +328,8 @@ class Tuner:
         self.budget = DEPTHS[self.depth] or FULL_CAP
         self.advisor = advisor if (advisor and advisor.ready) else None
         self.space = Space(self.meta, self.hw, settings, self.gpu, full=self.depth == "full", pins=pins)
+        self.warm, self.warm_why = warm_start(self.model, self.meta, self.hw) \
+            if settings.get("tune_warm_start", True) else (None, "")
         self.ffn_frac = 0.0
         if self.gpu and not self.space.moe:
             try:
@@ -324,6 +346,8 @@ class Tuner:
         self.trials = []
         self.decisions = []
         self.calib = 1.0
+        if self.warm and self.warm.get("calib"):
+            self.calib = min(2.0, max(0.5, float(self.warm["calib"])))   # last time's memory-estimate correction
         self.size_mb = self.meta["size_bytes"] / 2**20
         self.mmproj_mb = (self.mmproj.stat().st_size / 2**20) if self.mmproj and self.mmproj.exists() else 0
         self.vram_total = self.hw["vram_total_mb"]
@@ -793,6 +817,34 @@ class Tuner:
                 opt = {**base, "ctx": 32768, "k": k}
         return split([anchor] if Space.key(opt) == Space.key(anchor) else [anchor, opt])
 
+    def warm_seed(self):
+        """The previous best, adapted to this model and search space: the same context, KV, batch and threads, about
+        the same VRAM (layers on the CPU shifted by the difference in file size), and within this tune's limit."""
+        if not self.warm:
+            return None
+        sp, k0 = self.space, dict(self.warm.get("knobs") or {})
+        if not k0.get("ctx"):
+            return None
+        c = {"ctx": max([x for x in sp.ctx if x <= k0["ctx"]] or sp.ctx[:1]),
+             "kv": k0.get("kv") if k0.get("kv") in sp.kv else ("q8_0" if "q8_0" in sp.kv else sp.kv[-1]),
+             "ub": k0.get("ub") if k0.get("ub") in sp.ub else (512 if 512 in sp.ub else sp.ub[0]),
+             "t": k0.get("t") if k0.get("t") in sp.thr else sp.phys, "k": sp.n}
+        if self.gpu:
+            old = ((self.warm.get("meta") or {}).get("size_bytes") or self.meta["size_bytes"]) / 2**20
+            per_layer = max(1.0, self.size_mb / max(1, sp.n))
+            shift = (self.size_mb - old) / per_layer
+            c["k"] = int(min(sp.n, max(0, round(int(k0.get("k") or 0) + shift))))
+            if k0.get("f") and sp.ffn:
+                c["f"] = True
+        c = sp.apply_pins(c)
+        # it has to fit this tune's limit too: more layers on the CPU (unless pinned), else a smaller context
+        while self.gpu and sp.pin_k is None and c["k"] < sp.n and self.est(c) > self.cap * 0.97:
+            c["k"] += 1
+        smaller = [x for x in sp.ctx if x < c["ctx"]]
+        while smaller and self.est(c) > self.cap * (0.97 if self.gpu else 0.9):
+            c["ctx"] = smaller.pop()
+        return c
+
     def _pinned_seeds(self, base):
         """With the placement pinned: the largest context that fits it, and the smallest."""
         sp = self.space
@@ -887,7 +939,12 @@ class Tuner:
 
         why = ["estimator's fastest usable config (sets the reference speed)",
                "estimator's predicted optimum for this goal"]
-        for i, c in enumerate(self.seeds()):
+        warm = self.warm_seed()
+        if warm:
+            self.log(f"Warm start from {self.warm_why}.")
+            self.emit({"type": "warm_start", "from": self.warm_why})
+            self.trial(warm, "seed", reason="warm start: " + self.warm_why)
+        for i, c in enumerate(s for s in self.seeds() if not (warm and Space.key(s) == Space.key(warm))):
             r = "the other split: feed-forward of some layers in RAM, attention and KV on the GPU" if c.get("f") \
                 else (why[i] if len(why) > i else "")
             first = self.trial(c, "seed", reason=r)
@@ -1002,6 +1059,9 @@ class Tuner:
             "trials": [{**{k: v for k, v in t.items() if k != "cfg"}, "knobs": t["cfg"]} for t in self.trials],
             "decisions": self.decisions, "tuned_at": time.strftime("%Y-%m-%d %H:%M"), "elapsed_s": elapsed,
             "model_file": self.model.name, "llama_version": server_version(), "meta": m, "tool_eval": tool,
+            "hw": {"gpu_name": self.hw.get("gpu_name"), "vram_total_mb": self.vram_total,
+                   "ram_total_mb": self.hw.get("ram_total_mb")}, "calib": round(self.calib, 4),
+            "warm": self.warm_why or None,
         }
         self.emit({"type": "tune_done", "desc": best["desc"], "pp": best["pp"], "tg": best["tg"],
                    "tg_deep": deep.get("tg_deep"), "n": best["n"], "elapsed_s": elapsed, "trials": len(self.trials),

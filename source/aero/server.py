@@ -1,5 +1,6 @@
 """FastAPI backend: serves the UI and the JSON/SSE API."""
 import asyncio
+import functools
 import json
 import os
 import re
@@ -138,7 +139,13 @@ def get_state(ui: int = 0):
             "busy": _job["busy"], "llama": {"found": bool(server_binary()), "path": str(server_binary() or "")},
             "settings": load_settings(), "hw": hw(), "os": {"name": osinfo.name(), "kind": osinfo.kind()},
             "secrets_where": vault.where(), "update": _update_brief(), "stopping": _last_ping.get("exit"),
+            "bg_tune": _bgtune_status(),
             "paths": {"root": str(DATA.parent), "data": str(DATA)}}
+
+
+def _bgtune_status():
+    from . import bgtune
+    return bgtune.status()
 
 
 def _update_brief():
@@ -524,6 +531,7 @@ async def select_run(req: Request):
             models.update(m["id"], select={"summary": r["summary"], "strategy": pick["strategy"], "ctx": pick["ctx"],
                                            "kv": pick["kv"], "est_tg": pick["est_tg"], "at": time.time()})
         emit({"type": "phase", "phase": "tune"})
+        _stop_bgtune()                  # the new model is downloaded: now it replaces the one being tuned
         res = _load_job(m, False, "auto", r.get("depth") or "medium", emit, cancel)
         return {**(res or {}), "model_id": m["id"]}
     return stream_job(job)
@@ -545,6 +553,7 @@ def unload():
 
 @app.post("/api/unload")
 def api_unload():
+    _stop_bgtune()
     unload()
     return {"ok": True}
 
@@ -735,10 +744,41 @@ class NeedsTune(Exception):
     pass
 
 
+_LOAD_LOCK = threading.Lock()       # one load or tune at a time (the user's, or background tuning's)
+
+
+def _serial(fn):
+    @functools.wraps(fn)
+    def run(*a, **k):
+        with _LOAD_LOCK:
+            return fn(*a, **k)
+    return run
+
+
+def _bg_load(m, retune, limit_gb, depth, emit, cancel):
+    """Background tuning's loads (bgtune.py): a tune never waits for, or runs alongside, a load or download the user
+    started; putting the saved tuning back (retune False) only needs the model free."""
+    from . import bgtune
+    if (retune and _job["busy"]) or not _LOAD_LOCK.acquire(blocking=False):
+        raise bgtune.Busy("another load is running")
+    try:
+        return _load_job.__wrapped__(m, retune, limit_gb, depth, emit, cancel)
+    finally:
+        _LOAD_LOCK.release()
+
+
+def _stop_bgtune():
+    """The user loads, selects or unloads a model: background tuning stops without putting its model back."""
+    from . import bgtune
+    bgtune.interrupt(reload=False)
+
+
+@_serial
 def _load_job(m, retune, limit_gb, depth, emit, cancel):
     """Load model m, tuning it first when there is no saved tuning (or retune). limit_gb: the VRAM (RAM) limit for
     tuning in GB, "auto" for this PC's free VRAM less a margin (1.2.6: nobody has to type it), or None to ask
     the user (NeedsTune). Shared by /api/load and Select."""
+    tuner.Tuner.check_cancel(cancel)           # stopped before it began: leave the loaded model alone
     s = load_settings()
     unload()
     h = hw(force=True)
@@ -860,6 +900,7 @@ def _load_job(m, retune, limit_gb, depth, emit, cancel):
                  tune={"tg": tg, "pp": pp, "at": entry["tuned_at"],
                        "trials": len(entry["trials"]), "limit_gb": round(entry.get("limit_mb", 0) / 1024, 2),
                        "depth": entry.get("depth"), "advisor": (entry.get("advisor") or {}).get("name"),
+                       "warm": entry.get("warm"),
                        "profile": prof.get("profile") if prof else None,
                        "profile_name": prof.get("name") if prof else None, "key": key,
                        "tools": {k: (entry.get("tool_eval") or {}).get(k) for k in
@@ -895,6 +936,7 @@ async def load(req: Request):
         m = models.update(mid, pins=tuner.clean_pins(body["pins"])) or models.get(mid)
 
     def job(emit, cancel):
+        _stop_bgtune()                  # only once this load really starts (a busy 409 leaves background tuning be)
         return _load_job(m, retune, limit_gb, depth, emit, cancel)
     return stream_job(job)
 
@@ -1112,6 +1154,8 @@ def del_memory_summary(cid: str):
 @app.post("/api/chat")
 async def chat(req: Request):
     body = await req.json()
+    from . import bgtune
+    bgtune.interrupt()                    # 1.2.80: a chat stops background tuning; the model comes back at once
     if STATE["status"] != "ready" and not vram_policy.holding():
         raise HTTPException(409, "No model loaded")
     _last_ping["chat"] = time.time()
@@ -2574,6 +2618,19 @@ async def _startup():
     tools.load_all()
     from . import jobs
     jobs.start(STATE, load_settings, asyncio.get_running_loop())        # 1.2.75: interrupted work + schedules
+    from . import bgtune
+    bgtune.start({"state": STATE, "settings": load_settings, "load": _bg_load, "started": time.time(),       # 1.2.80
+                  "hold": lambda on: vram_policy.hold(on, "Aero was tuning the model in the background. It stopped "
+                                                       "for your message, which runs as soon as the model is back.",
+                                                      owner="bgtune"),
+                  "busy": lambda: bool(agent.active() or agents.busy() or _job["busy"] or jobs.status()["running"]
+                                       or _memorize_q or vram_policy.holding()),
+                  "user_job": lambda: bool(_job["busy"] or jobs.status()["running"]),
+                  "engine_ok": lambda: ENGINE.kind == "llama" and not STATE.get("remote"),
+                  "profile": lambda key: bool(hapo.active(key)),
+                  "saved": tuner.cached, "restore": tuner.store,
+                  "last_activity": lambda: _last_ping["chat"],
+                  "task_soon": lambda before: bool(jobs.due(before))})
     os.environ.setdefault("AERO_OVERLAY", "1")      # the on-screen cursor, banner and outline belong to the app only
     from . import gpu_lend
     gpu_lend.register(_lend_stop, _lend_restore)

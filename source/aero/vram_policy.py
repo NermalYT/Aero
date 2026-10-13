@@ -406,22 +406,29 @@ class Runner:
 
 # ------------------------------------------------------------------------------------------------ holding chats
 
-_hold = {"on": False, "since": 0.0}
+_hold = {"on": False, "since": 0.0, "why": "", "owners": {}}
 
 
-def hold(on):
-    _hold.update(on=bool(on), since=time.time())
+def hold(on, why="", owner="remote"):
+    """New chats wait while any owner holds (Remote Mode and GPU lending: "remote"; background tuning: "bgtune")."""
+    if on:
+        _hold["owners"][owner] = why
+    else:
+        _hold["owners"].pop(owner, None)
+    _hold.update(on=bool(_hold["owners"]), since=time.time(),
+                 why=next((w for w in _hold["owners"].values() if w), ""))
 
 
 def holding():
     return _hold["on"]
 
 
-async def wait_for_model(limit=600):
+async def wait_for_model(limit=900):
     """For a new chat turn: yields one notice and waits while Remote Mode is reloading the model."""
     if not _hold["on"]:
         return
-    yield {"t": "notice", "text": "The model is restarting for Remote Mode; this message runs as soon as it is back."}
+    yield {"t": "notice", "text": _hold.get("why") or "The model is restarting for Remote Mode; this message runs as "
+                                                     "soon as it is back."}
     t0 = time.time()
     while _hold["on"] and time.time() - t0 < limit:
         await asyncio.sleep(0.5)

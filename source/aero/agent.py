@@ -409,6 +409,15 @@ class Turn:
         self.loop_round = False
         self.untrusted = []          # web pages, mail and other internet content read this turn (for the authority)
 
+    def refresh_engine(self, engine_state):
+        """The model came back after this turn waited for it (background tuning, Remote Mode): its context size,
+        vision and name, which the turn read while the model was unloaded."""
+        self.engine = engine_state
+        self.vision = bool(engine_state.get("vision"))
+        self.ctx_size = int(engine_state.get("ctx") or 8192)
+        self.tctx.vision = self.vision
+        self.model_name = ((engine_state.get("model") or {}).get("name") or "local model")
+
     def rebind(self, new_id):
         autonomy.rebind(self.chat_id, new_id)
         from . import kvcache

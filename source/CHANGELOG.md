@@ -1,5 +1,48 @@
 # Changelog
 
+## Aero 1.2.80 (2026-10-13)
+
+**Tuning that keeps improving**: tuning starts from what worked last time, and goes deeper while the PC is idle.
+
+- **Warm start (`tuner.warm_start`).** A tune begins with the best configuration of this model's last tuning (after
+  a llama.cpp update, a new limit or pins, or a deeper re-tune), or else of another quant of the same model on this
+  GPU.
+  - Its context, KV cache, batch and threads carry over.
+  - The layers kept on the CPU are shifted by the difference in file size. If the seed doesn't fit this tune's
+    limit, more layers move to the CPU, or the context gets smaller when the placement is pinned.
+  - The memory estimate's correction from that tuning is reused, so the first estimates are already calibrated.
+  - The warm seed is the first trial. The search then explores from it as usual, so the result is never worse than
+    the old best as measured now.
+  - *Settings → Model & tuning → Warm start*, on by default. The tuning summary says "warm start" when it was used.
+- **Background tuning (`bgtune.py`).** When a model was tuned Short or Medium, Aero tunes it one depth deeper (Short
+  → Medium → Long) while the PC is idle. Idle means:
+  - no message for 20 minutes (*Settings → Model & tuning*, 5 or more);
+  - plugged in;
+  - no scheduled task due within 30 minutes;
+  - no chat, load, download, memory summary or scheduled run in progress;
+  - no HAPO profile chosen for the model (that profile is what loads, not the tuner's pick).
+- **What stops it.**
+  - A message stops it at once. The trial in progress is abandoned, the model comes back with its saved tuning, and
+    the message runs as soon as the model is back (it says why it waited, and uses the reloaded model's context).
+  - It keeps checking while it runs: unplugging the PC, a scheduled task falling due, or a load or download you start
+    stop it the same way.
+  - Loading, selecting or unloading a model stops it without putting the old model back. Select stops it only once
+    the new model is downloaded.
+  - Background tuning never waits for, or runs alongside, a load you started.
+- **It only keeps a better tuning.** A result with less context, or slower beyond measurement noise (for example
+  because another app took VRAM meanwhile), is dropped and the saved tuning goes back.
+  - A toast reports the old and new speed when it finishes.
+  - Each run's log is in `data/logs/bgtune.log`.
+  - Not used for AirLLM or in Remote Mode, whose model reloads now keep their own hold.
+- **Live test** (Qwen3-1.7B, pinned 16k / q8_0+q4_0 / 8 threads, on this PC while the owner's 27B model held most
+  of the GPU):
+  - After 5 idle minutes it started on its own (Short → Medium).
+  - A message sent 45 s in got a notice, and its answer began 14.8 s later on the saved tuning.
+  - The next idle period ran Medium to the end: 25 trials in 4.8 minutes, warm-started from the Short tuning, 28.4
+    → 29.2 tok/s.
+  - After the review fixes, a message with about 8,000 tokens of history sent during a Long run was answered on the
+    reloaded model (16k context) without being compacted. The run's log was in `data/logs/bgtune.log`.
+
 ## Aero 1.2.75 (2026-10-13)
 
 **Tasks**: work survives closing Aero, and tasks can run on a schedule.

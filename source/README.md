@@ -144,6 +144,14 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Tuning that keeps improving (1.2.80)
+
+- **Warm start.** A tune starts from this model's last tuning (or that of another quant of it on this PC), so a
+  re-tune after a llama.cpp update or a new limit needs fewer trials. *Settings → Model & tuning → Warm start*.
+- **Background tuning.** A model tuned Short or Medium is tuned one depth deeper while the PC is idle and plugged in
+  (no message for 20 minutes by default). A message stops it at once and the model comes back with its saved tuning.
+  *Settings → Model & tuning → Background tuning*.
+
 ### Tasks (1.2.75)
 
 The sidebar's **Tasks** has two lists:
