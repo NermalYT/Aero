@@ -1,5 +1,67 @@
 # Changelog
 
+## Aero 1.3.1 (2026-10-13)
+
+**A chat that looked frozen, fixed.** Found on a real PC right after the 1.3 update: with 212 skills imported from
+Claude, Codex and plugins, "open my Chrome and pull up my Modrinth page" sat on "thinking" for minutes. The same
+request now answers in about 15 seconds.
+
+### Fixed
+
+- **The router's prompt fits its context again (`router.py`).** Every installed skill went into the router's
+  prompt; 212 of them made it 8,632 tokens, past the router's 8,192, and llama-server answered 400 Bad Request.
+  Skills now go into the request part, and only the 12 that best match the message (by words in their name and
+  description); the fixed part (rules and tool catalog) stays cached. Whatever is too long is cut to fit. The
+  router's prompt for that request is now about 2,000 tokens.
+- **A failed router no longer offers every tool (`pipeline.py`).** When the router fails or isn't running, the
+  model gets the usual small set for the message (from its words, e.g. a browser request gets the browser tools)
+  instead of all of them: the first prompt was 25,461 tokens.
+- **One llama-server slot when the card is nearly full (`server.py`).** After a load Aero checks the free VRAM; with
+  less than 1 GB (or 6% of the card) left, it restarts the model with one slot. Two slots beside a 64k-context 27B
+  left 445 MB on a 16 GB card, Windows moved memory to the shared GPU memory, and the prompt was read at ~200
+  tokens/s instead of ~1,260.
+- **Reading a long prompt shows progress.** llama-server reports how far it is (`return_progress`); the chat shows
+  "Reading N tokens: X% (about S s left)" for prompts of 1,500 tokens or more, instead of an unchanging label.
+- **"Open my Chrome" uses Aero's browser (`app_tools.py`, `capabilities.py`, `router.py`).** The model launched the
+  user's own Chrome again and again (and the Modrinth App), alternating with `app_find` for 40 calls with no answer.
+  `app_launch` now refuses web browsers and points to `browser_open` (Aero's own browser keeps the sign-ins), and
+  names like "my Chrome" or "my X page" bring the browser tools.
+- **An app is started once per request.** Launching the same app again within 10 minutes while its window is open
+  returns its window ids instead.
+- **The same call at most 3 times per request (`agent.py`).** A call with the same arguments run 3 times in one
+  request is refused the 4th time, even when other calls came in between (only waiting and looking are exempt).
+- **The tool-step limit ends with an answer.** A run that used every step stopped with nothing; now the model gets
+  one more request without tools and says what it did, what it found and what is left.
+- **Guessing at addresses no longer piles up tabs (`browser.py`).** One request opened 15 tabs, guessing at profile
+  addresses. An agent keeps its 3 newest tabs (older ones it opened close; never the user's own), all its tabs close
+  with it, and after 6 pages in 10 minutes the model is told to follow links, search or ask instead of guessing.
+- **Mid-request compaction keeps the request (`pipeline.py`).** A long tool run compacted its own request away; the
+  next prompt had no user message, Qwen's chat template refused it ("No user query found in messages") and the turn
+  ended with error 500. The request now stays at the top of the continued part.
+
+Found by re-running the feature sweep with the 212 skills installed:
+
+- **Thinking that goes in circles is stopped (`agent.py`).** After a failed `use_skill`, the 27B repeated one
+  paragraph of its thinking for 73,755 tokens (3 minutes) and the reply was empty. When the end of the thinking
+  already appears 4 times in it, Aero stops the reply and asks again without thinking (once per request). The same
+  request now answers in 11 seconds.
+- **Skills match word forms (`router.py`).** "documents" now matches a skill called "documentation", and words in a
+  skill's name count twice, so "make a diagram" finds `diagram-design` among 265 skills.
+- **An unchanged file is read at most 3 times per request.** A diagram run read the same template 33 times and hit
+  the step limit; the 4th identical read is refused until something is written. The run now takes 2 reads and 51 s.
+- **A skill's files are found from relative paths.** `read_file("references/x.md")` after `use_skill` looks in that
+  skill's folder when the working folder has no such file.
+
+### Tests
+
+- `tests/test_v131.py`: 19 tests (router size with 202 skills, shortlist and word forms, cut-to-fit, compact
+  fallback, one slot, browsers never launched, start once, the per-request cap, re-reads, the hints, compaction,
+  tabs, the open nudge, circling thinking, skill files, progress). Full suite: 509 tests pass (9 skipped).
+- Live, on the PC where it froze (27B Qwen3.8 IQ2_M, RTX 5080): the same request takes 14.9 s, first text at
+  13.5 s, one `browser_open`, no errors. Before the last two fixes it took 152 s with 15 tabs; before 1.3.1 it never
+  finished. The feature sweep (files, edit, search, shell, web, browser, memory, skill, loop, compact, mod, docx,
+  diagram) passes on the same PC.
+
 ## Aero 1.3 (2026-10-13)
 
 **Every feature tested on a real PC**: voice typing, text in images for models that can't see, Word documents, and

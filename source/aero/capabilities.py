@@ -224,7 +224,8 @@ HINTS = [
     (r"\b(yesterday|last (time|week|chat|session)|earlier (chat|today|conversation)|we (talked|discussed|spoke)|you "
      r"(said|told me)|do you remember|remember when)\b", ["memory.recall"]),
     (r"(https?://\S+|\b(browser|web ?page|website|web site|this site|the site|tab|sign ?in to|log ?in to|scroll (down|up)"
-     r"|go back|previous page|the form|on the page)\b)", ["browser.navigate", "browser.read", "browser.interact"]),
+     r"|go back|previous page|the form|on the page|chrome|edge|firefox|brave|vivaldi|opera|(my|the|their|his|her)"
+     r" [\w.-]+ (page|profile|account|dashboard))\b)", ["browser.navigate", "browser.read", "browser.interact"]),
     (r"\b(click|press|tap|type|toggle|tick|untick|select)\b.{0,60}\b(button|field|box|window|menu|dialog|tab|app|"
      r"checkbox)\b", ["app.inspect", "app.interact", "app.read"]),
     (r"^\s*(please\s+)?(open|start|launch|run|fire up|boot up)\s+(?!the\s+(file|folder|tests?))\w", ["app.launch", "app.discover"]),

@@ -144,6 +144,20 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Many skills, slow prompts, runaway tool calls (1.3.1)
+
+- **The router sees the skills that match.** Only the 12 installed skills whose names and descriptions best match
+  the message go to the router (with hundreds imported, all of them overflowed its 8,192-token context). If the
+  router fails anyway, the model gets the usual small tool set for the message.
+- **One slot on a nearly full card.** After loading, Aero restarts the model with one llama-server slot when less
+  than 1 GB (or 6%) of VRAM is free, so nothing spills into shared GPU memory.
+- **Prompt progress.** A prompt of 1,500 tokens or more shows how much is read and about how long is left.
+- **Guards.** `app_launch` never starts a web browser (Aero's own browser is used); an app is started once per
+  request; one call with the same arguments runs at most 3 times per request; an agent keeps at most 3 tabs it
+  opened; the tool-step limit ends with an answer; compaction in the middle of a request keeps the request; an
+  unchanged file is read at most 3 times per request; thinking that repeats itself is stopped and the model is
+  asked again without thinking.
+
 ### Voice typing, text in images, Word documents (1.3)
 
 - **Voice typing.** The microphone button beside the paperclip records you; click again to stop. whisper.cpp on

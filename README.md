@@ -86,6 +86,21 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
+## What's new in 1.3.1
+
+A chat could look frozen with many imported skills: "open my Chrome and pull up my Modrinth page" sat on
+"thinking" for minutes. It now answers in about 15 seconds.
+
+- The router's prompt fits again with hundreds of skills (only the best-matching dozen go to it).
+- A failed router offers the usual few tools, not all of them.
+- One model slot when the graphics card is nearly full, so prompts aren't read from shared memory.
+- Long prompts show "Reading N tokens: X%" instead of an unchanging label.
+- "Open my Chrome" uses Aero's own browser; apps start once; the same action runs at most 3 times per request; the
+  step limit ends with an answer; guessing at addresses no longer piles up tabs; a long run keeps your request when
+  it compacts.
+- Thinking that goes in circles is stopped and the model answers without it; an unchanged file isn't re-read over
+  and over; skills match word forms ("documents" finds "documentation").
+
 ## What's new in 1.3
 
 Every feature was tested on a real PC for this release; what broke is fixed, and what was missing is added.

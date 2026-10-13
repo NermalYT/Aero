@@ -65,6 +65,7 @@ Rules
 - Commands, installs, git, scripts, system info: run_command.
 - An app window ("in Notepad", "click", "this window", "my app"): app_list, app_view, app_click, app_type, app_keys, app_read.
 - The web: web_search and fetch_url for facts and pages; browser_* to log in, click or fill forms on websites.
+- "Open my Chrome / browser / Edge and go to X": browser_open (Aero's own browser keeps the user's sign-ins). Never app_launch a web browser.
 - Earlier chats or personal facts: recall (and remember to save new lasting facts).
 - Big jobs with separate parts or a lot of reading (many files, long logs, several searches, checking work): add run_subagent.
 - If the user continues an earlier task ("do it again", "now fix that", "continue"), choose the same kind of tools as the context shows."""
@@ -245,10 +246,50 @@ def catalog(tool_list, skills=None):
     for name, cat, desc in tool_list:
         lines.append(f"- {name} [{cat}]: {_first_sentence(desc)}")
     if skills:
-        lines.append("\n# Skills (instructions the main model can load with use_skill)")
-        for sk in skills:
-            lines.append(f"- {sk['name']}: {_first_sentence(sk.get('description', ''), 140)}")
+        lines.append("\n" + skills_block(skills))
     return "\n".join(lines)
+
+
+def skills_block(skills):
+    lines = ["# Skills that may fit (instructions the main model can load with use_skill)"]
+    for sk in skills:
+        lines.append(f"- {sk['name']}: {_first_sentence(sk.get('description', ''), 140)}")
+    return "\n".join(lines)
+
+
+SKILLS_IN_PROMPT = 12
+_STOP = set("""about after also been before being from have into just like make more need only over some such than
+that their them then there these they this those through very want what when where which while will with would your
+yours please could should using used help skill skills tell load first show give""".split())
+
+
+def _words(text):
+    """Content words, stemmed loosely ("documents" and "documentation" both become "docume")."""
+    return {w.rstrip("s")[:6] for w in re.findall(r"[a-z0-9]{4,}", (text or "").lower()) if w not in _STOP}
+
+
+def shortlist(skills, text, k=SKILLS_IN_PROMPT):
+    """The few skills that may fit this request, by the words they share with it (a name said outright counts most).
+    1.3.1: every installed skill used to be listed in the router's prompt; 212 skills imported from Claude, Codex and
+    plugins pushed it past the router's 8,192-token context, the router failed, and every tool was offered."""
+    want, low = _words(text), (text or "").lower()
+    scored = []
+    for s in skills or []:
+        name = s.get("name") or ""
+        named = _words(name.replace("-", " ").replace("_", " "))
+        score = len(want & (named | _words(s.get("description")))) + len(want & named)     # name words count twice
+        if name and name.lower() in low:
+            score += 5
+        if score >= 2 or (score and len(want) <= 3):
+            scored.append((-score, name, s))
+    return [s for _, _, s in sorted(scored, key=lambda x: (x[0], x[1]))[:k]]
+
+
+PROMPT_BUDGET = CTX - 900      # tokens for the rules, the catalog and the request; the rest is the answer and slack
+
+
+def _tokens(text):
+    return len(text) // 3 + 1   # conservative for this tokenizer on mixed English, code and JSON
 
 
 def schema(tool_names, skill_names=None, plan=False, preference=False):
@@ -337,13 +378,22 @@ def decide(history, tool_list, skills=None, timeout=45):
     if not ready():
         raise RuntimeError(_state.get("error") or "router not running")
     names = [t[0] for t in tool_list]
-    skill_names = [s["name"] for s in (skills or [])]
-    sys_text = RULES + "\n\n" + catalog(tool_list, skills)
     users = [m for m in history if m.get("role") == "user"]
     text = (users[-1].get("content") or "") if users else ""
+    fit = shortlist(skills, text)
+    skill_names = [s["name"] for s in fit]
+    sys_text = RULES + "\n\n" + catalog(tool_list)          # fixed: stays in the router's prompt cache
+    request = _context_text(history)
+    room = PROMPT_BUDGET - _tokens(sys_text)
+    if fit and _tokens(request) + _tokens(skills_block(fit)) < room:
+        request += "\n\n" + skills_block(fit)
+    else:
+        skill_names = []
+    if _tokens(request) > room:                              # a very long message: the router reads its start
+        request = request[:max(600, room * 3)]
     plan, pref = wants_plan(text), bool(PREF_CUE.search(text))
     body = {"messages": [{"role": "system", "content": sys_text},
-                         {"role": "user", "content": _context_text(history)}],
+                         {"role": "user", "content": request}],
             "temperature": 0, "top_k": 1, "max_tokens": 320, "cache_prompt": True,
             "chat_template_kwargs": {"enable_thinking": False},
             "response_format": {"type": "json_schema",
