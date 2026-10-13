@@ -41,6 +41,8 @@
   unsaved changes asks first. Before, each tab was rebuilt from the saved settings, so switching tabs lost what you
   typed.
 - Floating panels, dialogs and notices start below the title bar.
+- The window's first start: centred on the main screen and never wider than its working area (it opened across
+  two monitors when the mouse was on a narrow portrait screen).
 
 ### Tests
 

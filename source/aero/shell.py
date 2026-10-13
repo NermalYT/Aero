@@ -162,6 +162,11 @@ def caption_off_top(saved_top, zoomed, frame):
     return saved_top + (frame if zoomed else 0)
 
 
+def first_size(work_w, work_h):
+    """The window's size on its first start: 1280 x 860, or 92% of a smaller screen's working area."""
+    return min(1280, int(work_w * .92)), min(860, int(work_h * .92))
+
+
 def _state_file():
     from .config import DATA
     return DATA / "window.json"
@@ -227,9 +232,11 @@ def run(url):
         if b and any(s.WorkingArea.IntersectsWith(rect) for s in WF.Screen.AllScreens):
             form.StartPosition = WF.FormStartPosition.Manual
             form.Location, form.Size = Point(rect.X, rect.Y), Size(rect.Width, rect.Height)
-        else:
-            form.StartPosition = WF.FormStartPosition.CenterScreen
-            form.Size = Size(1280, 860)
+        else:                                  # first start: centred on the main screen and never wider than it
+            wa = WF.Screen.PrimaryScreen.WorkingArea
+            w, h = first_size(wa.Width, wa.Height)
+            form.StartPosition = WF.FormStartPosition.Manual
+            form.Location, form.Size = Point(wa.X + (wa.Width - w) // 2, wa.Y + (wa.Height - h) // 2), Size(w, h)
         if b.get("max"):
             form.WindowState = WF.FormWindowState.Maximized
             keep["normal"] = (rect.X, rect.Y, rect.Width, rect.Height)
