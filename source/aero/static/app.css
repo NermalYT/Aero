@@ -316,6 +316,16 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px;
 .hf-row .btn.sm { flex: none; }
 .auto-limit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; }
 .auto-limit small { flex-basis: 100%; }
+.pin-panel { display: grid; gap: 8px; max-height: 46vh; overflow: auto; padding-right: 4px; }
+.pin-row { display: grid; grid-template-columns: 190px 1fr; gap: 4px 10px; align-items: center; }
+.pin-row small { grid-column: 2; font-size: 11.5px; }
+.pin-row select { min-width: 0; }
+.prof-list { display: grid; gap: 6px; margin: 8px 0; }
+.prof-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 12px;
+  border-radius: 10px; border: 1px solid var(--line); background: var(--glass-2); color: inherit; cursor: pointer; }
+.prof-pick.on { border-color: var(--accent, #2f8cff); }
+.prof-pick:disabled { opacity: .5; cursor: default; }
+@media (max-width: 560px) { .pin-row { grid-template-columns: 1fr; } .pin-row small { grid-column: 1; } }
 .rp-body { overflow-y: auto; padding: 14px 18px 30px; }
 .qtable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .qtable td, .qtable th { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; }

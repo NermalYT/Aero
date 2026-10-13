@@ -26,6 +26,7 @@ the improving moves run out, a sweep over the untested combinations next to the 
 change nothing (or the 120-trial cap).
 """
 import hashlib
+import json
 import statistics
 import time
 from pathlib import Path
@@ -34,7 +35,7 @@ import httpx
 
 from . import bigmodel, gguf, hardware
 from .config import TRIAL_PORT, read_store, write_store
-from .engine import LlamaServer, build_args, classify_failure, server_version, spec_args
+from .engine import supports, LlamaServer, build_args, classify_failure, server_version, spec_args
 
 LADDER = [4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 57344, 65536, 81920, 98304, 131072,
           196608, 262144, 393216, 524288, 1048576]
@@ -68,8 +69,9 @@ class Cancelled(Exception):
 
 # ---- cache ---------------------------------------------------------------------------------------
 
-def cache_key(model_path, mmproj, hw, spec=None):
-    """Same model file + vision projector + GPU + RAM (+ speculative decoding, which costs VRAM) = same tuning.
+def cache_key(model_path, mmproj, hw, spec=None, pins=None):
+    """Same model file + vision projector + GPU + RAM (+ speculative decoding, which costs VRAM, + the settings the
+    user pinned, 1.2.65) = same tuning.
     The llama.cpp version is stored in the entry instead of the key, so an update doesn't force a re-tune (the UI
     flags it as tuned on an older build)."""
     p = Path(model_path)
@@ -77,7 +79,56 @@ def cache_key(model_path, mmproj, hw, spec=None):
            f"{hw.get('vram_total_mb')}|{hw.get('ram_total_mb', 0) // 1024}"
     if spec:
         meta += "|spec=" + " ".join(spec)
+    pins = clean_pins(pins)
+    if pins:
+        meta += "|pins=" + json.dumps(pins, sort_keys=True)
     return hashlib.sha1(meta.encode()).hexdigest()[:20]
+
+
+# 1.2.65: settings the user can pin per model (Tuning settings). Search knobs are fixed to the pinned value; the
+# others are passed to llama-server as they are.
+KV_CHOICES = ("f16", "q8_0", "q4_0", "q8_0/q4_0", "f16/q8_0", "q5_1", "q5_0")
+PIN_KNOBS = {
+    "ctx": "context length (tokens)", "kv": "KV cache type (K/V)", "cpu_layers": "layers (or expert blocks) kept on "
+    "the CPU", "split": "how layers are split: layers or ffn", "ub": "micro-batch", "threads": "threads",
+    "fa": "flash attention", "batch": "batch", "threads_batch": "threads for prompt processing", "mmap": "map the file",
+    "mlock": "lock the model in RAM", "rope_scale": "YaRN context extension factor",
+}
+
+
+def clean_pins(pins):
+    """Only known knobs with usable values; anything else is dropped (the settings API accepts any JSON)."""
+    out = {}
+    for k, v in (pins or {}).items():
+        if k not in PIN_KNOBS or v is None or v == "" or v == "auto":
+            continue
+        try:
+            if k in ("ctx", "cpu_layers", "ub", "threads", "batch", "threads_batch"):
+                if isinstance(v, bool):
+                    continue
+                v = int(v)
+                lo, hi = {"ctx": (2048, 1 << 22), "cpu_layers": (0, 1024), "ub": (32, 65536),
+                          "threads": (1, 512), "batch": (32, 65536), "threads_batch": (1, 512)}[k]
+                if not lo <= v <= hi:
+                    continue
+            elif k == "rope_scale":
+                v = float(v)
+                if not 1 < v <= 8:
+                    continue
+            elif k in ("fa", "mmap", "mlock"):
+                v = bool(v) if isinstance(v, bool) else str(v).lower() in ("1", "true", "on", "yes")
+            elif k == "kv":
+                if v not in KV_CHOICES:
+                    continue
+            elif k == "split":
+                if v not in ("layers", "ffn"):
+                    continue
+        except (TypeError, ValueError):
+            continue
+        out[k] = v
+    if out.get("fa") is False and "kv" in out and gguf.kv_types(out["kv"])[1] != "f16":
+        del out["kv"]          # llama.cpp only quantizes the V cache with flash attention on
+    return out
 
 
 def cached(key):
@@ -106,18 +157,38 @@ class Space:
     """The knobs and their ladders. A config is {ctx, k, kv, ub, t[, f]}; k = layers (dense) or expert
     blocks (MoE) kept on the CPU; with f (dense only) k counts layers whose feed-forward weights alone are in RAM."""
 
-    def __init__(self, meta, hw, settings, gpu, full=False):
+    def __init__(self, meta, hw, settings, gpu, full=False, pins=None):
         self.meta, self.gpu, self.full = meta, gpu, full
+        self.pins = pins = clean_pins(pins)
         self.n = meta["n_layer"]
         self.moe = meta["experts"] > 0
         cap = int(settings.get("context_cap") or 0)
-        ctx_max = max(2048, min(cap, meta["ctx_train"]) if cap else meta["ctx_train"])
+        self.rope = float(pins.get("rope_scale") or 1)
+        if self.rope > 1 and not supports("--rope-scaling"):
+            self.rope = 1.0
+        trained = int(meta["ctx_train"] * self.rope)              # YaRN stretches the trained context
+        ctx_max = max(2048, min(cap, trained) if cap else trained)
         self.ctx = [c for c in LADDER if c < ctx_max] + [ctx_max]
-        self.kv = (["q4_0"] if settings.get("allow_q4_kv") or full else []) + ["q8_0", "f16"]
+        low = settings.get("allow_q4_kv") or full
+        # the mixed cache (K q8_0, V q4_0) sits between q4_0 and q8_0: keys are the more sensitive half
+        self.kv = (["q4_0", "q8_0/q4_0"] if low else []) + ["q8_0", "f16"]
         self.ub = [256, 512, 1024, 2048]
         phys, logical = hw["cores"], hw["threads"]
         self.thr = sorted({max(2, phys // 2), phys, logical})
         self.phys = phys
+        if pins.get("ctx"):
+            self.ctx = [min(int(pins["ctx"]), ctx_max)]
+        if pins.get("kv"):
+            self.kv = [pins["kv"]]
+        if pins.get("fa") is False:          # without flash attention llama.cpp refuses a quantized V cache
+            self.kv = [v for v in self.kv if gguf.kv_types(v)[1] == "f16"] or ["f16"]
+        if pins.get("ub"):
+            self.ub = [int(pins["ub"])]
+        if pins.get("threads"):
+            self.thr = [int(pins["threads"])]
+            self.phys = self.thr[0]
+        self.pin_k = pins.get("cpu_layers")
+        self.pin_split = pins.get("split")
         self.ffn = False             # set by the tuner: a dense model whose feed-forward can be split off
         self.equiv = None            # tuner: the config of the other split kind with about the same VRAM
 
@@ -140,18 +211,22 @@ class Space:
             v = step(self.ctx, c["ctx"], d)
             if v:
                 out.append((nm, {**c, "ctx": v}))
-        if self.gpu:
+        if self.gpu and self.pin_k is None:
             if c["k"] > 0:
                 out.append(("gpu+", {**c, "k": c["k"] - 1}))
             if c["k"] < self.n:
                 out.append(("gpu-", {**c, "k": c["k"] + 1}))
-            e = self.equiv(c) if self.ffn and self.equiv and c["k"] > 0 else None
+        if self.gpu:
+            e = self.equiv(c) if (self.ffn and self.equiv and c["k"] > 0 and not self.pin_split
+                                  and self.pin_k is None) else None
             if e:
                 out.append(("split", e))
         for d, nm in ((1, "kv+"), (-1, "kv-")):
             v = step(self.kv, c["kv"], d)
             if v:
                 out.append((nm, {**c, "kv": v}))
+        if c["kv"] == "q8_0" and "q4_0" in self.kv and "q8_0/q4_0" in self.kv:
+            out.append(("kv--", {**c, "kv": "q4_0"}))       # past the mixed step (1.2.65), so q4_0 is still one move away
         for d, nm in ((1, "ub+"), (-1, "ub-")):
             v = step(self.ub, c["ub"], d)
             if v:
@@ -163,8 +238,28 @@ class Space:
                     out.append((nm, {**c, "t": v}))
         return out
 
+    def apply_pins(self, c):
+        """A config with the pinned placement (layers on the CPU, kind of split)."""
+        c = dict(c)
+        if self.pin_k is not None and self.gpu:
+            c["k"] = min(self.n, int(self.pin_k))
+        if self.pin_split == "ffn" and self.ffn and not self.moe:
+            c["f"] = True
+        elif self.pin_split == "layers":
+            c.pop("f", None)
+        return c
+
     def server_cfg(self, c):
-        s = {"ctx": c["ctx"], "kv": c["kv"], "fa": True, "ub": c["ub"], "b": 2048}
+        p = self.pins
+        s = {"ctx": c["ctx"], "kv": c["kv"], "fa": p.get("fa", True), "ub": c["ub"], "b": p.get("batch", 2048)}
+        if p.get("threads_batch"):
+            s["tb"] = p["threads_batch"]
+        if p.get("mlock"):
+            s["mlock"] = True
+        if p.get("mmap") is False:
+            s["no_mmap"] = True
+        if self.rope > 1:
+            s["rope_scale"], s["yarn_orig_ctx"] = self.rope, self.meta["ctx_train"]
         if not self.gpu:
             s["ngl"] = 0
         elif self.moe:
@@ -177,7 +272,7 @@ class Space:
                 s["ot"] = [bigmodel.ffn_override(range(c["k"]))]
         else:
             s["ngl"] = 999 if c["k"] == 0 else self.n - c["k"]
-        if self.cpu_layers(c) or self.full:
+        if self.cpu_layers(c) or self.full or "threads" in p:
             s["threads"] = c["t"]
         return s
 
@@ -199,7 +294,7 @@ class Space:
 # ---- the tuner ---------------------------------------------------------------------------------------
 
 class Tuner:
-    def __init__(self, model, mmproj, settings, limit_mb, depth, advisor, emit, cancel, others_mb=None):
+    def __init__(self, model, mmproj, settings, limit_mb, depth, advisor, emit, cancel, others_mb=None, pins=None):
         self.model = Path(model)
         self.mmproj = Path(mmproj) if mmproj else None
         self.settings, self.emit, self.cancel = settings, emit, cancel
@@ -212,7 +307,7 @@ class Tuner:
         self.depth = depth if depth in DEPTHS else "medium"
         self.budget = DEPTHS[self.depth] or FULL_CAP
         self.advisor = advisor if (advisor and advisor.ready) else None
-        self.space = Space(self.meta, self.hw, settings, self.gpu, full=self.depth == "full")
+        self.space = Space(self.meta, self.hw, settings, self.gpu, full=self.depth == "full", pins=pins)
         self.ffn_frac = 0.0
         if self.gpu and not self.space.moe:
             try:
@@ -570,7 +665,7 @@ class Tuner:
         if self.depth != "full" or self.best_since >= PATIENCE:
             return None
         rank = {t["n"]: i for i, t in enumerate(self.ranked())}
-        order = {"split": 0, "kv-": 0, "kv+": 1, "ub+": 2, "ub-": 3, "ctx+": 4, "threads+": 5, "threads-": 6, "gpu+": 7, "ctx-": 8,
+        order = {"split": 0, "kv-": 0, "kv--": 0, "kv+": 1, "ub+": 2, "ub-": 3, "ctx+": 4, "threads+": 5, "threads-": 6, "gpu+": 7, "ctx-": 8,
                  "gpu-": 9}
         fit = [o for o in opts if not o["over"]]
         if not fit:
@@ -659,7 +754,10 @@ class Tuner:
         """The estimator's two anchors: [fastest usable config, predicted optimum for the goal].
         The fastest one sets the reference speed the goal's floor is measured against."""
         sp = self.space
-        base = {"kv": "q8_0", "ub": 512, "t": sp.phys}
+        base = {"kv": "q8_0" if "q8_0" in sp.kv else sp.kv[-1], "ub": 512 if 512 in sp.ub else sp.ub[0],
+                "t": sp.phys}
+        if sp.pin_k is not None or sp.pin_split:
+            return self._pinned_seeds(base)
         if not self.gpu:
             ctxs = [c for c in sp.ctx if self.est_raw({**base, "ctx": c, "k": sp.n}) <= self.cap * 0.9 and c <= 32768]
             return [{**base, "ctx": (ctxs or sp.ctx[:1])[-1], "k": sp.n}]
@@ -694,6 +792,14 @@ class Tuner:
             if k is not None and rel(k) >= 0.5:
                 opt = {**base, "ctx": 32768, "k": k}
         return split([anchor] if Space.key(opt) == Space.key(anchor) else [anchor, opt])
+
+    def _pinned_seeds(self, base):
+        """With the placement pinned: the largest context that fits it, and the smallest."""
+        sp = self.space
+        k = sp.n if (sp.pin_k is None or not sp.gpu) else min(sp.n, int(sp.pin_k))
+        fits = [c for c in sp.ctx if self.est_raw(sp.apply_pins({**base, "ctx": c, "k": k})) <= self.cap * 0.97]
+        ctxs = sorted({(fits or sp.ctx[:1])[0], (fits or sp.ctx[:1])[-1]})
+        return [sp.apply_pins({**base, "ctx": c, "k": k}) for c in ctxs]
 
     # ---- tool calling ------------------------------------------------------------------------------------
     def tool_phase(self, best):

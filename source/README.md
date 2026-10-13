@@ -144,6 +144,24 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Tuning settings and profiles (1.2.65)
+
+The tuning dialog has a **Tuning settings** section. The model card has the same panel under ⋯ → **Tuning
+settings…**. Every setting is *Automatic* or pinned:
+- context;
+- KV cache for keys and values (f16, q8_0, q5, q4_0, or mixed such as K q8_0 + V q4_0);
+- layers or expert blocks on the CPU, and whole-layer or feed-forward split;
+- flash attention;
+- micro-batch and batch;
+- threads and prompt threads;
+- mmap and mlock;
+- YaRN context extension (×2 or ×4).
+
+The tuner keeps pinned settings fixed and searches the rest. Changing pins re-tunes on the next load.
+
+⋯ → **Profile…** switches between the configurations HAPO measured for the model (Maximum Speed, Balanced, Maximum
+Context, Maximum Quality, Agent Optimized, Efficiency, or the tuner's pick) without re-tuning.
+
 ### Select (1.2.6)
 
 Search any model in the launcher and click **Select** (on the result, or on the model's page). Aero:

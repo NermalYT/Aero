@@ -49,7 +49,7 @@ def simulate(t, ffn_speedup=1.25):
         tg = 40 / (1 + 9 * c["k"] / n)
         if c.get("f"):
             tg = 40 / (1 + 9 * c["k"] * t.ffn_frac / n) * ffn_speedup
-        tg *= {"q4_0": 1.0, "q8_0": 0.99, "f16": 0.97}[c["kv"]] * (1 + c["ub"] / 20000)
+        tg *= {"q4_0": 1.0, "q8_0/q4_0": 0.995, "q8_0": 0.99, "f16": 0.97}[c["kv"]] * (1 + c["ub"] / 20000)
         return {"ok": True, "pp": tg * 30, "tg": round(tg, 2), "mem_mb": round(mem), "load_s": 1}
     t.run_config = run_config
     t.deep_check = lambda b: {"ok": True, "tg_deep": b["tg"], "pp_deep": b["pp"], "filled": 4096}

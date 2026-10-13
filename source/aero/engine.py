@@ -212,6 +212,8 @@ def build_args(model, cfg, port, mmproj=None, final=False, settings=None, spec=N
         a += ["-ot", str(o)]
     if cfg.get("threads"):
         a += ["-t", str(cfg["threads"])]
+    if cfg.get("tb"):
+        a += ["-tb", str(cfg["tb"])]
     if cfg.get("ub"):
         a += ["-ub", str(cfg["ub"]), "-b", str(max(cfg["ub"], cfg.get("b", 2048)))]
     help_txt = server_help()
@@ -219,9 +221,14 @@ def build_args(model, cfg, port, mmproj=None, final=False, settings=None, spec=N
         a += ["-fa", "on" if cfg.get("fa", True) else "off"]
     elif cfg.get("fa", True) and supports("--flash-attn"):
         a += ["-fa"]
-    kv = cfg.get("kv", "q8_0")
-    if kv != "f16":
-        a += ["-ctk", kv, "-ctv", kv]
+    from .gguf import kv_types
+    kt, vt = kv_types(cfg.get("kv", "q8_0"))
+    if (kt, vt) != ("f16", "f16"):
+        a += ["-ctk", kt, "-ctv", vt]
+    if cfg.get("rope_scale") and float(cfg["rope_scale"]) > 1 and supports("--rope-scaling"):
+        a += ["--rope-scaling", "yarn", "--rope-scale", f"{float(cfg['rope_scale']):g}"]   # context past training
+        if cfg.get("yarn_orig_ctx"):
+            a += ["--yarn-orig-ctx", str(int(cfg["yarn_orig_ctx"]))]
     if supports("--fit"):
         a += ["--fit", "off"]           # we size things ourselves
     if mmproj:
@@ -235,7 +242,13 @@ def build_args(model, cfg, port, mmproj=None, final=False, settings=None, spec=N
                                         # for VRAM accounting and Remote Mode (about 20 lines per request)
     if spec:
         a += list(spec)
-    if cfg.get("no_mmap"):
+    load_mode_mlock = bool(cfg.get("mlock")) and not supports("--mlock") and supports("--load-mode") and \
+        re.search(r"--load-mode[^\n]*(\n\s+[^-][^\n]*)*mlock", help_txt) is not None
+    if cfg.get("mlock") and supports("--mlock"):
+        a += ["--mlock"]
+    elif load_mode_mlock:
+        a += ["--load-mode", "mlock"]           # reads the file into locked RAM: no separate no-mmap mode needed
+    if cfg.get("no_mmap") and not load_mode_mlock:
         if supports("--no-mmap"):
             a += ["--no-mmap"]
         elif supports("--load-mode"):           # llama.cpp v0.5.0 replaced --no-mmap/--mlock with --load-mode

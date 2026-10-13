@@ -180,7 +180,8 @@ async def put_settings(req: Request):
 
 def _tuned_info(m, h, ver):
     try:
-        c = tuner.cached(tuner.cache_key(m["path"], m.get("mmproj"), h, spec_args(m["path"], load_settings())))
+        c = tuner.cached(tuner.cache_key(m["path"], m.get("mmproj"), h, spec_args(m["path"], load_settings()),
+                                         pins=m.get("pins")))
         if c:
             return {"desc": c["desc"], "tg": c["tg"], "pp": c["pp"], "ctx": c["config"]["ctx"], "at": c["tuned_at"],
                     "limit_gb": round(c.get("limit_mb", 0) / 1024, 2), "depth": c.get("depth"),
@@ -569,7 +570,47 @@ def tune_info(mid: str):
             "last_limit_gb": s.get("last_vram_limit_gb"), "mode": s.get("tune_mode", "balanced"),
             "advisor": s.get("advisor_model", "auto"), "per_trial_s": round(per_trial),
             "depths": {k: v for k, v in tuner.DEPTHS.items()}, "full_cap": tuner.FULL_CAP,
-            "advisor_margin_mb": ADVISOR_MARGIN_MB}
+            "advisor_margin_mb": ADVISOR_MARGIN_MB, "pins": tuner.clean_pins(m.get("pins")),
+            "knobs": _knob_choices(m, h)}
+
+
+def _knob_choices(m, h):
+    """What each pinnable setting can be set to for this model on this PC (Tuning settings, 1.2.65)."""
+    try:
+        meta = gguf.summarize(Path(m["path"]))
+    except Exception:  # noqa: BLE001
+        meta = {"n_layer": 0, "ctx_train": 32768, "experts": 0}
+    ctx_train = meta.get("ctx_train") or 32768
+    ctxs = [c for c in tuner.LADDER if c < ctx_train] + [ctx_train]
+    from .engine import supports
+    yarn = supports("--rope-scaling")
+    if yarn:
+        ctxs += [ctx_train * 2, ctx_train * 4]          # only with the YaRN setting below
+    cores, threads = h.get("cores") or 8, h.get("threads") or 16
+    return {"ctx": ctxs, "ctx_train": ctx_train, "kv": list(tuner.KV_CHOICES), "layers": meta.get("n_layer") or 0,
+            "moe": bool(meta.get("experts")), "ub": [128, 256, 512, 1024, 2048],
+            "batch": [512, 1024, 2048, 4096, 8192],
+            "threads": sorted({max(1, cores // 2), cores, threads, max(1, cores - 2)}),
+            "rope_scale": [2, 4] if yarn else [], "gpu": bool(h.get("gpus")), "labels": tuner.PIN_KNOBS}
+
+
+@app.get("/api/models/{mid}/pins")
+def get_pins(mid: str):
+    m = models.get(mid)
+    if not m:
+        raise HTTPException(404, "Unknown model")
+    return {"pins": tuner.clean_pins(m.get("pins")), "knobs": _knob_choices(m, hw())}
+
+
+@app.put("/api/models/{mid}/pins")
+async def put_pins(mid: str, req: Request):
+    """Save the pinned settings; a different set means a different tuning (cache key), so the next load re-tunes."""
+    if not models.get(mid):
+        raise HTTPException(404, "Unknown model")
+    b = await req.json()
+    pins = tuner.clean_pins(b.get("pins") if isinstance(b, dict) else None)
+    models.update(mid, pins=pins)
+    return {"pins": pins}
 
 
 ENGINE_VRAM = {"mb": 0}
@@ -628,7 +669,7 @@ def _load_job(m, retune, limit_gb, depth, emit, cancel):
     unload()
     h = hw(force=True)
     spec = spec_args(m["path"], s)
-    key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
+    key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec, pins=m.get("pins"))
     entry = None if retune else tuner.cached(key)
     if limit_gb == "auto":
         limit_gb = auto_limit_gb(m, h)
@@ -659,7 +700,11 @@ def _load_job(m, retune, limit_gb, depth, emit, cancel):
             adv.prepare()
             tuner.Tuner.check_cancel(cancel)
             emit({"type": "phase", "phase": "trials"})
-            t = tuner.Tuner(m["path"], m.get("mmproj"), s, limit_mb, depth, adv, emit, cancel, others_mb=others)
+            t = tuner.Tuner(m["path"], m.get("mmproj"), s, limit_mb, depth, adv, emit, cancel, others_mb=others,
+                            pins=m.get("pins"))
+            if m.get("pins"):
+                emit({"type": "log", "text": "Pinned settings (kept fixed while tuning): " +
+                                             ", ".join(f"{k} {v}" for k, v in tuner.clean_pins(m["pins"]).items())})
             e = t.run()
         finally:
             adv.stop()
@@ -714,7 +759,7 @@ def _load_job(m, retune, limit_gb, depth, emit, cancel):
                 emit({"type": "log", "text": "The tuned settings failed to load (other apps took VRAM or "
                                              "llama.cpp changed). Re-tuning with your limit."})
                 entry = do_tune()
-                key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
+                key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec, pins=m.get("pins"))
                 prof = None
             else:
                 STATE.update(status="error", error=tail)
@@ -772,6 +817,8 @@ async def load(req: Request):
         raise HTTPException(400, "depth must be short, medium, long or full")
     if body.get("mode") in tuner.MODE_TEXT:
         save_settings({"tune_mode": body["mode"]})
+    if isinstance(body.get("pins"), dict):
+        m = models.update(mid, pins=tuner.clean_pins(body["pins"])) or models.get(mid)
 
     def job(emit, cancel):
         return _load_job(m, retune, limit_gb, depth, emit, cancel)
@@ -1693,7 +1740,7 @@ def local_status():
 # ---- HAPO profiles ------------------------------------------------------------------------------
 
 def _tune_key(m, s, h):
-    return tuner.cache_key(m["path"], m.get("mmproj"), h, spec_args(m["path"], s))
+    return tuner.cache_key(m["path"], m.get("mmproj"), h, spec_args(m["path"], s), pins=m.get("pins"))
 
 
 def _hapo_ctx(mid):
@@ -1726,7 +1773,7 @@ async def hapo_apply(req: Request):
     if not entry:
         raise HTTPException(409, "Tune this model first (Quick Tune or Deep Tune).")
     meta = entry.get("meta") or gguf.summarize(Path(m["path"]))
-    space = tuner.Space(meta, h, s, bool(h["gpus"]))
+    space = tuner.Space(meta, h, s, bool(h["gpus"]), pins=m.get("pins"))
     try:
         act = hapo.apply(key, b.get("profile"), entry, h, space.server_cfg, hapo.fingerprint(h)["id"])
     except ValueError as e:
