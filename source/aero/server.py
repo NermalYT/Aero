@@ -762,6 +762,19 @@ def slots_for(s, h, model_mb, others_mb, limit_mb=None):
     return max(1, min(want, 1 + int(max(0.0, budget - model_mb) // per)))
 
 
+def _vram_too_low(h):
+    """' (only N MB left)' when the card is nearly full after a load, else None. 1.3.1, measured: a 27B (64k context,
+    hybrid with a recurrent state per slot) left 445 MB of 16,303 with two slots, and prompts read at ~200 tok/s
+    instead of ~1,260. The per-slot estimate missed the recurrent state; this checks what is really left."""
+    if not h.get("vram_measured", True):
+        return None
+    used = hardware.gpu_used_mb()
+    if used is None:
+        return None
+    free = h["vram_total_mb"] - used
+    return f" (only {free:,} MB left)" if free < max(1024, h["vram_total_mb"] * 0.06) else None
+
+
 _ALLOC_FAIL = re.compile(r"cudaMalloc failed|failed to allocate \w+ buffer|out of memory", re.I)
 
 
@@ -876,10 +889,12 @@ def _load_job(m, retune, limit_gb, depth, emit, cancel):
                                     settings={**s, "parallel_slots": slots}, spec=spec))
             ok, why = ENGINE.wait_ready(900, cancel)
             from . import engine as _engine
-            if ok and _engine.slots_of(ENGINE.url) > 1 and h["gpus"] and _ALLOC_FAIL.search(ENGINE.log_tail(600)):
-                # an allocation already failed while loading (e.g. the vision projector's buffers): the next request
-                # would take the server down. One slot instead.
-                emit({"type": "log", "text": f"VRAM ran out while loading with {slots} slots: restarting with one."})
+            low = _vram_too_low(h) if ok and _engine.slots_of(ENGINE.url) > 1 and h["gpus"] else None
+            if ok and _engine.slots_of(ENGINE.url) > 1 and h["gpus"] and (_ALLOC_FAIL.search(ENGINE.log_tail(600)) or low):
+                # an allocation already failed while loading (e.g. the vision projector's buffers), or almost nothing is
+                # left (Windows then moves memory into shared RAM and prompts read ~6x slower): one slot instead
+                emit({"type": "log", "text": f"VRAM ran out while loading with {slots} slots{low or ''}: restarting "
+                                             "with one."})
                 ENGINE.stop()
                 one_slot = True
                 if not use:

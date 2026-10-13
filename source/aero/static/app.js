@@ -1853,6 +1853,14 @@ async function runAgent(loop) {
           if (cur.think && cur.think.open && !cur.thinkClosed) { cur.think.open = false; cur.thinkClosed = true; $('summary', cur.think).textContent = `Thought for ${((Date.now() - cur.t0) / 1000).toFixed(1)}s`; }
           sched(); break;
         case 'tool_pending': pendingLabel.textContent = `Preparing ${toolInfo(ev.name).name}…`; (cur?.L.el || ctx.el).append(pendingLabel); scrollBottom(); break;
+        case 'prefill': {                              // 1.3.1: a long prompt shows how far the model has read
+          const todo = ev.total - ev.cache, done = Math.max(0, ev.done - ev.cache);
+          if (todo < 1500 || ev.done >= ev.total) { pendingLabel.remove(); break; }
+          const rate = ev.ms > 0 ? done / (ev.ms / 1000) : 0, left = rate > 0 ? Math.round((todo - done) / rate) : null;
+          pendingLabel.textContent = `Reading ${fmtNum(todo)} tokens: ${Math.round(done / todo * 100)}%` + (left != null && done > 0 ? ` (about ${left} s left)` : '');
+          if (!pendingLabel.isConnected) { (cur?.L.el || ctx.el).append(pendingLabel); scrollBottom(); }
+          break;
+        }
         case 'assistant_done': {
           pendingLabel.remove();
           const m = ev.message;

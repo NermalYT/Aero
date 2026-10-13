@@ -1,7 +1,21 @@
 """app_find and app_launch: find installed apps by the names people use and start them with proof (app_registry.py).
 Both work on Windows, Linux and macOS."""
+import re
+import time
+
 from . import tool
 from .. import action_results, app_catalog, app_registry
+
+
+def _alive(windows):
+    """Is any of these windows still open? (Without a way to check, assume so for the short window that matters.)"""
+    if not windows:
+        return False
+    try:
+        import ctypes
+        return any(ctypes.windll.user32.IsWindow(int(w["id"])) for w in windows)
+    except Exception:  # noqa: BLE001
+        return True
 
 
 def _fmt(c):
@@ -46,6 +60,15 @@ def app_find(ctx, name, refresh=False):
     return head + "\n".join(_fmt(c) for c in cands)
 
 
+WEB_BROWSERS = re.compile(r"\b(google ?chrome|chrome|chromium|microsoft ?edge|msedge|edge|brave|vivaldi|firefox|opera|"
+                          r"arc|librewolf|waterfox|yandex browser|web ?browser|browser)\b", re.I)
+_LAUNCHED = {}           # (owner, app) -> {"at", "windows"}: what this agent launched, to start each app once
+
+
+def _is_web_browser(app):
+    return bool(WEB_BROWSERS.search(str(app or "").replace(".exe", "")))
+
+
 @tool("app_launch", "Start an installed app and check that it really started (its process or window appeared). "
       "Give the app id from app_find or a name. uri: a deep link the app handles (e.g. "
       "roblox://experiences/start?placeId=123), opened by whatever program is registered for it. args: command-line "
@@ -56,6 +79,19 @@ def app_find(ctx, name, refresh=False):
                                                                          "bundle", "command", "protocol", "url"]}},
       ["app"], summary=lambda a: (a.get("app") or "") + (f" · {a['uri']}" if a.get("uri") else ""))
 def app_launch(ctx, app, uri="", args=None, show=False, method=None):
+    if _is_web_browser(app) and not uri:
+        # 1.3.1: "open my chrome and pull up my Modrinth page" made the model launch the user's own Chrome again and
+        # again. Aero never uses the user's browser: its own one keeps the user's sign-ins (Settings > Tools)
+        return {"text": f"Aero doesn't open the user's own web browser ({app}). It has its own browser, which keeps "
+                        "the user's sign-ins: use browser_open with the page's address (it opens on screen) and the "
+                        "other browser_* tools. If you don't know the address, web_search for it first.",
+                "error": True}
+    key = (ctx.owner, str(app).lower())
+    was = _LAUNCHED.get(key)
+    if was and time.time() - was["at"] < 600 and not uri and _alive(was.get("windows")):
+        return {"text": f"{app} was already started for this request (windows: " + "; ".join(
+            f'id {w["id"]} "{w["title"]}"' for w in was["windows"][:4]) + "). Don't start it again: use app_view "
+            "with a window id.", "error": True}
     if uri and not str(uri).split(":", 1)[0].replace("-", "").replace(".", "").isalnum():
         return {"text": f"'{uri}' is not a link Aero can open.", "error": True}
     if uri and str(uri).split(":", 1)[0].lower() in ("http", "https", "file", "javascript", "data", "vbscript"):
@@ -77,6 +113,8 @@ def app_launch(ctx, app, uri="", args=None, show=False, method=None):
         text += ("\nA started process means the link was received; it does not prove the requested page, game or "
                  "experience finished loading. Check the window before saying it did.")
     verified = True if r.get("verified") else None if r.get("already_running") else False
+    if r.get("ok") and r.get("windows"):
+        _LAUNCHED[key] = {"at": time.time(), "windows": r["windows"][:4]}
     env = action_results.make("process", success=bool(r.get("ok")), verified=verified,
                               method="new process of the app seen" if r.get("verified") else
                               "app was already running" if r.get("already_running") else "process list checked",

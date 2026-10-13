@@ -69,6 +69,9 @@ def list_dir(ctx, path=".", depth=1):
       ["path"], summary=lambda a: a.get("path", ""))
 def read_file(ctx, path, start_line=1, max_lines=600):
     p = ctx.path(path)
+    if not p.is_file() and not os.path.isabs(str(path)):
+        # 1.3.1: models read a skill's "references/x.md" against the working folder even when told its folder
+        p = next((d / path for d in getattr(ctx, "skill_dirs", None) or [] if (d / path).is_file()), p)
     if not p.is_file():
         return {"text": f"Not a file: {p}", "error": True}
     size = p.stat().st_size

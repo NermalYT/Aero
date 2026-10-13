@@ -77,6 +77,12 @@ class StaleRef(RuntimeError):
     pass
 
 
+TABS_PER_OWNER = 3          # tabs one agent may hold open from new_tab
+OPENS_NUDGE = 6             # browser_open this many times within OPENS_WINDOW s: remind the model to stop guessing
+OPENS_WINDOW = 600
+_opens = {}                 # owner -> [times of browser_open]
+
+
 class _Browser:
     """All Playwright calls run on one worker thread (the sync API is thread-bound). Each owner (an agent's chat)
     has its own tab."""
@@ -89,6 +95,7 @@ class _Browser:
         self.gens = {}               # owner -> generation of its latest snapshot
         self.headed = None           # True / False: how the running context was started
         self.titles = {}             # owner -> title of its page at the latest snapshot (finds its window on screen)
+        self.extra = {}              # owner -> tabs it opened with new_tab, oldest first (at most TABS_PER_OWNER)
 
     def _ensure_thread(self):
         if self.thread and self.thread.is_alive():
@@ -185,6 +192,7 @@ class _Browser:
         self.ctx = None
         self.pages = {}
         self.gens = {}
+        self.extra = {}
 
     def _visible_pages(self):
         return [x for x in self.ctx.pages if not x.is_closed()]
@@ -197,6 +205,17 @@ class _Browser:
                      x not in self.pages.values()]
             p = blank[0] if blank and not new_tab else ctx.new_page()
             self.pages[owner] = p
+            if new_tab:
+                # 1.3.1: guessing at a profile address opened 15 tabs in one request. An agent keeps its newest few;
+                # older tabs it opened itself close (never ones the user opened)
+                mine = [x for x in self.extra.get(owner, []) if not x.is_closed() and x is not p] + [p]
+                while len(mine) > TABS_PER_OWNER:
+                    old = mine.pop(0)
+                    try:
+                        old.close()
+                    except Exception:
+                        pass
+                self.extra[owner] = mine
         if show:
             try:
                 p.bring_to_front()
@@ -246,11 +265,12 @@ class _Browser:
     def close_owner(self, owner):
         p = self.pages.pop(owner, None)
         self.gens.pop(owner, None)
-        if p is not None and not p.is_closed():
-            try:
-                p.close()
-            except Exception:
-                pass
+        for x in [p] + self.extra.pop(owner, []):         # with the tabs it opened beside it
+            if x is not None and not x.is_closed():
+                try:
+                    x.close()
+                except Exception:
+                    pass
 
 
 def _offline_route(route):
@@ -450,6 +470,9 @@ def browser_open(ctx, url, new_tab=False, show=False):
 
     vis = _visible(ctx)
 
+    now = time.time()
+    seen = _opens[owner] = [t for t in _opens.get(owner, []) if now - t < OPENS_WINDOW] + [now]
+
     def go():
         p = B.page(owner, show=bool(show) or vis is True, new_tab=new_tab, hide=vis is False and not show)
         p.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -458,7 +481,12 @@ def browser_open(ctx, url, new_tab=False, show=False):
         except Exception:
             pass
         return B.snapshot(owner)
-    return _go(ctx, go, timeout=240)
+    r = _go(ctx, go, timeout=240)
+    if len(seen) >= OPENS_NUDGE and isinstance(r, str):
+        r += (f"\n[Aero: that is {len(seen)} pages opened for this request. Stop guessing addresses: follow links on a "
+              "page you have (browser_click), use web_search, or tell the user what you found and ask for the exact "
+              "page.]")
+    return r
 
 
 @tool("browser_snapshot", "Re-read the current page: interactive elements and visible text.", "browser",

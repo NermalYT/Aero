@@ -189,6 +189,17 @@ def _user_content(m, vision, note="", ocr_on=True):
     return [{"type": "text", "text": text}] + [{"type": "image_url", "image_url": {"url": u}} for u in images]
 
 
+def looping(text, added, every=1500, tail=200, times=4, window=24000):
+    """Is this growing text going in circles? True when its last `tail` characters already appear `times` times in
+    the last `window`. Checked once per `every` new characters (`added`: the piece just appended).
+    1.3.1: a 27B repeated one paragraph of its thinking for 73,755 tokens (3 minutes) and then had no answer."""
+    n = len(text)
+    if n < tail * times or n // every == (n - added) // every:
+        return False
+    end = text[-tail:]
+    return len(end.strip()) > tail // 4 and text[-window:].count(end) >= times
+
+
 class EchoGuard:
     """Small models sometimes go on to repeat the <turn_context> block Aero appends to the user's message (1.3: seen
     with Qwen3-1.7B after an OCR'd attachment). From where the block starts again the text is not part of the answer:
@@ -704,6 +715,7 @@ def _repeat_guard(turn, name, args):
 
 
 SAME_MAX = 2          # the same call with the same result this many times in a row: the next one is refused
+TURN_MAX = 3          # the same call with the same arguments this many times in one request: the next one is refused
 
 
 def _sig(name, args):
@@ -716,11 +728,23 @@ def _sig(name, args):
 def _stuck(turn, name, args):
     """1.3: a model that repeats one call that keeps giving the same result (found: 39 presses on a text box that
     needed typing) is told to change approach instead of running it again."""
+    effect = capabilities.caps_of(name).side_effect
+    sig = _sig(name, args)
+    seen = (getattr(turn, "reads", None) or {}).get(sig)
+    if effect == "local_read" and "wait" not in name and seen and seen[1] >= TURN_MAX:
+        # 1.3.1: a diagram run read one unchanged template 33 times. Nothing was written since, so it is the same
+        return {"text": f"Not run: you already read this {seen[1]} times in this request and nothing was changed since; "
+                        "it is in the conversation above. Use it and go on with the task.", "error": True}
+    if "wait" in name or effect in ("none", "local_read", "external_read"):
+        return None                      # waiting, or looking again (a screenshot while a page loads), repeats on purpose
+    done = (getattr(turn, "calls_n", None) or {}).get(sig, 0)
+    if done >= TURN_MAX:                 # 1.3.1: app_find / app_launch alternated 40 times, so never "in a row"
+        return {"text": f"Not run: this exact {name} call already ran {done} times in this request. Doing it again "
+                        "won't help: use a different tool or different arguments, or stop and tell the user what is in "
+                        "the way.", "error": True}
     last = getattr(turn, "same", None)
-    if "wait" in name or not last or last["sig"] != _sig(name, args) or last["n"] < SAME_MAX:
-        return None                      # waiting for something to change is a repeat on purpose
-    if capabilities.caps_of(name).side_effect in ("none", "local_read", "external_read"):
-        return None                      # so is looking again (a screenshot while a page loads)
+    if not last or last["sig"] != sig or last["n"] < SAME_MAX:
+        return None
     last["n"] += 1
     return {"text": f"Not run: this exact {name} call already ran {last['n'] - 1} times in a row with the same result, "
                     "so running it again won't change anything. Use a different tool or different arguments (for text "
@@ -728,9 +752,19 @@ def _stuck(turn, name, args):
 
 
 def _note_same(turn, name, args, res):
-    if res.get("text", "").startswith(f"Not run: this exact {name} call"):
+    if res.get("text", "").startswith((f"Not run: this exact {name} call", "Not run: you already read this")):
         return
     sig, out = _sig(name, args), (res.get("text") or "")[:600]
+    if not hasattr(turn, "calls_n"):
+        turn.calls_n = {}
+    effect = capabilities.caps_of(name).side_effect
+    if effect == "local_read":                   # the same read with the same result, counted until something changes
+        reads = turn.__dict__.setdefault("reads", {})
+        h = hash(res.get("text") or "")
+        reads[sig] = (h, reads[sig][1] + 1 if sig in reads and reads[sig][0] == h else 1)
+    elif effect not in ("none", "external_read"):
+        turn.reads = {}                          # a write, a command, an app action: files may differ now
+    turn.calls_n[sig] = turn.calls_n.get(sig, 0) + 1
     last = getattr(turn, "same", None)
     if last and last["sig"] == sig and last["out"] == out:
         last["n"] += 1
@@ -1194,6 +1228,8 @@ async def run_local(turn, lane="local", max_steps=None):
     tools_rejected = False
     force_text = False           # after an empty reply: ask once more with tool_choice "none" (that request only)
     empty_retried = False
+    think_off = False            # after thinking that went in circles: the next request without thinking
+    loop_retried = False
     if not getattr(turn, "is_sub", False):
         async for ev in run_decided(turn, lane):      # actions approved after the last turn ended run first
             yield ev
@@ -1205,9 +1241,18 @@ async def run_local(turn, lane="local", max_steps=None):
             note = None
         if note:
             yield {"t": "notice", "text": note, "lane": lane}
-    for step in range(max_steps):
+    for step in range(max_steps + 1):
         if turn.cancel.is_set():
             return
+        if step == max_steps:
+            # 1.3.1: a run that used every step ended with no answer at all. One more request without tools: say what
+            # was done and what is left.
+            turn.history.append({"role": "user", "content": "[Aero: the tool-step limit for this request is reached. "
+                                 "Don't call tools. Answer now: what you did, what you found, and what is left or "
+                                 "what is in the way.]", "aero_note": True})
+            force_text = True
+            yield {"t": "notice", "text": f"Reached {max_steps} tool steps (Settings → Agent max steps): asking for an "
+                                          "answer with what was done so far.", "lane": lane}
         full = build_messages(turn.history, settings, turn.vision, turn.ctx_size, pipeline.extra(turn), trim=False,
                               memory_text=turn.memory_text)
         if compact_at and len(turn.history) > 4 and est_tokens(full) * turn.calib > turn.ctx_size * max(compact_at, 0.8):
@@ -1216,12 +1261,14 @@ async def run_local(turn, lane="local", max_steps=None):
         sent = build_messages(turn.history, settings, turn.vision, turn.ctx_size, pipeline.extra(turn),
                               calib=turn.calib, memory_text=turn.memory_text)
         schemas = [] if tools_rejected else current_schemas(turn)
-        think = turn.think
+        think = turn.think and not think_off
+        think_off = False
         body = {"messages": sent, "stream": True,
                 "temperature": settings["temperature"], "top_p": settings["top_p"], "top_k": settings["top_k"],
                 "min_p": settings["min_p"], "repeat_penalty": settings["repeat_penalty"],
                 "chat_template_kwargs": {"enable_thinking": bool(think)},
-                "stream_options": {"include_usage": True}, "cache_prompt": True}
+                "stream_options": {"include_usage": True}, "cache_prompt": True,
+                "return_progress": True}          # 1.3.1: prompt reading progress (a long prompt no longer looks frozen)
         if not getattr(turn, "is_sub", False):
             body["id_slot"] = 0               # the chat's own slot: its cache survives side jobs (kvcache.py)
         if settings.get("max_tokens"):
@@ -1245,6 +1292,7 @@ async def run_local(turn, lane="local", max_steps=None):
         echo = EchoGuard()
         yield {"t": "assistant_start", "id": msg["id"], "lane": lane, "model": turn.model_name}
         retry = False
+        circling = False
         pre = None
         if step == 0 and schemas and turn.intent is not None and turn.intent.must_act and tprof.get("act_first") \
                 and not turn.forced and not getattr(turn, "is_sub", False):
@@ -1296,6 +1344,11 @@ async def run_local(turn, lane="local", max_steps=None):
                                 chunk = json.loads(data)
                             except Exception:
                                 continue
+                            pp = chunk.get("prompt_progress")
+                            if isinstance(pp, dict) and pp.get("total"):
+                                yield {"t": "prefill", "done": int(pp.get("processed") or 0), "total": int(pp["total"]),
+                                       "cache": int(pp.get("cache") or 0), "ms": int(pp.get("time_ms") or 0),
+                                       "lane": lane}
                             if chunk.get("timings"):
                                 timings = chunk["timings"]
                             if chunk.get("usage"):
@@ -1308,6 +1361,9 @@ async def run_local(turn, lane="local", max_steps=None):
                                     first_tok = first_tok or time.time()
                                     msg["reasoning"] += d["reasoning_content"]
                                     yield {"t": "reasoning", "d": d["reasoning_content"], "lane": lane}
+                                    if looping(msg["reasoning"], len(d["reasoning_content"])):
+                                        circling = True
+                                        break
                                 if d.get("content"):
                                     first_tok = first_tok or time.time()
                                     piece = echo.feed(d["content"])
@@ -1328,13 +1384,20 @@ async def run_local(turn, lane="local", max_steps=None):
                                         yield {"t": "tool_pending", "name": c["name"], "lane": lane}
                                     if f.get("arguments"):
                                         c["args"] += f["arguments"]
-                            if echo.hit:
+                            if echo.hit or circling:
                                 break               # the model began repeating Aero's own context: stop it there
                         rest = echo.flush()
                         if rest:
                             msg["content"] += rest
                             yield {"t": "content", "d": rest, "lane": lane}
         if retry:
+            continue
+        if circling and not loop_retried and not turn.cancel.is_set():
+            # the thinking repeats itself: stop it and ask again without thinking (once per request); the circling
+            # thinking isn't kept, so the model doesn't read it back
+            loop_retried = think_off = True
+            yield {"t": "notice", "text": "The model's thinking went in circles; asking it again without thinking.",
+                   "lane": lane}
             continue
 
         # fallback: calls the model printed as text (toolcall_text knows the formats local models use). They run as
@@ -1395,6 +1458,8 @@ async def run_local(turn, lane="local", max_steps=None):
                                    "function": {"name": got[0], "arguments": json.dumps(got[1])}}]
                     msg["content"] = ""
                     msg["forced"] = reason
+        if tool_calls and step == max_steps:
+            tool_calls = []                 # the answer after the step limit: no more actions, even if it asks
         if tool_calls:
             msg["tool_calls"] = tool_calls
         if not tool_calls and not msg["content"].strip() and not msg["reasoning"].strip() and schemas \

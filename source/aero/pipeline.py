@@ -60,8 +60,14 @@ async def compact_midturn(turn):
     added = memory.store_result(turn.chat_id, turn.title, res, next_chat=new_id)
     turn.carry = {"from": turn.chat_id, "from_title": turn.title, "summary": res["summary"],
                   "open_tasks": res["open_tasks"], "at": time.time()}
+    asked = next((m for m in reversed(turn.history[:cut]) if m.get("role") == "user" and not m.get("aero_note")), None)
     turn.history = turn.history[cut:]
     turn.start_index = max(0, turn.start_index - cut)
+    if asked and not any(m.get("role") == "user" for m in turn.history):
+        # 1.3.1: a long tool run cut its own request away; Qwen's template then refused the prompt ("No user query
+        # found in messages") and the model lost what it was working on. The request stays at the top of the part.
+        turn.history.insert(0, dict(asked))
+        turn.start_index += 1
     yield {"t": "compacted", "new_chat_id": new_id, "carry": turn.carry, "keep": turn.history, "facts_added": added}
     turn.rebind(new_id)
     turn.memory_text = agent.memory_recall(turn.settings, turn.history, turn.carry, turn.chat_id, ctx_size)
@@ -150,6 +156,7 @@ async def route(turn, opts):
     available = [c[0] for c in catalog]
     prev = _prev_exposed(turn.history)
     rec = None
+    failed = False
 
     # a forever-loop repeats the same prompt: reuse the last decision instead of asking again
     if use_router and loop.get("iteration", 0) > 1:
@@ -177,8 +184,10 @@ async def route(turn, opts):
                 stats.SESSION["router_calls"] += 1
                 stats.SESSION["router_ms_total"] += info.get("ms") or 0
             except Exception as e:  # noqa: BLE001
+                failed = True
                 yield {"t": "router_error", "error": f"{type(e).__name__}: {e}"[:300]}
         elif router.model_path():
+            failed = True
             yield {"t": "router_error", "error": router.status().get("error") or "The router is not running."}
 
     if rec:
@@ -207,6 +216,13 @@ async def route(turn, opts):
         turn.history.append(rec)
         turn.start_index = len(turn.history)
         yield {"t": "router", "message": rec}
+    elif failed and catalog:
+        # 1.3.1: the router failed. Every tool (about 18,000 tokens of definitions) made a 25,000-token first prompt
+        # that read for minutes; the tools this request hints at, the core ones and what this chat had are enough
+        turn.exposed = choose_exposure({"tools": [], "complexity": "moderate"}, s, prev, available,
+                                       agent._last_user_text(turn.history), picked_app=bool(turn.tctx.target_window))
+        if turn.exposed is not None:
+            yield {"t": "exposure", "exposed": list(turn.exposed)}
     else:
         turn.exposed = None if prev is None else list(prev)      # no router: everything (or what this chat had)
 
