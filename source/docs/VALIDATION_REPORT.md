@@ -196,7 +196,7 @@ pressed without changing their setting, a whole chat ran with no review and no n
 
 ## 3d. Windows 11: Installed apps entry and uninstaller (live, real PC)
 
-On dom's PC, in throwaway folders under `%USERPROFILE%\HalcyonTest\uninstall-test`, with test entries named
+On the owner's PC, in throwaway folders under `%USERPROFILE%\HalcyonTest\uninstall-test`, with test entries named
 `AeroTest*` registered for the current user (no administrator rights in that session). Each test install held the
 real app code, a real Python venv, a 64 MB model file, a router file, a data folder, a stand-in `llama-server.exe`
 and a path longer than 260 characters; `setup.py --skip-llama --no-shortcuts` registered it. The uninstall was run
@@ -216,7 +216,7 @@ the administrator hand-off, 2 for `Uninstall-Aero.bat` and 2 parser checks under
 | Quiet uninstall keeps `models` and `data` (model file intact), removes the rest and the entry; `-Quiet -All` removes everything | Passed |
 | A file held open: the rest is removed, the entry is removed, exit 0, and a `RunOnce` command deletes the folder at the next sign-in (the command was run and removed it) | Passed |
 | Refuses a folder that isn't an Aero install, and the user profile folder (exit 1, nothing deleted) | Passed |
-| dom's own Desktop and Start menu shortcuts (including `Halcyon.lnk`) unchanged; no test entries left; `C:\Aero` never created; `C:\Halcyon` untouched | Passed |
+| The owner's own Desktop and Start menu shortcuts (including `Halcyon.lnk`) unchanged; no test entries left; `C:\Aero` never created; `C:\Halcyon` untouched | Passed |
 | The administrator hand-off, with a copy whose only change is that `-Verb RunAs` is left out: the uninstaller restarts itself with `-Elevated`, an install path containing a space and the `-RemoveModels -RemoveData` choices arrive intact, the child removes everything and its exit code reaches the caller | Passed |
 | `C:\Aero\Uninstall-Aero.bat -Quiet -All` removes everything, exit 0, with no "cannot find" message after it deletes itself | Passed |
 | `Uninstall-Aero.ps1` and `Validate-Aero.ps1` parse under Windows PowerShell 5.1 | Passed |
