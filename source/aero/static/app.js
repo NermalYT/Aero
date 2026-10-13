@@ -176,7 +176,7 @@ async function boot() {
   await loadChats();
   const reopen = takeReopen();
   if (reopen && S.chats.some(c => c.id === reopen)) { try { S.chat = await api('/api/chats/' + reopen); } catch { } }
-  if (S.st.engine.status === 'ready') showChat();
+  if (S.st.engine.status === 'ready' || S.st.bg_tune?.running) showChat();
   else {
     await showLauncher();
     if (S.settings.auto_load_last && S.models[0] && S.models[0].exists && !S.st.busy) loadModel(S.models[0].id);
@@ -193,8 +193,19 @@ async function refreshState() {
     const first = !S.settings;
     S.settings = S.st.settings; S.hw = S.st.hw;
     if (first) applyTheme();
-    renderEngine(); syncBusy(); renderUpdateBar(); renderModCount();
+    renderEngine(); syncBusy(); renderUpdateBar(); renderModCount(); bgTuneNote();
   } catch (e) { /* backend restarting */ }
+}
+
+/** 1.2.80: say once when background tuning finished (or failed); stopping it for a chat says nothing. */
+function bgTuneNote() {
+  const l = S.st?.bg_tune?.last;
+  if (!l?.at) return;
+  if (S.bgSeen === undefined) { S.bgSeen = l.at; return; }
+  if (l.at === S.bgSeen) return;
+  S.bgSeen = l.at;
+  if (l.ok) toast(`Background tuning finished (${DEPTH_INFO[l.depth]?.[0] || l.depth}) for ${l.model}: ${l.tg_before ?? '?'} → ${l.tg ?? '?'} tok/s.`, false, 9000);
+  else if (!String(l.why).startsWith('stopped')) toast(`Background tuning stopped: ${l.why}.`, false, 9000);
 }
 
 function renderEngine() {
@@ -202,7 +213,8 @@ function renderEngine() {
   const dot = $('#engineDot');
   dot.className = 'dot ' + ({ ready: 'ready', tuning: 'busy', loading: 'busy', error: 'error' }[e.status] || '');
   $('#modelName').textContent = e.model ? (e.model.name || 'Model') : 'No model loaded';
-  $('#modelMeta').textContent = e.status === 'ready' ? `${fmtCtx(e.ctx)} ctx · ${e.tune?.tg ?? '?'} tok/s${e.vision ? ' · vision' : ''}${e.tune?.profile_name ? ' · ' + e.tune.profile_name : ''}` :
+  $('#modelMeta').textContent = S.st.bg_tune?.running ? `tuning in the background (${DEPTH_INFO[S.st.bg_tune.depth]?.[0] || S.st.bg_tune.depth}) · a message stops it` :
+    e.status === 'ready' ? `${fmtCtx(e.ctx)} ctx · ${e.tune?.tg ?? '?'} tok/s${e.vision ? ' · vision' : ''}${e.tune?.profile_name ? ' · ' + e.tune.profile_name : ''}` :
     e.status === 'idle' ? 'Click to choose a model' : e.status;
   const g = S.hw?.gpus?.[0];
   const gs = S.hw?.gpus || [];
@@ -1626,7 +1638,7 @@ function renderChips() {
 
 // ---------------------------------------------------------------- sending + streaming
 async function send() {
-  if (S.st?.engine.status !== 'ready') { toast('Load a model first.', true); return showLauncher(); }
+  if (S.st?.engine.status !== 'ready' && !S.st?.bg_tune?.running) { toast('Load a model first.', true); return showLauncher(); }
   if (S.compacting) return toast('Still compacting; one moment.');
   const ta = $('#input'); const text = ta.value.trim();
   if (!text && !S.pending.pastes.length && !S.pending.atts.length) return;
@@ -2886,7 +2898,7 @@ async function openSettings(start = 'General') {
           h('span', {}, 'Loaded'), h('span', {}, e.model.name),
           h('span', {}, 'Configuration'), h('span', {}, e.desc || '-'),
           h('span', {}, 'Speed'), h('span', {}, e.tune ? `${e.tune.tg} tok/s generate · ${e.tune.pp} tok/s prompt` : '-'),
-          h('span', {}, 'Tuned'), h('span', {}, e.tune ? `${e.tune.at} · ${e.tune.trials} trials · ${e.tune.depth || ''} · limit ${e.tune.limit_gb} GB` : '-'),
+          h('span', {}, 'Tuned'), h('span', {}, e.tune ? `${e.tune.at} · ${e.tune.trials} trials · ${e.tune.depth || ''} · limit ${e.tune.limit_gb} GB${e.tune.warm ? ' · warm start' : ''}` : '-'),
           h('span', {}, 'Advisor'), h('span', {}, e.tune ? (e.tune.advisor || 'built-in step policy') : '-'),
           h('span', {}, 'Tool calling'), h('span', {}, e.tune?.tools ? `${Math.round(e.tune.tools.score * 100)}% on the exam · temperature ${e.tune.tools.temperature}` +
             (e.tune.tools.act_first ? ' · Aero starts actions for it' : '') : 'not measured yet (re-tune to measure)')) : h('p', { class: 'muted' }, 'No model loaded.'),
@@ -2911,6 +2923,10 @@ async function openSettings(start = 'General') {
             'How long tuning runs after Select downloads a model.'),
           field('Select: minimum speed', num('select_min_tps', s.select_min_tps ?? 5, 1),
             'tokens/s. Select prefers the best quality that is at least this fast, and warns when nothing is.')),
+        toggle('tune_warm_start', s.tune_warm_start !== false, 'Warm start: tuning begins with this model\'s last tuning (or that of another quant of it on this PC), so it finds a good setup in fewer trials'),
+        h('div', { class: 'row2' },
+          toggle('bg_tune', s.bg_tune !== false, 'Background tuning: when the PC is idle and plugged in, keep tuning the loaded model one depth deeper (Short → Medium → Long). A message stops it at once'),
+          field('Idle before background tuning', num('bg_tune_idle_min', s.bg_tune_idle_min ?? 20, 5), 'minutes without a chat (5 or more)')),
         toggle('allow_q4_kv', s.allow_q4_kv, 'Let the tuner try a q4_0 KV cache (more context, small quality loss; Full depth always tries it)'),
         toggle('tune_tool_eval', s.tune_tool_eval !== false, 'Test tool calling while tuning: a short exam (Berkeley function-calling cases + Aero requests) picks the temperature for tool steps and whether Aero should start actions for this model'),
         toggle('use_tuned_tool_temp', s.use_tuned_tool_temp !== false, 'Use the temperature the exam found best whenever tools are offered'),

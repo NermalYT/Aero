@@ -17,7 +17,7 @@ from pathlib import Path
 from .osinfo import IS_LINUX, IS_MAC, IS_WIN  # noqa: F401  (re-exported for the other modules)
 
 APP_NAME = "Aero"
-VERSION = "1.2.75"
+VERSION = "1.2.80"
 REPO = "NermalYT/Aero"            # GitHub repository the updater reads releases from
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -195,6 +195,9 @@ DEFAULTS = {
     "verify_downloads": True,        # check Hugging Face downloads against their published SHA-256
     "keep_quant_source": False,      # quantize.py: keep the original weights after making a GGUF
     "use_tuned_tool_temp": True,     # tool steps use the temperature the exam measured best
+    "tune_warm_start": True,         # 1.2.80: tuning starts from this model's (or a similar one's) last tuning
+    "bg_tune": True,                 # keep tuning the loaded model deeper while the PC is idle
+    "bg_tune_idle_min": 20,          # minutes without a chat before background tuning starts
     "parallel_slots": 2,             # 1.2.70: llama-server slots sharing one KV pool (chat in 0, side jobs in 1)
     "cache_reuse": 256,              # reuse cached chunks of at least this many tokens after an edit (0 = off)
     "prompt_cache_ram_mb": 8192,     # llama-server's prompt cache in RAM (0 = off)

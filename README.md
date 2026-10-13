@@ -86,6 +86,11 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
+## What's new in 1.2.80
+
+- **Tuning that keeps improving.** A tune starts from what worked last time, and while your PC is idle Aero keeps
+  tuning the loaded model one depth deeper. Send a message and it stops at once.
+
 ## What's new in 1.2.75
 
 - **Tasks survive closing Aero.** If Aero closes in the middle of a job, it's listed under **Tasks**: one click

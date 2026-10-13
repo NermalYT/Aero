@@ -618,8 +618,12 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
 
     try:
         from . import vram_policy
+        waited = False
         async for ev in vram_policy.wait_for_model():
+            waited = True
             yield out(ev)
+        if waited:
+            turn.refresh_engine(engine_state)      # read while the model was away: ctx 0, no vision
         for ev in mod_events:
             yield out(ev)
         if mod:
