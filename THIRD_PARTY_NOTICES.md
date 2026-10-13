@@ -60,6 +60,7 @@ into your data folder when you ask, and it stays under its own licence there.
 | anthropic, openai | MIT / Apache-2.0 | |
 | playwright | Apache-2.0 | optional |
 | claude-agent-sdk | MIT | optional |
+| pywebview (with pythonnet, clr_loader, bottle, proxy_tools) | BSD-3-Clause (pywebview) / MIT (the others) | optional, Windows only (1.3.2: Aero's own window). pywebview ships Microsoft's WebView2 SDK assemblies (`Microsoft.Web.WebView2.Core.dll`, `.WinForms.dll`), redistributable under Microsoft's WebView2 SDK licence; the WebView2 runtime itself comes with Windows 11 and Microsoft Edge |
 
 ## Downloaded with Aero (1.2: integrations, each into `data/toolchains` or its own environment; set up by the installer and in the background, `--lean` to skip)
 

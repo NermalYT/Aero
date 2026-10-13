@@ -1,4 +1,7 @@
 # Optional packages, installed one at a time: Aero works without any of them.
 # playwright: the agent's browser tools. claude-agent-sdk: Claude reviews through your Claude plan.
+# pywebview (Windows): Aero's own window with its own title bar (1.3.2); it brings pythonnet and Microsoft's
+# WebView2 SDK assemblies. Without it Aero opens its window in Edge or Chrome as before.
 playwright>=1.44,<2
 claude-agent-sdk>=0.2.164,<0.3
+pywebview>=6.2,<7; sys_platform == "win32"
