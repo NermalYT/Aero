@@ -325,6 +325,10 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px;
   border-radius: 10px; border: 1px solid var(--line); background: var(--glass-2); color: inherit; cursor: pointer; }
 .prof-pick.on { border-color: var(--accent, #2f8cff); }
 .prof-pick:disabled { opacity: .5; cursor: default; }
+/* voice typing (1.3) */
+#micBtn.rec { color: #fff; background: #e5484d; border-radius: 50%; animation: micPulse 1.2s ease-in-out infinite; }
+#micBtn.busy { opacity: .55; cursor: progress; }
+@keyframes micPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, .55); } 50% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); } }
 .tasks-card { width: min(760px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 0; }
 .tasks-body { padding: 12px 18px 18px; display: grid; gap: 10px; }
 .task-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }

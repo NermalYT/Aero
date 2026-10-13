@@ -578,8 +578,13 @@ def browser_screenshot(ctx):
     owner = _owner(ctx)
     png = _go(ctx, lambda: B.page(owner).screenshot(type="png"))
     meta = attachments.save_image_bytes(png, "browser.png")
-    return {"text": "Browser screenshot captured." + ("" if ctx.vision else " (model has no vision)"),
-            "image": meta["id"]}
+    if ctx.vision:
+        return {"text": "Browser screenshot captured.", "image": meta["id"]}
+    from .desktop import _ocr_lines
+    seen = _ocr_lines(ctx, png)
+    return {"text": "Browser screenshot captured. The model has no vision" + (
+        ", so here is its text (OCR) with each line's centre in viewport pixels:\n" + seen if seen else
+        "; use browser_read for the page text."), "image": meta["id"]}
 
 
 @tool("browser_read", "Get the plain visible text of the current page. For long pages, browser_read_sections is "

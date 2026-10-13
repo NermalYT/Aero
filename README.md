@@ -86,6 +86,22 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
+## What's new in 1.3
+
+Every feature was tested on a real PC for this release; what broke is fixed, and what was missing is added.
+
+- **Voice typing.** A microphone button in the chat box: speak, and your words appear in the message box. It runs
+  on your PC with whisper.cpp; attached recordings are transcribed too.
+- **Text in images for models that can't see.** Attached images, scanned PDFs and screenshots are read with
+  Windows' own OCR, so a text-only model still gets their text (and where each line is on screen).
+- **Word documents.** Ask for a report or a letter as a Word file and get a real .docx.
+- **Fixes from the testing**, among them:
+  - a model tuned to fill the GPU no longer crashes on its second request;
+  - "type into this box" in an app works (3 tool calls instead of 40 that never finished);
+  - Mod Aero's checks pass again;
+  - edits to Windows files keep their line endings.
+  Full list in the [changelog](source/CHANGELOG.md), test results in [the 1.3 test report](source/docs/V1.3_TEST_REPORT.md).
+
 ## What's new in 1.2.80
 
 - **Tuning that keeps improving.** A tune starts from what worked last time, and while your PC is idle Aero keeps

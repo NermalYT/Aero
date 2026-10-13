@@ -744,6 +744,27 @@ class NeedsTune(Exception):
     pass
 
 
+EXTRA_SLOT_MB = 384      # measured (1.3): a second slot of a hybrid 27B with MTP drafts took 350 MB more
+
+
+def slots_for(s, h, model_mb, others_mb, limit_mb=None):
+    """How many llama-server slots fit (Settings > Model & tuning > Parallel slots). Tuning measures one slot inside
+    its VRAM limit; each extra one needs room beside it, within that limit and what other apps leave free. A card
+    the tuning filled has none: a second slot there ran out of memory on the next request (CUDA OOM, the model
+    server gone). On Windows CUDA can use less than the card's size, so the tuning's limit is the better guide."""
+    want = max(1, int(s.get("parallel_slots") or 1))
+    if want == 1 or not h["gpus"] or not model_mb:
+        return want
+    per = max(EXTRA_SLOT_MB, model_mb * 0.03)
+    budget = h["vram_total_mb"] - max(0, others_mb) - 256
+    if limit_mb:
+        budget = min(budget, float(limit_mb))
+    return max(1, min(want, 1 + int(max(0.0, budget - model_mb) // per)))
+
+
+_ALLOC_FAIL = re.compile(r"cudaMalloc failed|failed to allocate \w+ buffer|out of memory", re.I)
+
+
 _LOAD_LOCK = threading.Lock()       # one load or tune at a time (the user's, or background tuning's)
 
 
@@ -835,6 +856,7 @@ def _load_job(m, retune, limit_gb, depth, emit, cancel):
 
         prof = hapo.active(key)
         attempt = 0
+        one_slot = False
         while True:
             use = prof.get("config") if prof else None
             if not use:
@@ -844,9 +866,25 @@ def _load_job(m, retune, limit_gb, depth, emit, cancel):
             emit({"type": "loading", "desc": prof["desc"] if use else entry["desc"],
                   "profile": prof.get("name") if use else None})
             before = hardware.settle_vram() if h["gpus"] else 0
+            want = max(1, int(s.get("parallel_slots") or 1))
+            slots = 1 if one_slot else slots_for(s, h, (use and prof.get("mem_mb")) or entry.get("mem_mb"), before,
+                                                 entry.get("limit_mb"))
+            if slots < want and not one_slot:
+                emit({"type": "log", "text": f"VRAM is too full for {want} slots beside this model: using {slots} "
+                                             "(background jobs share the chat's slot)."})
             ENGINE.start(build_args(m["path"], cfg, LLAMA_PORT, m.get("mmproj"), final=True,
-                                    settings=s, spec=spec))
+                                    settings={**s, "parallel_slots": slots}, spec=spec))
             ok, why = ENGINE.wait_ready(900, cancel)
+            from . import engine as _engine
+            if ok and _engine.slots_of(ENGINE.url) > 1 and h["gpus"] and _ALLOC_FAIL.search(ENGINE.log_tail(600)):
+                # an allocation already failed while loading (e.g. the vision projector's buffers): the next request
+                # would take the server down. One slot instead.
+                emit({"type": "log", "text": f"VRAM ran out while loading with {slots} slots: restarting with one."})
+                ENGINE.stop()
+                one_slot = True
+                if not use:
+                    attempt -= 1
+                continue
             if ok:
                 if not h["gpus"]:
                     ENGINE_VRAM["mb"] = 0
@@ -1256,6 +1294,26 @@ async def upload(req: Request, name: str):
     if len(data) > 512 * 2**20:
         raise HTTPException(413, "File too large (512 MB max)")
     return await asyncio.to_thread(attachments.save_upload, name, data)
+
+
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(req: Request, lang: str = "auto"):
+    """Voice typing (1.3): a 16 kHz mono WAV from the microphone button -> the words, for the message box."""
+    data = await req.body()
+    if len(data) > 64 * 2**20:
+        raise HTTPException(413, "Recording too long")
+    if len(data) < 2000:
+        return {"text": ""}
+    from .integrations import load_all, voice
+    load_all()
+    if not voice.ready():
+        raise HTTPException(409, "Voice typing is still being set up (whisper.cpp and an 82 MB model). It installs "
+                                 "in the background; Integrations → Create shows it.")
+    try:
+        text = await asyncio.to_thread(voice.transcribe_bytes, data, ".wav", lang)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    return {"text": text}
 
 
 @app.get("/api/uploads/{uid}")

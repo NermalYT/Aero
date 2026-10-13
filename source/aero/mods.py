@@ -36,8 +36,10 @@ MODS = DATA / "mods"
 ORDER = MODS / "order.json"               # ids of mods that are on, in the order they were applied
 BOOT = MODS / "boot.json"                 # {"pending": id, "tries": n}: a mod applied but not yet seen to boot
 MARK = APP_DIR / "aero" / "mods-applied.json"   # written into the app folder; an update's fresh copy lacks it
-SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "node_modules", "data", "models", "llama", "venv",
-             "brand"}                     # brand/: logo source images, not part of the running app
+SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "node_modules"}          # anywhere in the tree
+TOP_SKIP = {"data", "models", "llama", "venv", "brand"}  # only at the app folder's top: the user's data and models,
+# the engine, the venv, logo sources. Deeper folders of these names are part of Aero (1.3: aero/integrations/data, the
+# bundled library snapshots, was left out of every mod's copy, so its unit tests failed and no mod could pass)
 TEXT_EXT = {".py", ".js", ".css", ".html", ".json", ".md", ".txt", ".svg", ".bat", ".ps1", ".sh", ".toml", ".cfg"}
 MAX_FILE = 2_000_000
 
@@ -113,15 +115,25 @@ def name_for(prompt):
 
 # ------------------------------------------------------------------------------------------------ the copy
 
-def _ignore(_dir_path, names):
-    return [n for n in names if n in SKIP_DIRS or n.endswith((".pyc", ".pyo")) or n == "mods-applied.json"]
+def _skipped(dir_path, name, root):
+    return name in SKIP_DIRS or (name in TOP_SKIP and Path(dir_path).resolve() == Path(root).resolve())
+
+
+def _ignore_under(root):
+    def ignore(dir_path, names):
+        return [n for n in names if _skipped(dir_path, n, root) or n.endswith((".pyc", ".pyo"))
+                or n == "mods-applied.json"]
+    return ignore
+
+
+_ignore = _ignore_under(APP_DIR)
 
 
 def _files(root: Path):
     """Relative paths of every file under root that a mod is compared on."""
     out = []
     for dp, dns, fns in os.walk(root):
-        dns[:] = [d for d in dns if d not in SKIP_DIRS]
+        dns[:] = [d for d in dns if not _skipped(dp, d, root)]
         for f in fns:
             if f.endswith((".pyc", ".pyo")) or f == "mods-applied.json":
                 continue

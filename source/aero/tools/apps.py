@@ -715,7 +715,13 @@ def _observe(ctx, hwnd, elements=True, find="", zoom=None, marks=True, restore=F
     if mode:
         head += f"\nControl mode: {mode} ({why})."
     if pic is not None and not ctx.vision:
-        head += " The loaded model has no vision, so rely on the element list."
+        from .desktop import _ocr_lines
+        seen = _ocr_lines(ctx, buf.getvalue(), 3000, positions=not zoom)
+        head += (" The loaded model has no vision, so rely on the element list" + (
+            ("; the text in the zoomed region (OCR) is at the end." if zoom else
+             "; the text in the picture (OCR, each line's centre in picture pixels) is at the end.") if seen else "."))
+        if seen:
+            lines = list(lines) + ["", "Text in the picture (OCR):", seen]
     elif pic is not None and elements and marks:
         head += " Numbered boxes in the picture match the [n] ids below."
     body = "\n".join(lines) if lines else ("(no element list requested)" if not elements else
@@ -926,7 +932,12 @@ def set_text(hwnd, text):
 
 
 def _is_classic_edit(hwnd):
-    return bool(hwnd) and _class(hwnd).lower().startswith(CLASSIC_EDIT)
+    """A Win32 edit control: the classic classes, and Windows Forms' wrappers of them (WindowsForms10.EDIT.app...,
+    1.3: those got posted characters, which can't replace the old text)."""
+    if not hwnd:
+        return False
+    c = _class(hwnd).lower()
+    return c.startswith(CLASSIC_EDIT) or c.startswith(("windowsforms10.edit.", "windowsforms10.richedit"))
 
 
 def _norm_nl(s):
@@ -1005,6 +1016,30 @@ def _hwnd(sess):
     return h
 
 
+class JustSelected(ValueError):
+    """The model acted before looking: the window the user picked is selected now and its controls are listed; the
+    action itself is not done (element ids it guessed would be wrong)."""
+
+
+def _selected(ctx, acting=True):
+    """(session, hwnd) of the agent's selected window. When none is selected yet but the user picked a window for this
+    request (the App button), it is selected and looked at here, as app_view would (1.3: models often act first).
+    An action stops there (element ids it guessed would be wrong); reading just goes on."""
+    sess = session(_owner(ctx))
+    if not (sess["hwnd"] and user32.IsWindow(sess["hwnd"])):
+        t = getattr(ctx, "target_window", None)
+        if t:
+            try:
+                view = _observe(ctx, _find(str(t), sess))
+            except Exception:  # noqa: BLE001
+                view = None
+            if view is not None and sess["hwnd"] and acting:
+                raise JustSelected("No window was selected yet, so Aero selected the one the user picked and looked "
+                                   "at it (nothing was clicked or typed). Use these element ids and repeat the "
+                                   "action:\n" + view.get("text", ""))
+    return sess, _hwnd(sess)
+
+
 def _blocked(sess):
     mode = (sess.get("mode") or ("", ""))[0]
     if mode == "OBSERVE_ONLY":
@@ -1075,8 +1110,7 @@ def app_click(ctx, element=None, x=None, y=None, button="left", clicks=1, input=
 
 
 def _click(ctx, element, x, y, button, clicks, input):
-    sess = session(_owner(ctx))
-    hwnd = _hwnd(sess)
+    sess, hwnd = _selected(ctx)
     if (b := _blocked(sess)):
         return b
     button, clicks = button or "left", int(clicks or 1)
@@ -1094,7 +1128,11 @@ def _click(ctx, element, x, y, button, clicks, input):
                 if how:
                     env = fg.apply(action_results.make("accessibility_background", verified=verified, method=method,
                                                        mode="ACCESSIBILITY_BACKGROUND", target={"window_id": hwnd}))
-                    return f"Pressed [{element}] \"{c.Name}\" via {how} (no real mouse).{fg.note()}", env
+                    hint = ""
+                    if (getattr(c, "ControlTypeName", "") or "").startswith(("Edit", "Document")):
+                        hint = (f" [{element}] is a text field: pressing it doesn't enter text. To type into it use "
+                                f"app_type with element={element} and the text (mode 'replace' clears it first).")
+                    return f"Pressed [{element}] \"{c.Name}\" via {how} (no real mouse).{fg.note()}{hint}", env
         elif x is not None and y is not None:
             sx, sy = _to_screen(sess, x, y)
             _show_cursor(sx, sy, "click")
@@ -1199,8 +1237,7 @@ def app_type(ctx, text, element=None, mode="append", enter=False, input="auto", 
 
 
 def _type(ctx, text, element, mode, enter, input):
-    sess = session(_owner(ctx))
-    hwnd = _hwnd(sess)
+    sess, hwnd = _selected(ctx)
     if (b := _blocked(sess)):
         return b
     text = str(text)
@@ -1284,6 +1321,12 @@ def _type(ctx, text, element, mode, enter, input):
         if ok is False:
             note = (" The field did not change: this app ignores background typing. Use an element id with a value, "
                     "edit the file directly, or ask for input='real'.")
+        elif mode == "replace" and before:
+            # posted characters add to what is there: say so instead of claiming a replace
+            env = action_results.make("window_message_background", verified=False, method=how,
+                                      mode="WINDOW_MESSAGE_BACKGROUND", target={"window_id": hwnd})
+            note = (f" The old text couldn't be cleared in the background, so the text was added to it: the field now "
+                    f"reads {(after or '')[:120]!r}. Clear it another way (input='real') if that matters.")
         return f"Sent {len(text)} chars to {_class(target)} in the background{tail}.{note}", env
 
 
@@ -1306,8 +1349,7 @@ def has_chord(keys):
 
 
 def _keys(ctx, keys, input):
-    sess = session(_owner(ctx))
-    hwnd = _hwnd(sess)
+    sess, hwnd = _selected(ctx)
     if (b := _blocked(sess)):
         return b
     chords = str(keys).split()
@@ -1357,8 +1399,7 @@ def app_scroll(ctx, amount, element=None, x=None, y=None, look=True):
 
 
 def _scroll(ctx, amount, element, x, y):
-    sess = session(_owner(ctx))
-    hwnd = _hwnd(sess)
+    sess, hwnd = _selected(ctx)
     if (b := _blocked(sess)):
         return b
     amount = int(amount or 0)
@@ -1401,8 +1442,7 @@ def _scroll(ctx, amount, element, x, y):
       summary=lambda a: f"element [{a['element']}]" if a.get("element") else "whole window")
 @_on_ui_thread
 def app_read(ctx, element=None, max_chars=20000):
-    sess = session(_owner(ctx))
-    hwnd = _hwnd(sess)
+    sess, hwnd = _selected(ctx, acting=False)
     auto = _uia()
     try:
         root = _element(sess, element) if element else auto.ControlFromHandle(hwnd)

@@ -106,12 +106,24 @@ def _logger():
         return lambda ev: None, lambda: None
 
     def emit(ev):
-        if isinstance(ev, dict) and ev.get("type") == "log" and ev.get("text"):
-            try:
-                f.write(time.strftime("%H:%M:%S ") + ev["text"] + "\n")
-                f.flush()
-            except (OSError, ValueError):
-                pass
+        if not isinstance(ev, dict):
+            return
+        t = ev.get("type")
+        if t == "log":
+            line = ev.get("text") or ""
+        elif t == "trial_done":
+            line = (f"#{ev.get('n')} {ev.get('desc')}: " + (f"{ev.get('tg')} tok/s, prompt {ev.get('pp')} tok/s"
+                                                          if ev.get("ok") else f"failed ({ev.get('error')})"))
+        elif t == "tune_done":
+            line = (f"Best: #{ev.get('n')} {ev.get('desc')}, {ev.get('tg')} tok/s ({ev.get('trials')} trials, "
+                    f"{ev.get('elapsed_s')} s)")
+        else:
+            return
+        try:
+            f.write(time.strftime("%H:%M:%S ") + line + "\n")
+            f.flush()
+        except (OSError, ValueError):
+            pass
     return emit, f.close
 
 

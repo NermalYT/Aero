@@ -75,6 +75,7 @@ class Ctx:
         self.chat_id = chat_id
         self.cancel = cancel
         self.work_dir = Path(os.path.expandvars(os.path.expanduser(settings.get("work_dir") or "~")))
+        self.target_window = None      # the window the user picked for this request (App button), if any
 
     @property
     def owner(self):
@@ -124,6 +125,9 @@ def label(name, args):
     return first[:80]
 
 
+EXPECTED = (ValueError, RuntimeError, OSError, NotImplementedError)   # 1.3: errors tools raise on purpose
+
+
 def run(name, args, ctx):
     """Returns {'text': str, 'image': upload_id | None, 'error': bool, 'envelope': {...}} (see action_results)."""
     t0 = time.monotonic()
@@ -156,6 +160,8 @@ def _run(name, args, ctx):
         return {"text": f"Bad arguments for {name}: {e}", "error": True}
     except localonly.OfflineBlocked as e:
         return {"text": str(e), "error": True}
+    except EXPECTED as e:             # a tool saying what's wrong: the message is the answer, a traceback is noise
+        return {"text": f"{type(e).__name__}: {e}", "error": True}
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc(limit=3)
         return {"text": f"{type(e).__name__}: {e}\n{tb[-1500:]}", "error": True}
