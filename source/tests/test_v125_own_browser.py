@@ -61,7 +61,8 @@ class SignIn(unittest.TestCase):
         b = browser._Browser()
         b.pw = mock.Mock()
         b.pw.chromium.launch_persistent_context.side_effect = RuntimeError("profile in use")
-        with mock.patch.object(osinfo, "browser_executable", lambda: None):
+        fake = {"playwright": mock.Mock(), "playwright.sync_api": mock.Mock()}     # CI has no Playwright
+        with mock.patch.object(osinfo, "browser_executable", lambda: None), mock.patch.dict(sys.modules, fake):
             with self.assertRaises(RuntimeError) as e:
                 b._context(show=True)
         self.assertIn("open for signing in", str(e.exception))
