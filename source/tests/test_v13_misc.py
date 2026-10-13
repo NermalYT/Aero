@@ -190,7 +190,7 @@ class WordDocuments(unittest.TestCase):
               "| Region | Revenue |\n|---|---|\n| EU | 2.1 |\n")
         res = doc_tools.write_docx(ctx, "q3", md, title="Acme")
         out = res["text"]
-        self.assertEqual(res["envelope"]["changed_state"]["path"], str(d / "q3.docx"))
+        self.assertEqual(Path(res["envelope"]["changed_state"]["path"]).resolve(), (d / "q3.docx").resolve())
         self.assertIn("1 tables", out)
         self.assertIn("headings: Acme, Report", out)
         text = attachments._docx((d / "q3.docx").read_bytes())
