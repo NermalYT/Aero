@@ -144,6 +144,21 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Aero's window, projects, Files and Changes (1.3.2)
+
+- **The window.** On Windows, Aero's window is WebView2 without the Windows title bar (`aero/shell.py`, with the
+  optional `pywebview` package for the WebView2 SDK and pythonnet). The page's header is the title bar (CSS
+  `app-region: drag`): move, Snap, double-click to maximize. The page asks the window to minimize, maximize or close
+  with `chrome.webview.postMessage`. Without WebView2, and on macOS and Linux, Aero opens in Edge or Chrome. The
+  window starts un-elevated (Explorer's token) because Aero runs as administrator. `AERO_NATIVE_WINDOW=0` forces
+  the browser window.
+- **Projects.** `data/projects.json`: name, folder, instructions. A chat's `project` field puts it in one. Its turns
+  use the folder as the working directory and add the instructions to the system prompt (`projects.chat_settings`).
+- **Files and Changes.** `/api/files/list`, `/read`, `/raw` read inside the project's folder only (resolved paths are
+  checked against it); raw files are sent with a sandbox CSP. Changes come from the chat's own tool calls.
+- **Settings.** Each tab's pane is built once and kept; fields are compared with their value when they appeared, so
+  Save sends only real changes, from every tab.
+
 ### Many skills, slow prompts, runaway tool calls (1.3.1)
 
 - **The router sees the skills that match.** Only the 12 installed skills whose names and descriptions best match

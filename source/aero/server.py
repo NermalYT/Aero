@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import (advisor, agent, agents, app_registry, attachments, autonomy, bench, claude_code, clarifications, cloud, experience, fit,
                gguf, github, hapo, hardware, hf, input_guard, localonly, looplog, memory, migrate, models, mods, osinfo,
-               pipeline, quantize, remote_sessions, resources, router, skills, stats, task_graph, tools, tuner, updater, vault,
-               vram_policy)
+               pipeline, projects, quantize, remote_sessions, resources, router, skills, stats, task_graph, tools, tuner,
+               updater, vault, vram_policy)
 from .config import (APP_NAME, CHATS, DATA, LLAMA_PORT, LOGS, PKG_DIR, UI_PORT, VERSION, load_settings,
                      save_settings)
 from .engine import LlamaServer, build_args, server_binary, server_version, spec_args
@@ -1000,6 +1000,129 @@ def _chat_path(cid):
     return CHATS / (re.sub(r"[^\w-]", "", cid) + ".json")
 
 
+@app.get("/api/projects")
+def list_projects():
+    counts = {}
+    for p in CHATS.glob("*.json"):
+        try:
+            pid = json.loads(p.read_text(encoding="utf-8")).get("project")
+        except Exception:  # noqa: BLE001
+            continue
+        if pid:
+            counts[pid] = counts.get(pid, 0) + 1
+    return [{**p, "chats": counts.get(p["id"], 0), "exists": Path(p["path"]).is_dir()} for p in projects.all()]
+
+
+@app.post("/api/projects")
+async def create_project(req: Request):
+    b = await req.json()
+    try:
+        return projects.create(b.get("name"), b.get("path"), b.get("instructions") or "")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/projects/{pid}")
+async def update_project(pid: str, req: Request):
+    b = await req.json()
+    try:
+        return projects.update(pid, **{k: b[k] for k in ("name", "path", "instructions") if k in b})
+    except KeyError:
+        raise HTTPException(404, "No such project")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/projects/{pid}")
+def delete_project(pid: str):
+    return {"removed": projects.delete(pid)}
+
+
+@app.post("/api/projects/browse")
+def browse_folder():
+    """Native folder picker for a new project (runs on this PC, the same machine as the UI)."""
+    try:
+        import tkinter
+        from tkinter import filedialog
+        root = tkinter.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askdirectory(title="Choose the project's folder", mustexist=True)
+        root.destroy()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Folder dialog unavailable: {e}")
+    return {"path": str(Path(path).resolve())} if path else {"cancelled": True}
+
+
+def _files_root(project):
+    try:
+        return projects.root_of(project, load_settings())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/files/list")
+def files_list(project: str = "", path: str = ""):
+    root = _files_root(project)
+    try:
+        return projects.listing(root, path)
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    except (FileNotFoundError, PermissionError) as e:
+        raise HTTPException(404, str(e))
+
+
+@app.get("/api/files/read")
+def files_read(project: str = "", path: str = ""):
+    root = _files_root(project)
+    try:
+        return projects.read(root, path)
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    except (FileNotFoundError, PermissionError) as e:
+        raise HTTPException(404, str(e))
+
+
+@app.get("/api/files/raw")
+def files_raw(project: str = "", path: str = ""):
+    """Images, PDFs and media for the file view. Served sandboxed: an HTML or SVG file in a project can't run script
+    in Aero's page."""
+    root = _files_root(project)
+    try:
+        f, mime = projects.raw(root, path)
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    except (FileNotFoundError, PermissionError) as e:
+        raise HTTPException(404, str(e))
+    headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache"}
+    if mime != "application/pdf":                 # the PDF viewer can't run in a sandboxed document
+        headers["Content-Security-Policy"] = ("sandbox; default-src 'none'; img-src data: blob:; media-src 'self'; "
+                                              "style-src 'unsafe-inline'")
+    return FileResponse(f, media_type=mime, headers=headers)
+
+
+@app.post("/api/files/reveal")
+async def files_reveal(req: Request):
+    """Show a file of the file view in the system's file manager (selected). Never opens or runs it."""
+    b = await req.json()
+    root = _files_root(b.get("project") or "")
+    try:
+        f = projects.inside(root, b.get("path") or "")
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    if not f.exists():
+        raise HTTPException(404, f"Not found: {f}")
+    import subprocess
+    import sys
+    if osinfo.IS_WIN:
+        subprocess.Popen(["explorer.exe", "/select," + str(f)] if f.is_file() else ["explorer.exe", str(f)])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(f)])
+    else:
+        subprocess.Popen(["xdg-open", str(f if f.is_dir() else f.parent)])
+    return {"ok": True}
+
+
 @app.get("/api/chats")
 def list_chats():
     out = []
@@ -1007,7 +1130,8 @@ def list_chats():
         try:
             c = json.loads(p.read_text(encoding="utf-8"))
             out.append({"id": c["id"], "title": c.get("title") or "New chat", "updated": c.get("updated", 0),
-                        "continued": bool(c.get("carry")), "compacted": bool(c.get("compacted_into"))})
+                        "continued": bool(c.get("carry")), "compacted": bool(c.get("compacted_into")),
+                        "project": c.get("project")})
         except Exception:
             continue
     return sorted(out, key=lambda c: -c["updated"])
@@ -1216,6 +1340,8 @@ async def chat(req: Request):
     if jobs.chat_running(body.get("chat_id")):
         raise HTTPException(409, "A scheduled task is running in this chat. Send your message when it has finished.")
     opts = body.get("opts") or {}
+    if body.get("project"):
+        opts["project"] = body["project"]        # 1.3.2: the chat's project (its folder and instructions)
     if (opts.get("loop") or {}).get("stop"):
         stats.SESSION["loop"]["active"] = False
     gen = pipeline.run_turn(body.get("chat_id") or uuid.uuid4().hex, body["messages"], load_settings(), STATE,

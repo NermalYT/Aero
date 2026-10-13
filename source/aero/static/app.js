@@ -106,13 +106,21 @@ function toast(msg, err = false, ms = 3500) {
   const t = $('#toast'); t.textContent = msg; t.className = 'toast' + (err ? ' err' : ''); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), ms);
 }
 
-function modal(title, body, wide = false) {
+function modal(title, body, wide = false, kind = '') {
+  S.beforeClose = null;
   $('#modalTitle').textContent = title;
   const b = $('#modalBody'); b.innerHTML = ''; b.append(body);
-  $('#modal .modal').classList.toggle('wide', wide);
+  const m = $('#modal .modal');
+  m.classList.toggle('wide', !!wide);
+  m.classList.toggle('settings', kind === 'settings');
   $('#modal').classList.remove('hidden');
 }
-function closeModal() { $('#modal').classList.add('hidden'); }
+/** Close the dialog. A dialog with unsaved edits (Settings) can ask first; force skips that. */
+function closeModal(force = false) {
+  if (force !== true && S.beforeClose && S.beforeClose() === false) return;
+  S.beforeClose = null;
+  $('#modal').classList.add('hidden');
+}
 
 function popMenu(anchor, items) {
   $$('.menu').forEach(m => m.remove());
@@ -169,6 +177,7 @@ async function boot() {
   $('.search-ico').innerHTML = I.search; $('.ico-plus').innerHTML = I.plus; $('.ico-mem').innerHTML = I.mem; $('.ico-lab').innerHTML = I.lab;
   $('#dashBtn').innerHTML = I.dash; $('.ico-mod').innerHTML = I.mod;
   Scene.init(); bindTips();
+  initShell();                                     // projects.js: title bar, projects, Files and Changes (1.3.2)
   bindChatUI(); bindLauncher();
   await refreshState();
   applyTheme(); renderDashVisibility();
@@ -966,19 +975,24 @@ $('#loadClose').onclick = () => { $('#loadOverlay').classList.add('hidden'); sho
 // ---------------------------------------------------------------- chats
 async function loadChats() { try { S.chats = await api('/api/chats'); } catch { S.chats = []; } renderChatList(); }
 
+function chatItem(c) {
+  const del = h('button', { class: 'del', html: I.trash, title: 'Delete chat' });
+  del.onclick = async (ev) => {
+    ev.stopPropagation();
+    await api('/api/chats/' + c.id, { method: 'DELETE' });
+    if (S.chat?.id === c.id) newChat();
+    loadChats();
+  };
+  const looping = S.loop?.active && S.loop.chatId === c.id;
+  return h('div', { class: 'chat-item' + (S.chat?.id === c.id ? ' active' : ''), onclick: () => openChat(c.id) }, h('span', {}, c.title, looping ? h('span', { class: 'loopmark', 'data-tip': 'Forever-loop running' }, '∞') : null), del);
+}
+
+/** Projects with their chats (projects.js), then Recent: the chats without a project. */
 function renderChatList() {
   const box = $('#chatList'); box.innerHTML = '';
-  for (const c of S.chats) {
-    const del = h('button', { class: 'del', html: I.trash, title: 'Delete chat' });
-    del.onclick = async (ev) => {
-      ev.stopPropagation();
-      await api('/api/chats/' + c.id, { method: 'DELETE' });
-      if (S.chat?.id === c.id) newChat();
-      loadChats();
-    };
-    const looping = S.loop?.active && S.loop.chatId === c.id;
-    box.append(h('div', { class: 'chat-item' + (S.chat?.id === c.id ? ' active' : ''), onclick: () => openChat(c.id) }, h('span', {}, c.title, looping ? h('span', { class: 'loopmark', 'data-tip': 'Forever-loop running' }, '∞') : null), del));
-  }
+  renderProjects(chatItem);
+  for (const c of S.chats) if (!projectOf(c)) box.append(chatItem(c));
+  if (!box.childElementCount) box.append(h('div', { class: 'proj-none' }, 'No chats yet'));
 }
 
 function leaveChat() {
@@ -998,8 +1012,9 @@ function newChat() {
   if (S.streaming) stopGen();
   if (S.loop?.active) stopLoop('Forever-loop stopped.');
   leaveChat();
-  S.chat = { id: uid(), title: '', messages: [], created: Date.now() / 1000 };
+  S.chat = { id: uid(), title: '', messages: [], created: Date.now() / 1000, project: P.cur || undefined };
   renderMessages(); renderChatList(); setTitleBar(); $('#input').focus();
+  if (P.view !== 'chat') refreshView();
 }
 
 async function openChat(id) {
@@ -1008,6 +1023,9 @@ async function openChat(id) {
   if (S.chat?.id !== id) { leaveChat(); if (S.loop?.active) stopLoop('Forever-loop stopped because you switched chats.'); }
   try { S.chat = await api('/api/chats/' + id); } catch (e) { return toast(e.message, true); }
   if (PHONE.matches) setSidebar(false);
+  const proj = projectOf(S.chat);
+  if ((proj ? proj.id : null) !== P.cur) setProject(proj ? proj.id : null, { keepChat: true });   // the chat's own project
+  else if (P.view !== 'chat') refreshView();
   renderMessages(); renderChatList(); setTitleBar();
   refreshQuestions(S.chat);
 }
@@ -1029,7 +1047,7 @@ async function saveChat() {
   if (!S.chat || !S.chat.messages.length) return;
   await api('/api/chats/' + S.chat.id, { method: 'PUT', json: S.chat });
   const ex = S.chats.find(c => c.id === S.chat.id);
-  if (!ex) { S.chats.unshift({ id: S.chat.id, title: S.chat.title || 'New chat', updated: Date.now() / 1000 }); }
+  if (!ex) { S.chats.unshift({ id: S.chat.id, title: S.chat.title || 'New chat', updated: Date.now() / 1000, project: S.chat.project }); }
   else { ex.title = S.chat.title || ex.title; S.chats = [ex, ...S.chats.filter(c => c !== ex)]; }
   renderChatList();
 }
@@ -1419,7 +1437,7 @@ function chatPct() {
 
 function adoptChat(c, list = true) {
   S.chat = c;
-  if (list && !S.chats.find(x => x.id === c.id)) S.chats.unshift({ id: c.id, title: c.title, updated: Date.now() / 1000, continued: true });
+  if (list && !S.chats.find(x => x.id === c.id)) S.chats.unshift({ id: c.id, title: c.title, updated: Date.now() / 1000, continued: true, project: c.project });
   if (S.loop.active) S.loop.chatId = c.id;
   setTitleBar();
   renderMessages(); renderChatList();
@@ -1769,7 +1787,7 @@ async function runAgent(loop) {
   let modNote = null, journalNote = null, learnNote = null;
 
   try {
-    await sseFetch('/api/chat', { chat_id: chat.id, messages: chat.messages, carry: chat.carry || null, title: chat.title || '', opts, agent: chat.agent || null }, ev => {
+    await sseFetch('/api/chat', { chat_id: chat.id, messages: chat.messages, carry: chat.carry || null, title: chat.title || '', opts, agent: chat.agent || null, project: chat.project || null }, ev => {
       if (typeof ev.sub === 'string') {
         if (ev.t === 'queued') { queueAdd(ctx, chat, push, ev.item); return; }    // a subagent's queued action: the chat's queue card
         return subEvent(subs, ev, chat);
@@ -1830,8 +1848,8 @@ async function runAgent(loop) {
           old.compacted_into = ev.new_chat_id;
           api('/api/chats/' + old.id, { method: 'PUT', json: old }).catch(() => { });
           chat = { id: ev.new_chat_id, title: (old.title || 'Chat').replace(/ · part (\d+)$/, (m, n) => ` · part ${+n + 1}`) + (/ · part \d+$/.test(old.title || '') ? '' : ' · part 2'),
-            messages: ev.keep, carry: ev.carry, created: Date.now() / 1000, agent: old.agent };
-          if (S.chat === old) adoptChat(chat); else S.chats.unshift({ id: chat.id, title: chat.title, updated: Date.now() / 1000 });
+            messages: ev.keep, carry: ev.carry, created: Date.now() / 1000, agent: old.agent, project: old.project };
+          if (S.chat === old) adoptChat(chat); else S.chats.unshift({ id: chat.id, title: chat.title, updated: Date.now() / 1000, project: chat.project });
           api('/api/chats/' + chat.id, { method: 'PUT', json: chat }).catch(() => { });
           const last = $('#messages').lastElementChild;
           ctx = last?.classList.contains('turn') ? turnCtx(last) : newTurn($('#messages'));
@@ -2921,9 +2939,10 @@ const SECTIONS = ['General', 'Autonomy', 'Router', 'Claude', 'ChatGPT', 'GitHub'
 async function openSettings(start = 'General') {
   if (typeof start !== 'string') start = 'General';
   const s = await api('/api/state').then(r => r.settings);
-  const nav = h('div', { class: 'set-nav' });
-  const pane = h('div');
-  const changes = {};
+  const s0 = JSON.parse(JSON.stringify(s));       // as saved: Save sends only what differs from it
+  const nav = h('nav', { class: 'set-nav' });
+  const pane = h('div', { class: 'set-pane' });
+  const panes = {};                               // each tab's pane, built on its first visit and kept until Save
   const sections = {
     'General': () => [
       field('System prompt', h('textarea', { 'data-k': 'system_prompt' }, s.system_prompt), 'The local model\'s instructions. Leave it unchanged to keep getting Aero\'s improvements.'),
@@ -3073,28 +3092,67 @@ async function openSettings(start = 'General') {
         h('button', { class: 'btn ghost sm', onclick: async () => { await api('/api/unload', { method: 'POST' }); refreshState(); toast('Model unloaded'); } }, 'Unload model'),
         h('button', { class: 'btn danger sm', onclick: () => { api('/api/shutdown', { method: 'POST' }); setTimeout(() => window.close(), 300); } }, 'Quit Aero'))],
   };
+  // 1.3.2: every tab keeps its pane once opened, so edits survive switching tabs and one Save saves them all
+  const base = new WeakMap();                     // each field's value when it appeared: a change is a difference from it
+  const mark = root => $$('[data-k]', root).forEach(el => { if (!base.has(el)) { try { base.set(el, JSON.stringify(value(el))); } catch { } } });
+  new MutationObserver(recs => recs.forEach(r => r.addedNodes.forEach(n => n.nodeType === 1 && (n.matches?.('[data-k]') ? mark(n.parentNode) : mark(n)))))
+    .observe(pane, { childList: true, subtree: true });   // fields that sections add later (after an API call)
   const show = name => {
-    collect();
-    $$('button', nav).forEach(b => b.classList.toggle('active', b.textContent === name));
-    pane.innerHTML = ''; pane.append(...sections[name]().filter(Boolean));
+    $$('button', nav).forEach(b => b.classList.toggle('active', b.dataset.sec === name));
+    if (!panes[name]) {
+      panes[name] = h('section', { class: 'set-sec' }, h('h2', { class: 'set-h' }, name), ...sections[name]().filter(Boolean));
+      mark(panes[name]);
+      pane.append(panes[name]);
+    }
+    for (const [n, p] of Object.entries(panes)) p.hidden = n !== name;
+    pane.scrollTop = 0;
   };
+  const value = el => el.type === 'checkbox' ? el.checked : el.dataset.json ? JSON.parse(el.value) : el.dataset.lines ? el.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+    : (el.type === 'number' || el.dataset.num) ? Number(el.value) : el.value;
+  const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null) || (a == null && b === '') || (a === '' && b == null);
+  /** What differs from the saved settings, across every opened tab, with the tab each change is on. */
   function collect() {
-    $$('[data-k]', pane).forEach(el => {
-      const k = el.dataset.k;
-      changes[k] = el.type === 'checkbox' ? el.checked : el.dataset.json ? JSON.parse(el.value) : el.dataset.lines ? el.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
-        : (el.type === 'number' || el.dataset.num) ? Number(el.value) : el.value;
-    });
-    const pb = $('.policy-box', pane); if (pb?.dataset.policy) changes.tool_policy = JSON.parse(pb.dataset.policy);
+    const out = {}, where = new Set();
+    for (const [name, p] of Object.entries(panes)) {
+      $$('[data-k]', p).forEach(el => {
+        let v; try { v = value(el); } catch { return; }
+        if (base.has(el) && base.get(el) !== JSON.stringify(v)) { out[el.dataset.k] = v; where.add(name); }
+      });
+      const pb = $('.policy-box', p);
+      if (pb?.dataset.policy) { const pol = JSON.parse(pb.dataset.policy); if (!same(s0.tool_policy, pol)) { out.tool_policy = pol; where.add(name); } }
+    }
+    return { out, where };
   }
-  for (const name of SECTIONS) nav.append(h('button', { onclick: () => show(name) }, name));
-  const saveBtn = h('button', { class: 'btn', onclick: async () => {
-    collect();
-    S.settings = await api('/api/settings', { method: 'PUT', json: changes });
-    closeModal(); toast('Settings saved');
+  const status = h('span', { class: 'set-status' });
+  const refreshDirty = () => {
+    const { out, where } = collect();
+    $$('button', nav).forEach(b => b.classList.toggle('dirty', where.has(b.dataset.sec)));
+    const n = Object.keys(out).length;
+    status.textContent = n ? `${n} unsaved change${n === 1 ? '' : 's'}${where.size > 1 ? ` in ${where.size} tabs` : ''}` : '';
+    saveBtn.disabled = !n;
+    return n;
+  };
+  for (const ev of ['input', 'change']) pane.addEventListener(ev, () => setTimeout(refreshDirty, 0));
+  pane.addEventListener('click', () => setTimeout(refreshDirty, 0));      // segmented buttons write hidden inputs
+  for (const name of SECTIONS) nav.append(h('button', { 'data-sec': name, onclick: () => show(name) }, name));
+  const saveBtn = h('button', { class: 'btn', disabled: true, onclick: async () => {
+    const { out } = collect();
+    if (!Object.keys(out).length) return closeModal(true);
+    try { S.settings = await api('/api/settings', { method: 'PUT', json: out }); }
+    catch (e) { return toast(e.message, true); }
+    closeModal(true); toast('Settings saved');
     renderToggles(); applyTheme(); renderDashVisibility(); loadCloud(); refreshState();
   } }, 'Save');
-  const body = h('div', {}, h('div', { class: 'set-layout' }, nav, pane), h('div', { style: 'display:flex;justify-content:flex-end;gap:8px;margin-top:14px;border-top:1px solid var(--line);padding-top:14px' }, h('button', { class: 'btn ghost', onclick: () => { closeModal(); applyTheme(); } }, 'Cancel'), saveBtn));
-  modal('Settings', body, true);
+  const cancel = () => { closeModal(); };
+  S.beforeClose = null;
+  const body = h('div', { class: 'set-wrap' }, h('div', { class: 'set-layout' }, nav, pane),
+    h('div', { class: 'set-foot' }, status, h('span', { class: 'grow' }), h('button', { class: 'btn ghost', onclick: cancel }, 'Cancel'), saveBtn));
+  modal('Settings', body, true, 'settings');
+  S.beforeClose = () => {
+    if (refreshDirty() && !confirm('Discard your unsaved settings changes?')) return false;
+    applyTheme(); Scene.setMode?.(sceneMode());
+    return true;
+  };
   show(SECTIONS.includes(start) ? start : 'General');
 }
 

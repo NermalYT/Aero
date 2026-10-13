@@ -597,6 +597,8 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
     a chat with a subagent which one)."""
     opts = opts or {}
     meta = agent_meta if isinstance(agent_meta, dict) else {}
+    from . import projects
+    settings = projects.chat_settings(settings, chat_id, opts.get("project"))   # 1.3.2: its folder and instructions
     mod, mod_events = None, []
     if opts.get("mod"):
         from . import mods

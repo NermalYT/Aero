@@ -86,6 +86,15 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
 
+## What's new in 1.3.2
+
+- **Aero's own window.** No more Windows title bar: Aero's header has the project, the views and the window
+  buttons; drag it to move the window, double-click to maximize.
+- **Projects.** A folder with its own instructions; chats in a project work there and are grouped under it.
+- **Files and Changes.** Browse the project's files, and see every file a chat wrote, with diffs.
+- **Settings keep your edits** when you switch tabs; one Save saves every tab, and the window is one size with
+  only the settings scrolling.
+
 ## What's new in 1.3.1
 
 A chat could look frozen with many imported skills: "open my Chrome and pull up my Modrinth page" sat on

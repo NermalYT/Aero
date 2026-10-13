@@ -1,5 +1,62 @@
 # Changelog
 
+## Aero 1.3.2 (2026-10-13)
+
+**Aero's own window, projects, a file view, and a settings window that keeps your edits.**
+
+### New
+
+- **Aero's own title bar (`shell.py`).** On Windows, Aero's window is now Microsoft Edge WebView2 in a window of its
+  own, without the Windows title bar. Aero draws its header: the sidebar button, Aero, the project, the views and
+  minimize / maximize / close. The header is a real title bar: drag it to move the window (Snap works), double-click
+  it to maximize. The edges resize, and a maximized window stops at the taskbar. The window keeps its size and
+  place between starts.
+  - Aero runs as administrator; its window starts un-elevated, like a browser, so files dragged from Explorer can be
+    dropped on it.
+  - It needs the optional `pywebview` package (Windows; installed with the update) and the WebView2 runtime (part of
+    Windows 11 and Edge). Without them, and on macOS and Linux, Aero opens in Edge or Chrome as before, with the same
+    header under the system's title bar.
+  - After the update, the browser window Aero used before is closed (only Aero's own profile) and the new window
+    opens.
+- **Projects (`projects.py`).** A project is a folder with its own instructions. Create one from the title bar or
+  the sidebar (Browse… picks the folder). Chats started in a project:
+  - work in its folder (file and shell tools resolve relative paths there);
+  - read its instructions with the system prompt (fixed per project, so the prompt cache keeps working);
+  - are listed under it in the sidebar; Recent shows the chats without a project.
+  Opening a chat switches to its project. Removing a project keeps its folder and its chats.
+- **Files and Changes views.** Tabs in the title bar: **Chat**, **Files**, **Changes**.
+  - **Files** browses the project's folder (or the working directory without a project): code with syntax colours
+    and line numbers, Markdown rendered (or its source), images, video, audio and PDFs. **Show in folder** opens the
+    file manager on it; nothing is ever run.
+  - **Changes** lists every file the chat's tools wrote, moved or deleted, with what each step did: edits as a diff,
+    new files as their content. The tab shows how many files changed.
+  - The view reads only inside the project's folder (`..`, absolute paths and links that leave it are refused), and
+    files are served sandboxed, so an HTML or SVG file in a project can't run script in Aero.
+
+### Fixed
+
+- **Settings.** The window is one size on every tab (it fits the screen), the list of tabs stays put and only the
+  settings scroll. Edits now survive switching tabs: change things on several tabs and one **Save** saves them all.
+  A dot marks each tab with unsaved changes, the footer counts them, Save sends only what changed, and closing with
+  unsaved changes asks first. Before, each tab was rebuilt from the saved settings, so switching tabs lost what you
+  typed.
+- Floating panels, dialogs and notices start below the title bar.
+
+### Tests
+
+- `tests/test_v132.py`: 15 tests (projects, a chat's folder and instructions, the file view's listing, kinds and
+  path checks, sandboxed raw files, the window's caption math and fallbacks, the header, the settings window).
+  Full suite: 524 tests pass (9 skipped).
+- Live on Windows 11 (RTX 5080, 27B model):
+  - the new window opens from a normal start and from an update restart (the old browser window is closed);
+  - dragging by the header, Snap, double-click to maximize and restore, resizing by the edges, the window buttons,
+    and its size across maximize, minimize and restore all work;
+  - closing the window shuts Aero down as before;
+  - a chat in a project lists that folder, reads its instructions and follows them (a file written with the
+    project's footer line); the file shows in Changes;
+  - in Settings, an edit survived visiting all 17 tabs, one Save stored changes from two tabs, and every tab was
+    the same size with no sideways scrolling.
+
 ## Aero 1.3.1 (2026-10-13)
 
 **A chat that looked frozen, fixed.** Found on a real PC right after the 1.3 update: with 212 skills imported from

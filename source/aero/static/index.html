@@ -69,6 +69,22 @@
 </div>
 <div id="app">
 
+  <!-- ============ TITLE BAR (1.3.2): Aero's own; in its window (shell.py) it replaces the Windows one ============ -->
+  <header id="titlebar">
+    <button class="tb-btn" id="tbSidebar" title="Show or hide the sidebar"></button>
+    <div class="tb-brand"><img src="icons/aero-bubble.svg" alt=""><span>Aero</span></div>
+    <button class="tb-proj" id="projBtn"><span class="ico-folder"></span><span id="projName">No project</span><span class="chev"></span></button>
+    <nav class="tb-views" id="tbViews" role="tablist" aria-label="View">
+      <button data-view="chat" class="on" role="tab">Chat</button>
+      <button data-view="files" role="tab" title="Browse the project's folder">Files</button>
+      <button data-view="changes" role="tab" title="Files this chat created, edited, moved or deleted">Changes <small id="chgCount"></small></button>
+    </nav>
+    <div class="tb-drag"></div>
+    <div class="tb-win" id="winCtl">
+      <button id="wMin" title="Minimize"></button><button id="wMax" title="Maximize"></button><button id="wClose" class="close" title="Close"></button>
+    </div>
+  </header>
+
   <!-- ============ LAUNCHER (model picker) ============ -->
   <section id="launcher" class="view hidden">
     <header class="l-head glass">
@@ -118,8 +134,13 @@
       <button class="sb-mem" id="modsBtn" title="Change Aero itself: describe the change, a model edits a copy of Aero, you check it and apply or undo it"><span class="ico-mod"></span><span>Mod Aero</span><small id="modCount"></small></button>
       <button id="wsToggle" class="sb-label sb-fold" aria-expanded="true">Workspaces</button>
       <div id="wsList" class="ws-side"></div>
-      <div class="sb-label">Recent</div>
-      <div id="chatList" class="chat-list client"></div>
+      <div class="sb-scroll client">
+        <div class="sb-label sb-row"><span>Projects</span><button class="icon-btn xs" id="newProject" title="New project: a folder and instructions for its chats"></button></div>
+        <div id="projList" class="proj-list"></div>
+        <div id="projEmpty" class="proj-none hidden">Give chats a folder and instructions: <a href="#" onclick="projectDialog();return false">new project</a></div>
+        <div class="sb-label">Recent</div>
+        <div id="chatList" class="chat-list"></div>
+      </div>
       <div class="sb-bottom">
         <button class="sb-model" id="modelBtn" title="Switch model">
           <span class="dot" id="engineDot"></span>
@@ -138,7 +159,7 @@
         <button class="icon-btn" id="themeBtn" title="Theme: auto / day / night"></button>
         <button class="icon-btn" id="dashBtn" title="Show or hide the live dashboard"></button>
       </div>
-      <div class="client main-client">
+      <div class="client main-client" id="chatPane">
       <div id="banner" class="banner hidden"></div>
       <div id="loopBar" class="loop-bar hidden"></div>
       <div id="scroller">
@@ -178,6 +199,13 @@
           <input type="file" id="fileInput" multiple hidden>
         </div>
       </div>
+      </div>
+      <div class="client main-client files-view hidden" id="filesView">
+        <div class="fv-side">
+          <div class="fv-top"><b id="fvRoot"></b><button class="icon-btn" id="fvReload" title="Refresh"></button></div>
+          <div id="fvList" class="fv-list"></div>
+        </div>
+        <div id="fvBody" class="fv-body"></div>
       </div>
     </main>
     <aside id="ws" class="glass hidden"></aside>
@@ -236,6 +264,7 @@
 <script src="vendor/purify.min.js"></script>
 <script src="vendor/highlight.min.js"></script>
 <script src="scene.js"></script>
+<script src="projects.js"></script>
 <script src="app.js"></script>
 <script src="workspaces.js"></script>
 <script src="lab.js"></script>

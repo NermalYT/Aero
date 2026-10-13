@@ -46,6 +46,21 @@ def _already_running():
 
 
 def open_window():
+    """Aero's own window (shell.py: WebView2 with Aero's title bar, 1.3.2) on Windows; otherwise, or if that can't
+    start, a chromeless browser window."""
+    from . import shell
+    if shell.available():
+        try:
+            from .config import PKG_DIR
+            pid = shell.launch(URL, cwd=str(PKG_DIR.parent))
+            log(f"Opened Aero's window (pid {pid}).")
+            return pid
+        except Exception as e:  # noqa: BLE001
+            log(f"Aero's window could not start ({e}); using a browser window instead.")
+    return open_browser_window()
+
+
+def open_browser_window():
     argv, sandboxed = osinfo.find_browser()
     if not argv:
         webbrowser.open(URL)
@@ -115,7 +130,12 @@ def main():
     if "--no-window" in sys.argv:
         _live_headless(t)
         return
-    if not (reopen and _window_reconnects(12)):
+    from . import shell
+    if reopen and shell.available() and _browser_window_procs():
+        # 1.3.2: updated from a version that used a browser window: replace it with Aero's own window
+        _close_browser_window()
+        open_window()
+    elif not (reopen and _window_reconnects(12)):
         open_window()
     _live_while_window_open()
     then = _exit_action()
@@ -166,22 +186,49 @@ def _exit_action():
     return _last_ping.get("then")
 
 
-def _window_procs():
+def _browser_window_procs():
     """Browser processes running our app-window profile. Aero runs as admin on Windows and Edge relaunches
     itself un-elevated, so the msedge.exe we start exits at once; its replacement keeps our
     --user-data-dir on the command line, so that is how the window is found."""
     import psutil
     prof = str(DATA / "ui-profile").lower()
     names = osinfo.browser_process_names()
-    n = 0
+    found = []
     for p in psutil.process_iter(["name", "cmdline"]):
         try:
             name = (p.info["name"] or "").lower()
             if name.startswith(names) and prof in " ".join(p.info["cmdline"] or []).lower():
+                found.append(p)
+        except Exception:
+            pass
+    return found
+
+
+def _shell_procs():
+    """Aero's own window (python -m aero.shell)."""
+    import psutil
+    n = 0
+    for p in psutil.process_iter(["name", "cmdline"]):
+        try:
+            cmd = p.info["cmdline"] or []
+            if (p.info["name"] or "").lower().startswith("python") and "aero.shell" in cmd:
                 n += 1
         except Exception:
             pass
     return n
+
+
+def _window_procs():
+    return len(_browser_window_procs()) + _shell_procs()
+
+
+def _close_browser_window():
+    """Close Aero's own browser window (only processes on Aero's ui-profile, never the user's browser)."""
+    for p in _browser_window_procs():
+        try:
+            p.terminate()
+        except Exception:
+            pass
 
 
 def _live_while_window_open():
