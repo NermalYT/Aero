@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2.6**](#whats-new-in-126) ·
+[**What's new in 1.2.65**](#whats-new-in-1265) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -85,6 +85,16 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 | Day | Night |
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
+
+## What's new in 1.2.65
+
+- **Tuning settings.** Every setting the tuner uses can stay automatic or be pinned for a model:
+  - context, and the KV cache for keys and values separately;
+  - GPU or CPU placement, flash attention, batch sizes and threads;
+  - memory mapping or locking;
+  - longer context with YaRN.
+- **Profiles one click away.** Each model card has *Profile…*: switch between the speed, balanced, long-context and
+  quality setups Aero measured, without re-tuning.
 
 ## What's new in 1.2.6
 

@@ -257,6 +257,8 @@ async function renderMyModels() {
       popMenu(more, [
         ['Load', () => loadModel(m.id)],
         ['Re-tune and load', () => loadModel(m.id, true)],
+        ['Tuning settings…', () => tuningSettings(m.id, m.name)],
+        ['Profile…', () => pickProfile(m.id, m.name)],
         ['Forget tuning', async () => { await api(`/api/models/${m.id}/forget_tune`, { method: 'POST' }); renderMyModels(); }],
         ['Remove from list', async () => { await api(`/api/models/${m.id}`, { method: 'DELETE' }); renderMyModels(); }],
         ['Delete model files…', async () => { if (confirm(`Delete ${m.name} from disk?`)) { await api(`/api/models/${m.id}?delete_files=true`, { method: 'DELETE' }); renderMyModels(); } }, 'danger'],
@@ -551,7 +553,7 @@ function askVramLimit(info) {
 }
 
 /** Step 2: how many trials. 90-second visible countdown, Medium when it runs out. */
-function askDepth(info, limitGB, auto = false) {
+function askDepth(info, limitGB, auto = false, pins = { ...(info.pins || {}) }) {
   return new Promise(resolve => {
     const SECONDS = 90;
     let left = SECONDS, sel = 'medium', mode = info.mode || 'balanced', timer = null;
@@ -565,19 +567,27 @@ function askDepth(info, limitGB, auto = false) {
     const goal = h('div', { class: 'seg goal-seg' });
     const cancel = h('button', { class: 'btn ghost' }, 'Cancel load');
     const change = h('button', { class: 'btn ghost sm', onclick: () => finish({ change: true }) }, 'Change');
+    const nPins = () => Object.keys(pins).length;
+    let pinSec = null;
+    const pinBox = info.knobs ? pinPanel(info.knobs, pins, () => {
+      left = Math.max(left, 30);                                   // editing: give it time before Medium starts
+      const n = pinSec && pinSec.querySelector('summary .muted');
+      if (n) n.textContent = nPins() ? `${nPins()} pinned` : 'all automatic';
+    }) : null;
+    pinSec = pinBox ? wsSec('Tuning settings', pinBox, { open: false, note: nPins() ? `${nPins()} pinned` : 'all automatic' }) : null;
     const g = gate('How long should tuning run?',
       h('p', {}, `Every trial is a real llama-server run of `, h('b', {}, info.model), ` inside a ${limitGB} GB VRAM limit. Pick a depth, or Aero starts `,
         h('b', {}, 'Medium'), ' when the timer runs out.'),
       h('div', { class: 'auto-limit' }, h('span', {}, `VRAM for this model: ${limitGB} GB` + (auto ? ' (automatic)' : ' (yours)')),
         auto && info.suggest ? h('small', { class: 'muted' }, info.suggest.why) : null, change),
       h('div', { class: 'cd' }, clock, h('div', { class: 'cd-right' }, label, bar)), cards,
-      h('div', { class: 'goal-row' }, h('span', { class: 'muted' }, 'Goal'), goal),
+      h('div', { class: 'goal-row' }, h('span', { class: 'muted' }, 'Goal'), goal), pinSec,
       h('div', { class: 'gate-foot' }, h('small', { class: 'muted', style: 'margin-right:auto' }, 'Keep games and other GPU apps closed while it runs.'), cancel));
     const finish = v => { clearInterval(timer); g.close(); resolve(v); };
     const render = () => {
       cards.innerHTML = '';
       for (const [k, [name, n, desc]] of Object.entries(DEPTH_INFO)) {
-        cards.append(h('button', { class: 'depth' + (k === sel ? ' on' : ''), onclick: () => finish({ depth: k, mode }) },
+        cards.append(h('button', { class: 'depth' + (k === sel ? ' on' : ''), onclick: () => finish({ depth: k, mode, pins }) },
           h('b', {}, name), h('span', { class: 'dn' }, n), h('small', {}, desc), h('span', { class: 'de' }, est(k))));
       }
       goal.innerHTML = '';
@@ -592,7 +602,7 @@ function askDepth(info, limitGB, auto = false) {
       $('i', bar).style.width = (left / SECONDS * 100) + '%';
       label.textContent = `Starting ${DEPTH_INFO[sel][0]} in ${fmtClock(Math.max(0, left))}`;
       clock.classList.toggle('low', left <= 10);
-      if (left <= 0) finish({ depth: sel, mode, auto: true });
+      if (left <= 0) finish({ depth: sel, mode, auto: true, pins });
     }, 1000);
   });
 }
@@ -606,12 +616,13 @@ async function loadModel(id, retune = false, preset = null) {
   if (retune || !info.tuned) {
     // 1.2.6: the VRAM limit is chosen automatically (free VRAM less a margin); Change still lets you type one
     let limit = 'auto';
+    const pins = { ...(info.pins || {}) };
     for (;;) {
       const shown = limit === 'auto' ? (info.suggest?.gb ?? '?') : limit;
-      const pick = preset?.depth ? { depth: preset.depth, mode: info.mode || 'balanced' } : await askDepth(info, shown, limit === 'auto');
+      const pick = preset?.depth ? { depth: preset.depth, mode: info.mode || 'balanced', pins } : await askDepth(info, shown, limit === 'auto', pins);
       if (!pick) return;
       if (pick.change) { const v = await askVramLimit(info); if (v !== null) limit = v; continue; }
-      req = { id, retune: true, vram_limit_gb: limit, depth: pick.depth, mode: pick.mode };
+      req = { id, retune: true, vram_limit_gb: limit, depth: pick.depth, mode: pick.mode, pins: pick.pins || info.pins || {} };
       break;
     }
   }
@@ -736,6 +747,73 @@ async function runLoad(req, info, url = '/api/load') {
 $('#loadCancel').onclick = () => api('/api/cancel', { method: 'POST' });
 $('#loadRetry').onclick = () => S.loadReq && (S.loadUrl === '/api/select' ? runLoad(S.loadReq, { model: S.loadReq.repo }, '/api/select') :
   S.loadReq.vram_limit_gb ? loadModel(S.loadReq.id, true) : runLoad(S.loadReq, { model: S.models.find(x => x.id === S.loadReq.id)?.name }));
+
+/** Tuning settings (1.2.65): every setting is Automatic (the tuner searches it) or pinned to a value. Edits `pins`
+ *  in place. Pinned search settings stay fixed while tuning; the others go to llama-server as they are. */
+function pinPanel(K, pins, onEdit = () => { }) {
+  const auto = ['', 'Automatic'];
+  const opt = (k, choices) => {
+    const sel = h('select', { onchange: e => { if (e.target.value === '') delete pins[k]; else pins[k] = /^\d+(\.\d+)?$/.test(e.target.value) ? Number(e.target.value) : e.target.value === 'true' ? true : e.target.value === 'false' ? false : e.target.value; onEdit(k); } },
+      [auto, ...choices].map(([v, lab]) => h('option', { value: String(v), selected: String(pins[k] ?? '') === String(v) }, lab)));
+    return sel;
+  };
+  const row = (label, input, help) => h('div', { class: 'pin-row' }, h('label', {}, label), input, help ? h('small', { class: 'muted' }, help) : null);
+  const kvLab = { 'f16': 'f16 (full precision)', 'q8_0': 'q8_0 (half the memory, near lossless)', 'q4_0': 'q4_0 (quarter, small quality loss)',
+    'q8_0/q4_0': 'K q8_0 + V q4_0 (keys precise, values small)', 'f16/q8_0': 'K f16 + V q8_0', 'q5_1': 'q5_1', 'q5_0': 'q5_0' };
+  const layers = K.layers ? [...Array(K.layers + 1).keys()].filter(n => n === 0 || n === K.layers || n % Math.max(1, Math.round(K.layers / 16)) === 0) : [];
+  return h('div', { class: 'pin-panel' },
+    h('small', { class: 'muted' }, 'Automatic settings are searched by the tuner; a pinned one stays fixed. Changing them re-tunes this model on its next load.'),
+    row('Context', opt('ctx', K.ctx.map(c => [c, fmtCtx(c) + (c === K.ctx_train ? ' (trained)' : c > K.ctx_train ? ' (needs YaRN below)' : '')])), 'Tokens the model can hold.'),
+    row('KV cache (keys / values)', opt('kv', K.kv.map(v => [v, kvLab[v] || v])), 'Memory per token of context.'),
+    K.gpu ? row(K.moe ? 'Expert blocks on the CPU' : 'Layers on the CPU', opt('cpu_layers', layers.map(n => [n, n === 0 ? 'none (all on the GPU)' : `${n} of ${K.layers}`])), 'More on the CPU frees VRAM for context, but is slower.') : null,
+    K.gpu && !K.moe ? row('How layers split', opt('split', [['layers', 'whole layers'], ['ffn', 'feed-forward only (attention stays on the GPU)']])) : null,
+    row('Flash attention', opt('fa', [[true, 'on'], [false, 'off']]), 'Off only allows an f16 V cache (llama.cpp needs flash attention for a quantized one).'),
+    row('Micro-batch', opt('ub', K.ub.map(v => [v, String(v)])), 'Bigger reads long prompts faster but needs more VRAM.'),
+    row('Batch', opt('batch', K.batch.map(v => [v, String(v)]))),
+    row('Threads', opt('threads', K.threads.map(v => [v, String(v)])), 'CPU threads for generation (matters when part of the model is on the CPU).'),
+    row('Threads for prompts', opt('threads_batch', K.threads.map(v => [v, String(v)]))),
+    row('Map the model file', opt('mmap', [[true, 'yes (fast start, shares RAM)'], [false, 'no (read it all into RAM)']])),
+    row('Lock in RAM', opt('mlock', [[true, 'yes (never swapped out)'], [false, 'no']])),
+    row('Context past training', opt('rope_scale', K.rope_scale.map(f => [f, `YaRN ×${f} (up to ${fmtCtx(K.ctx_train * f)})`])), 'Stretches the context beyond what the model was trained for; quality drops toward the end.'));
+}
+
+async function tuningSettings(id, name) {
+  let d;
+  try { d = await api(`/api/models/${id}/pins`); } catch (e) { return toast(e.message, true); }
+  const pins = { ...(d.pins || {}) };
+  const done = await new Promise(resolve => {
+    const g = gate(`Tuning settings · ${name}`, pinPanel(d.knobs, pins),
+      h('div', { class: 'gate-foot' }, h('button', { class: 'btn ghost', onclick: () => { g.close(); resolve(null); } }, 'Cancel'),
+        h('button', { class: 'btn ghost', onclick: () => { g.close(); resolve('save'); } }, 'Save'),
+        h('button', { class: 'btn', onclick: () => { g.close(); resolve('tune'); } }, 'Save and re-tune')));
+  });
+  if (!done) return;
+  try { await api(`/api/models/${id}/pins`, { method: 'PUT', json: { pins } }); } catch (e) { return toast(e.message, true); }
+  renderMyModels();
+  if (done === 'tune') loadModel(id, true);
+  else toast(Object.keys(pins).length ? 'Saved: the next load re-tunes with these settings.' : 'Saved: everything automatic.');
+}
+
+/** Per-model profiles (HAPO): switch between measured configs without re-tuning. */
+async function pickProfile(id, name) {
+  if (S.streaming) return toast('Wait for the current reply to finish.', true);
+  if (S.st?.busy) return toast('Another download or load is running.', true);
+  let d;
+  try { d = await api(`/api/hapo/${id}`); } catch (e) { return toast(e.message, true); }
+  if (!d.tuned) return toast('Tune this model first: profiles come from its measured trials.', true, 6000);
+  const pick = await new Promise(resolve => {
+    const rows = (d.profiles || []).map(p => h('button', { class: 'prof-pick' + (p.active ? ' on' : ''), disabled: !p.measured, onclick: () => { g.close(); resolve(p.id); } },
+      h('b', {}, p.name), p.measured ? h('small', {}, `${p.tg} tok/s · ${fmtCtx(p.ctx)} context · KV ${p.kv}`) : h('small', { class: 'muted' }, p.why || 'not measured')));
+    const tuner = h('button', { class: 'prof-pick' + (d.active ? '' : ' on'), onclick: () => { g.close(); resolve('tuner'); } },
+      h('b', {}, "Tuner's pick"), h('small', {}, `${d.tuner_pick?.tg} tok/s · ${fmtCtx(d.tuner_pick?.ctx || 0)} context`));
+    const g = gate(`Profile · ${name}`, h('p', { class: 'muted' }, 'Each profile is a configuration the tuner measured on this PC. Switching needs no re-tune.'),
+      h('div', { class: 'prof-list' }, tuner, ...rows), h('div', { class: 'gate-foot' }, h('button', { class: 'btn ghost', onclick: () => { g.close(); resolve(null); } }, 'Cancel')));
+  });
+  if (!pick) return;
+  try { await api('/api/hapo/apply', { method: 'POST', json: { id, profile: pick } }); } catch (e) { return toast(e.message, true); }
+  if (d.loaded) runLoad({ id }, { model: name });
+  else { toast('Profile saved: it is used the next time this model loads.'); renderMyModels(); }
+}
 
 /** Select (1.2.6): one click from a search result to a tuned, loaded model. The plan is shown first only when the
  *  model will be slow on this PC (with smaller models of the same family to pick instead). */

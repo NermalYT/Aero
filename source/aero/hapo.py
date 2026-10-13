@@ -49,6 +49,13 @@ NAMES = {k: n for k, n, _ in PROFILES}
 KV_RANK = {"q4_0": 0, "q8_0": 1, "bf16": 2, "f16": 2}
 
 
+def kv_rank(kv):
+    """How precise a KV cache is: the bytes per element of keys + values (mixed caches like K q8_0 + V q4_0 sit
+    between their halves; 1.2.65)."""
+    from .gguf import KV_ELEM, kv_types
+    return sum(KV_ELEM.get(t, 2.0) for t in kv_types(kv))
+
+
 # ---- fingerprint ------------------------------------------------------------------------------------------
 
 def _sha(obj, n=12):
@@ -92,7 +99,7 @@ def fingerprint(hw, model_path=None):
 
 # ---- trials -> candidates -----------------------------------------------------------------------------------
 
-_DESC = re.compile(r"ctx ([\d,]+) \| (?:CPU only|gpu (?:experts )?(\d+)/(\d+)) \| kv (\w+) \| ub (\d+)(?: \| (\d+) threads)?")
+_DESC = re.compile(r"ctx ([\d,]+) \| (?:CPU only|gpu (?:experts )?(\d+)/(\d+)) \| kv ([\w/]+) \| ub (\d+)(?: \| (\d+) threads)?")
 
 
 def knobs_of(trial, entry, hw):
@@ -137,7 +144,7 @@ def pick(goal, cands):
         return None
     mx = max(c["tg"] for c in cands)
     mxp = max(c["pp"] for c in cands) or 1
-    kvr = lambda c: KV_RANK.get(c["knobs"]["kv"], 1)          # noqa: E731
+    kvr = lambda c: kv_rank(c["knobs"]["kv"])                 # noqa: E731
     ctx = lambda c: c["knobs"]["ctx"]                           # noqa: E731
     if goal == "max_speed":
         pool = [c for c in cands if c["tg"] >= mx * 0.95]

@@ -1,5 +1,42 @@
 # Changelog
 
+## Aero 1.2.65 (2026-10-13)
+
+**Tuning settings**: every setting the tuner uses can be left automatic or pinned per model, and profiles are one
+click from the model card. (Versions go 1.2.6 → 1.2.65 → 1.2.70: updaters compare the last number as a whole, so
+1.2.7 would sort below 1.2.65.)
+
+- **Pin any setting, per model.** The *Tuning settings* section of the tuning dialog, also under the model card's
+  ⋯ menu → *Tuning settings…*. Each setting is *Automatic* (the tuner searches it) or a value you choose:
+  - context;
+  - KV cache, with keys and values set separately (e.g. K q8_0 + V q4_0);
+  - layers or expert blocks kept on the CPU, and how layers split (whole layers or feed-forward only);
+  - flash attention;
+  - micro-batch and batch;
+  - threads for generation and for prompts;
+  - mapping the file, and locking it in RAM;
+  - context past training with YaRN (×2, ×4).
+
+  Pinned search settings stay fixed while the tuner searches the rest. Changing pins makes a different tuning (the
+  cache key includes them), so the model re-tunes on its next load. Models without pins keep their existing
+  tunings.
+- **Combinations llama.cpp can't run are refused.**
+  - Flash attention off allows only an f16 V cache: llama.cpp needs flash attention to quantize it.
+  - YaRN is offered only when the installed llama.cpp supports it.
+  - Pinned threads and placement always reach llama-server.
+
+  A code review before release found these and seven more, all fixed.
+- **A mixed KV cache in the search.** When q4_0 KV is allowed (Settings, or Full depth), the tuner also tries
+  K q8_0 + V q4_0. That's about 25% less KV memory than q8_0, while keeping keys, the more sensitive half, at q8_0.
+- **Profiles from the model card.** ⋯ → *Profile…* lists the profiles HAPO measured for that model, with speed,
+  context and KV for each:
+  - Maximum Speed, Balanced, Maximum Context, Maximum Quality, Agent Optimized, Efficiency;
+  - the tuner's pick.
+
+  Switching needs no re-tune; a loaded model reloads with the profile.
+- **Live test** (Qwen3-1.7B Q8_0 on this PC). Pinned to 16k context, K q8_0 + V q4_0 and 8 threads, then re-tuned:
+  every trial kept the pins, llama-server got `-c 16384 -ctk q8_0 -ctv q4_0 -t 8`, and the result was 28.4 tok/s.
+
 ## Aero 1.2.6 (2026-10-13)
 
 **Select**: search any model, click Select, and Aero runs it the best way your PC can.

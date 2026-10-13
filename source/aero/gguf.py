@@ -197,10 +197,19 @@ def mmproj_caps(kv: dict) -> dict:
     return {"vision": bool(vis), "audio": bool(aud), "projector": proj}
 
 
+KV_ELEM = {"f16": 2.0, "q8_0": 1.0625, "q5_1": 0.75, "q5_0": 0.6875, "q4_1": 0.625, "q4_0": 0.5625}
+
+
+def kv_types(kv_type):
+    """(K type, V type) of a KV setting: "q8_0" for both, or "q8_0/q4_0" for K q8_0 and V q4_0 (1.2.65)."""
+    k, _, v = str(kv_type or "f16").partition("/")
+    return k, (v or k)
+
+
 def kv_bytes_per_token(meta: dict, kv_type: str = "q8_0") -> float:
-    per_elem = {"f16": 2.0, "q8_0": 1.0625, "q4_0": 0.5625}.get(kv_type, 2.0)
+    k, v = kv_types(kv_type)
     heads = meta.get("kv_heads", meta["n_layer"] * meta["n_head_kv"])
-    return heads * (meta["head_k"] + meta["head_v"]) * per_elem
+    return heads * (meta["head_k"] * KV_ELEM.get(k, 2.0) + meta["head_v"] * KV_ELEM.get(v, 2.0))
 
 
 def kv_mb(meta: dict, ctx: int, kv_type: str = "q8_0") -> float:
