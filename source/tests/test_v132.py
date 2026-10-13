@@ -119,6 +119,11 @@ class Window(unittest.TestCase):
         self.assertEqual(shell.caption_off_top(100, False, 8), 100)
         self.assertEqual(shell.caption_off_top(-8, True, 8), 0)     # a maximized window hangs its frame off-screen
 
+    def test_the_first_window_fits_the_main_screen(self):
+        from aero import shell
+        self.assertEqual(shell.first_size(2560, 1400), (1280, 860))
+        self.assertEqual(shell.first_size(1080, 1872), (993, 860))     # a portrait screen: never wider than it
+
     def test_without_webview2_aero_uses_a_browser_window(self):
         from aero import shell
         with mock.patch.object(shell, "IS_WIN", False):

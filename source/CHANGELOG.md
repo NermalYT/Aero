@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Aero's window, first start: first start: centred on the main screen and never wider than its working area (it opened across
+  two monitors when the mouse was on a narrow portrait screen).
+
 ## Aero 1.3.2 (2026-10-13)
 
 **Aero's own window, projects, a file view, and a settings window that keeps your edits.**
