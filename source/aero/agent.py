@@ -716,12 +716,18 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
     if name in (getattr(turn, "blocked", None) or ()):
         pol = "off"
     owner = _root(turn).chat_id
+    # a scheduled task is a lasting change that runs later on its own: always the user's explicit OK (1.2.75)
+    sched = name == "schedule_task" and isinstance(args, dict) and args.get("action") == "create"
+    if sched and pol == "auto":
+        pol = "ask"
     physical = bool(t) and isinstance(args, dict) and capabilities.is_physical(name, args)
     strict = physical and input_guard.strict(turn.settings)
     fg_needed = physical and not strict and pol == "ask" and not input_guard.has_grant(owner) and not preapproved
-    needs = pol == "ask" and category not in _chat_allow.get(turn.chat_id, set()) and not physical and not preapproved
+    needs = pol == "ask" and (sched or category not in _chat_allow.get(turn.chat_id, set())) and not physical and         not preapproved
     approval = getattr(_root(turn), "approval_mode", "ask")
     gate = approval if (needs or fg_needed) and args is not None and approval in ("batch", "auto") else None
+    if sched and gate == "auto" and _root(turn).untrusted:
+        gate = None                         # after reading web pages or mail: the user decides, not the authority model
     if gate:
         needs = fg_needed = False           # queued or judged instead of a card
     label = tools.label(name, args or {})
@@ -746,6 +752,9 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
     elif not sandbox_ok(turn, name, args):
         res = {"text": f"In a Mod Aero chat only files inside your copy of Aero ({turn.sandbox}) can be changed.",
                "error": True}
+    elif sched and getattr(_root(turn), "unattended", False):
+        res = {"text": "A scheduled run can't set up more scheduled tasks. If one is needed, say so in your answer and "
+                       "the user can add it under Tasks.", "error": True, "denied": True}
     elif strict:
         res = {"text": f"Strict Background Only is on (Settings > Tools), so Aero does not use the real mouse or "
                        f"keyboard, not even for {name} {label}. Use element ids (app_view, app_click, app_type), "
@@ -913,6 +922,11 @@ async def signin_pause(turn, res, lane="local", asked=""):
     from .tools import browser
     root = _root(turn)
     owner = turn.tctx.owner
+    if getattr(root, "unattended", False):   # a scheduled run: nobody is at the PC to sign in
+        site = (urlparse(browser.page_url(owner) or "").hostname or "this site").removeprefix("www.")
+        res["text"] = (f"{site} wants a sign-in, and nobody is at the PC (this is a scheduled run). Go on without "
+                       f"{site}; in your answer say it needs the user to sign in to {site} in Aero's browser once.")
+        return
     try:
         url = await asyncio.to_thread(browser.show_for_signin, owner)
     except Exception:  # noqa: BLE001
@@ -1437,7 +1451,7 @@ async def _batch_end(turn, lane, ran):
     """End of a reply with actions still queued: wait for the user's decision (not in forever-loop rounds), then run
     what they approved. ran['n'] = how many were handed back to the model."""
     n = len(autonomy.pending(turn.chat_id))
-    wait_s = 0 if turn.loop_round else float(turn.settings.get("batch_wait_s") or 600)
+    wait_s = 0 if turn.loop_round or getattr(_root(turn), "unattended", False) else         float(turn.settings.get("batch_wait_s") or 600)        # nobody decides during a forever-loop or a scheduled run
     if wait_s > 0:
         yield {"t": "batch_wait", "count": n, "lane": lane, "timeout": wait_s,
                "items": [autonomy.public(x) for x in autonomy.items(turn.chat_id, ("pending",))]}
@@ -1467,6 +1481,9 @@ async def ask_user(turn, call_id, args, lane="local"):
            "needs_approval": False, "lane": lane}
     pol = tools.policy("ask_user", turn.settings)
     try:
+        if getattr(_root(turn), "unattended", False):
+            raise ValueError("Nobody is watching this scheduled run, so there is no one to ask. Pick a sensible "
+                             "default, say which in your answer, and go on.")
         if pol == "off":
             raise ValueError("Questions are turned off in Settings → Tools. Pick a sensible default and say which.")
         q, created = clarifications.ask(_root(turn).chat_id, args.get("question"), args.get("choices"),
@@ -1515,7 +1532,7 @@ async def get_answer(turn, call_id, args, lane="local"):
         text = f"The user answered: {q['answer']}"
     elif q["status"] != "pending":
         text, err = f"That question was {q['status']} without an answer.", True
-    elif args.get("wait") is False:
+    elif args.get("wait") is False or getattr(_root(turn), "unattended", False):
         text = "No answer yet. Keep working on other parts and check again later."
     else:
         yield {"t": "waiting", "question_id": qid, "text": q["text"], "lane": lane}

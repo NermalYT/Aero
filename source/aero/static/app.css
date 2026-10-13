@@ -325,6 +325,14 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px;
   border-radius: 10px; border: 1px solid var(--line); background: var(--glass-2); color: inherit; cursor: pointer; }
 .prof-pick.on { border-color: var(--accent, #2f8cff); }
 .prof-pick:disabled { opacity: .5; cursor: default; }
+.tasks-card { width: min(760px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 0; }
+.tasks-body { padding: 12px 18px 18px; display: grid; gap: 10px; }
+.task-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.task-row.off { opacity: .55; }
+.task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.task-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sched-form { display: grid; gap: 8px; }
+.sched-form textarea { width: 100%; }
 @media (max-width: 560px) { .pin-row { grid-template-columns: 1fr; } .pin-row small { grid-column: 1; } }
 .rp-body { overflow-y: auto; padding: 14px 18px 30px; }
 .qtable { width: 100%; border-collapse: collapse; font-size: 13.5px; }

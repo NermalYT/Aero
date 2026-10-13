@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2.70**](#whats-new-in-1270) ·
+[**What's new in 1.2.75**](#whats-new-in-1275) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -85,6 +85,13 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 | Day | Night |
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
+
+## What's new in 1.2.75
+
+- **Tasks survive closing Aero.** If Aero closes in the middle of a job, it's listed under **Tasks**: one click
+  resumes it, and the model knows what was already done.
+- **Scheduled tasks.** "Every weekday at 8, check my email and GitHub": ask for it, or add it under Tasks. Each run
+  lands in its own chat, and anything that needs your OK waits for you.
 
 ## What's new in 1.2.70
 
