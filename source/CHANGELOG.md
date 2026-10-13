@@ -1,5 +1,38 @@
 # Changelog
 
+## Aero 1.2.70 (2026-10-13)
+
+**Prompt cache**: long chats stay fast, even after a restart.
+
+- **Each chat keeps its own slot.** llama-server now runs with 2 slots (*Settings → Model & tuning → Parallel
+  slots*) that share one KV pool (`--kv-unified`), so the second slot costs no extra VRAM. It's only on builds that
+  have shared slots and idle-slot caching; otherwise every slot would get a fraction of the context. Side jobs follow
+  the slots the running server really has, not the setting.
+  - Your chat always runs in slot 0.
+  - Side jobs run in slot 1: memory compaction, shared-learning reflection, loop journals, lessons from reviews and
+    chat titles.
+  - Before, these side jobs pushed the conversation out of the cache, and the next message had to read the whole
+    chat again.
+- **Saved per chat (`kvcache.py`).** A long chat's cache is saved to `data/kv-cache` right after an answer, before
+  any background job runs. That's the only moment the chat's slot surely holds it: llama-server moves an idle slot
+  to RAM as soon as another job starts. The file belongs to one model file (path, size, date), context and KV type.
+  - It is saved again only after the chat grew by 2,000 tokens, because writing it pauses llama-server briefly.
+  - The first time the chat runs after Aero or the model restarts, the cache is restored before the request. Within
+    one run, the RAM prompt cache does that.
+  - Chats from scheduled runs aren't saved, and compaction moves the cache to the new chat.
+  - The folder stays under a size limit (default 4 GB; least recently used chats go first, never the file just
+    written), and deleting a chat deletes its cache.
+- **Cache reuse and the RAM prompt cache.** `--cache-reuse 256` reuses unchanged parts after an edit earlier in the
+  conversation, and `--cache-ram` (8 GB) keeps recent prompts in RAM so switching chats is fast. All of these are in
+  Settings, and builds of llama.cpp without these flags simply don't get them.
+- **Live test** (Qwen3-1.7B on this PC, 16k context):
+  - Within a session, every agent step reused about 9,100 cached tokens and read about 75 new ones (0.1 s).
+  - After a server restart, the chat's cache (10,477 tokens) was restored in 0.2 s, and the next request read only
+    625 new tokens.
+
+  A code review before release found 12 issues (when to save and restore, slot counts, compaction, a replaced model
+  file, races with deleting a chat), all fixed.
+
 ## Aero 1.2.65 (2026-10-13)
 
 **Tuning settings**: every setting the tuner uses can be left automatic or pinned per model, and profiles are one

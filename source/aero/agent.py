@@ -411,6 +411,8 @@ class Turn:
 
     def rebind(self, new_id):
         autonomy.rebind(self.chat_id, new_id)
+        from . import kvcache
+        kvcache.rebind(self.chat_id, new_id)          # compaction: the slot's cache now belongs to the new chat
         self.chat_id = new_id
         _cancel[new_id] = self.cancel
         self.tctx.chat_id = new_id
@@ -1076,6 +1078,14 @@ async def run_local(turn, lane="local", max_steps=None):
     if not getattr(turn, "is_sub", False):
         async for ev in run_decided(turn, lane):      # actions approved after the last turn ended run first
             yield ev
+        from . import kvcache
+        turn.used_local = True
+        try:
+            note = await asyncio.to_thread(kvcache.before_turn, turn.chat_id, turn.engine, settings)
+        except Exception:  # noqa: BLE001
+            note = None
+        if note:
+            yield {"t": "notice", "text": note, "lane": lane}
     for step in range(max_steps):
         if turn.cancel.is_set():
             return
@@ -1093,6 +1103,8 @@ async def run_local(turn, lane="local", max_steps=None):
                 "min_p": settings["min_p"], "repeat_penalty": settings["repeat_penalty"],
                 "chat_template_kwargs": {"enable_thinking": bool(think)},
                 "stream_options": {"include_usage": True}, "cache_prompt": True}
+        if not getattr(turn, "is_sub", False):
+            body["id_slot"] = 0               # the chat's own slot: its cache survives side jobs (kvcache.py)
         if settings.get("max_tokens"):
             body["max_tokens"] = int(settings["max_tokens"])
         tprof = (turn.engine.get("tune") or {}).get("tools") or {} if isinstance(turn.engine, dict) else {}
@@ -1122,7 +1134,9 @@ async def run_local(turn, lane="local", max_steps=None):
             want = set(turn.intent.first_tools)
             pick = [x for x in schemas if x["function"]["name"] in want] or \
                 [x for x in schemas if x["function"]["name"] != "load_tools"]
-            pre = await asyncio.to_thread(forced_call.ask, turn.engine["url"], sent, pick, 0.2, turn.intent.first_hint)
+            from . import kvcache
+            pre = await asyncio.to_thread(forced_call.ask, turn.engine["url"], sent, pick, 0.2, turn.intent.first_hint,
+                                          extra=kvcache.side_slot(turn.engine["url"]))   # its prompt differs: not slot 0
             if pre:
                 msg["forced"] = "intent"
         if pre:
@@ -1241,7 +1255,9 @@ async def run_local(turn, lane="local", max_steps=None):
                         (want is None or s["function"]["name"] in want)] or \
                     [s for s in schemas if s["function"]["name"] != "load_tools"]
                 hint = it.first_hint if reason == "intent" else "You do have tools for this; use the right one."
-                got = await asyncio.to_thread(forced_call.ask, turn.engine["url"], sent, pick, 0.2, hint)
+                from . import kvcache
+                got = await asyncio.to_thread(forced_call.ask, turn.engine["url"], sent, pick, 0.2, hint,
+                                              extra=kvcache.side_slot(turn.engine["url"]))
                 if got:
                     tool_calls = [{"id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
                                    "function": {"name": got[0], "arguments": json.dumps(got[1])}}]

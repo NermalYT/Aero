@@ -17,7 +17,7 @@ from pathlib import Path
 from .osinfo import IS_LINUX, IS_MAC, IS_WIN  # noqa: F401  (re-exported for the other modules)
 
 APP_NAME = "Aero"
-VERSION = "1.2.65"
+VERSION = "1.2.70"
 REPO = "NermalYT/Aero"            # GitHub repository the updater reads releases from
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -195,6 +195,11 @@ DEFAULTS = {
     "verify_downloads": True,        # check Hugging Face downloads against their published SHA-256
     "keep_quant_source": False,      # quantize.py: keep the original weights after making a GGUF
     "use_tuned_tool_temp": True,     # tool steps use the temperature the exam measured best
+    "parallel_slots": 2,             # 1.2.70: llama-server slots sharing one KV pool (chat in 0, side jobs in 1)
+    "cache_reuse": 256,              # reuse cached chunks of at least this many tokens after an edit (0 = off)
+    "prompt_cache_ram_mb": 8192,     # llama-server's prompt cache in RAM (0 = off)
+    "save_chat_cache": True,         # save each long chat's prompt cache to disk and restore it after a restart
+    "chat_cache_max_gb": 4,          # size limit of data/kv-cache (least recently used chats go first)
     "select_depth": "medium",        # 1.2.6 Select: how long the tuner runs after the download
     "select_min_tps": 5,             # Select: plans slower than this (tokens/s) only when nothing faster runs
     "mail_accounts": [],              # extra mail sites to check (URLs); bookmarks and Gmail/Outlook are added

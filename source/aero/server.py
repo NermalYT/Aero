@@ -594,6 +594,13 @@ def _knob_choices(m, h):
             "rope_scale": [2, 4] if yarn else [], "gpu": bool(h.get("gpus")), "labels": tuner.PIN_KNOBS}
 
 
+@app.get("/api/kvcache")
+def kvcache_info():
+    """Settings → Model & tuning: how many chats have a saved prompt cache, and how much disk it takes."""
+    from . import kvcache
+    return kvcache.info()
+
+
 @app.get("/api/models/{mid}/pins")
 def get_pins(mid: str):
     m = models.get(mid)
@@ -871,6 +878,8 @@ def delete_chat(cid: str):
     if p.exists():
         p.unlink()
     memory.delete_summary(cid)          # facts learned from it stay; its summary goes
+    from . import kvcache
+    kvcache.forget(cid)                 # and its saved prompt cache
     return {"ok": True}
 
 
@@ -1097,6 +1106,8 @@ def parse_title(t):
 async def make_title(req: Request):
     """Ask the loaded model for a 3-6 word chat title and a job title for the chat's agent (non-streaming, tiny)."""
     import httpx
+
+    from . import kvcache
     b = await req.json()
     text = b.get("text", "")
     fallback = {"title": None, "agent": agents.name_from_text(text) if text else None}
@@ -1106,7 +1117,8 @@ async def make_title(req: Request):
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post(ENGINE.url + "/v1/chat/completions", json={
                 "messages": [{"role": "user", "content": _TITLE_PROMPT + text[:1500]}],
-                "max_tokens": 60, "temperature": 0.3, "chat_template_kwargs": {"enable_thinking": False}})
+                "max_tokens": 60, "temperature": 0.3, "chat_template_kwargs": {"enable_thinking": False},
+                **kvcache.side_slot(ENGINE.url)})                   # not in the chat's slot (1.2.70)
             out = parse_title(r.json()["choices"][0]["message"]["content"])
     except Exception:
         return fallback

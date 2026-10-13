@@ -15,6 +15,7 @@ import time
 
 import httpx
 
+from . import kvcache
 from .config import DATA
 
 LOOPS = DATA / "loops"
@@ -134,7 +135,8 @@ async def reflect(turn, task, iteration):
               "Only write what this round's work shows; leave a list empty when there is nothing new.")
     body = {"messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": 600,
             "chat_template_kwargs": {"enable_thinking": False}, "stream": False,
-            "response_format": {"type": "json_schema", "json_schema": {"name": "loop_journal", "schema": SCHEMA}}}
+            "response_format": {"type": "json_schema", "json_schema": {"name": "loop_journal", "schema": SCHEMA}},
+            **kvcache.side_slot((getattr(turn, "engine", None) or {}).get("url"))}
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(240, connect=10)) as c:
             r = await c.post(turn.engine["url"] + "/v1/chat/completions", json=body)

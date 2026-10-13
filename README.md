@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2.65**](#whats-new-in-1265) ·
+[**What's new in 1.2.70**](#whats-new-in-1270) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -85,6 +85,13 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 | Day | Night |
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
+
+## What's new in 1.2.70
+
+- **Long chats stay fast.** Your chat keeps its own slot in the model server, so background jobs no longer push it
+  out of the cache. Its cache is also saved to disk, so after a restart Aero picks the chat up where it left off
+  instead of reading it all again: 8,709 of 9,594 tokens reused in testing.
+- **Parallel slots, cache reuse and a RAM prompt cache**, all in *Settings → Model & tuning*.
 
 ## What's new in 1.2.65
 
