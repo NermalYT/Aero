@@ -2785,6 +2785,16 @@ async function openSettings(start = 'General') {
           field('Tuning advisor', h('input', { type: 'text', 'data-k': 'advisor_model', value: s.advisor_model }),
             'auto = Bonsai first, quant sized to the VRAM you leave free · off = built-in step policy · or an HF repo / .gguf path')),
         h('div', { class: 'row2' },
+          field('Parallel slots', numSel(select('parallel_slots', s.parallel_slots ?? 2, [[1, '1'], [2, '2 (recommended)'], [3, '3'], [4, '4']])),
+            'Your chat keeps slot 0 (its cache survives memory and compaction jobs in slot 1); subagents can run side by side. The slots share one KV pool, so no extra VRAM. Applies on the next load.'),
+          field('Reuse cached chunks', numSel(select('cache_reuse', s.cache_reuse ?? 256, [[0, 'Off'], [128, '128 tokens'], [256, '256 tokens (recommended)'], [512, '512 tokens']])),
+            'After an edit earlier in the conversation, llama-server shifts and reuses unchanged parts of the cache instead of reading them again.')),
+        h('div', { class: 'row2' },
+          field('Prompt cache in RAM', num('prompt_cache_ram_mb', s.prompt_cache_ram_mb ?? 8192, 512), 'MB. Recent prompts stay in system RAM, so switching between chats is fast. 0 turns it off: then each chat re-reads its prompt after background jobs.'),
+          field('Saved chat caches', num('chat_cache_max_gb', s.chat_cache_max_gb ?? 4, 1), 'GB on disk at most (0.5 or more); the least recently used chats go first.')),
+        (() => { const t = toggle('save_chat_cache', s.save_chat_cache !== false, 'Save each long chat\'s prompt cache to disk, so it picks up instantly after a restart or reload');
+          api('/api/kvcache').then(k => t.append(h('small', { class: 'muted', style: 'display:block' }, ` ${k.chats} chat${k.chats === 1 ? '' : 's'} saved · ${fmtBytes(k.bytes)}`))).catch(() => { }); return t; })(),
+        h('div', { class: 'row2' },
           field('Select tunes for', select('select_depth', s.select_depth || 'medium', Object.entries(DEPTH_INFO).map(([k, v]) => [k, `${v[0]} (${v[1]})`])),
             'How long tuning runs after Select downloads a model.'),
           field('Select: minimum speed', num('select_min_tps', s.select_min_tps ?? 5, 1),
@@ -3391,6 +3401,7 @@ function memorySection(s) {
 
 function field(label, input, help) { return h('div', { class: 'field' }, h('label', {}, label), input, help ? h('small', {}, help) : null); }
 function num(k, v, step) { return h('input', { type: 'number', 'data-k': k, value: v, step }); }
+function numSel(el) { el.dataset.num = '1'; return el; }        // a select whose values are saved as numbers
 function select(k, v, opts) { return h('select', { 'data-k': k }, opts.map(([val, lab]) => h('option', { value: val, selected: String(val) === String(v) }, lab))); }
 /** A select whose values are JSON (true / false / "auto"). */
 function jselect(k, v, opts) { return h('select', { 'data-k': k, 'data-json': '1' }, opts.map(([val, lab]) => h('option', { value: JSON.stringify(val), selected: JSON.stringify(val) === JSON.stringify(v) }, lab))); }

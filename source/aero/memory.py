@@ -413,8 +413,10 @@ def _render(history, per_tool=700, per_file=1500):
 
 
 async def _ask(url, prompt, max_tokens=1800, schema=None):
+    from . import kvcache
     body = {"messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": max_tokens,
-            "chat_template_kwargs": {"enable_thinking": False}, "stream": False}
+            "chat_template_kwargs": {"enable_thinking": False}, "stream": False,
+            **kvcache.side_slot(url)}                         # compaction: not in the chat's slot
     if schema:
         body["response_format"] = {"type": "json_schema", "json_schema": {"name": "compaction", "schema": schema}}
     async with httpx.AsyncClient(timeout=httpx.Timeout(900, connect=10)) as c:

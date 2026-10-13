@@ -202,10 +202,35 @@ def spec_args(model, settings):
     return (["--spec-type", ",".join(types)] + extra) if types else []
 
 
+_BOOTS = {}            # port -> when its llama-server last started (kvcache: is slot 0 still what we put there?)
+_SLOTS = {}            # port -> how many slots it was started with (kvcache.side_slot)
+
+
+def _port(url):
+    m = re.search(r":(\d+)", url or "")
+    return int(m.group(1)) if m else None
+
+
+def boot_of(url):
+    return _BOOTS.get(_port(url))
+
+
+def slots_of(url):
+    return _SLOTS.get(_port(url), 1)
+
+
 def build_args(model, cfg, port, mmproj=None, final=False, settings=None, spec=None):
     """Translate a tuning config into llama-server arguments."""
+    s = settings or {}
+    np_ = max(1, min(8, int(s.get("parallel_slots") or 1))) if final else 1
+    # more slots only where they share one KV pool and idle slots go to the RAM cache: otherwise every slot gets
+    # ctx / slots (Aero sizes prompts to the whole context); a separate draft model also gets ctx / slots
+    if np_ > 1 and not (supports("--kv-unified") and supports("--cache-idle-slots")) or "-md" in (spec or ()):
+        np_ = 1
     a = ["-m", str(model), "--host", "127.0.0.1", "--port", str(port),
-         "-c", str(cfg["ctx"]), "-ngl", str(cfg.get("ngl", 999)), "-np", "1"]
+         "-c", str(cfg["ctx"]), "-ngl", str(cfg.get("ngl", 999)), "-np", str(np_)]
+    if np_ > 1 and supports("--kv-unified"):
+        a += ["--kv-unified"]                   # the slots share one KV pool: no extra VRAM for the second slot
     if cfg.get("ncmoe"):
         a += ["--n-cpu-moe", str(cfg["ncmoe"])]
     for o in cfg.get("ot") or ():                 # bigmodel.py: tensors kept in RAM (e.g. feed-forward of some layers)
@@ -255,6 +280,15 @@ def build_args(model, cfg, port, mmproj=None, final=False, settings=None, spec=N
             a += ["--load-mode", "none"]
     if final:
         a += ["--jinja"]
+        # 1.2.70: prompt cache (kvcache.py)
+        if int(s.get("cache_reuse", 256) or 0) > 0 and supports("--cache-reuse"):
+            a += ["--cache-reuse", str(int(s.get("cache_reuse", 256)))]
+        if supports("--cache-ram") and s.get("prompt_cache_ram_mb") is not None:
+            a += ["--cache-ram", str(max(0, int(s["prompt_cache_ram_mb"])))]
+        if s.get("save_chat_cache", True) and supports("--slot-save-path"):
+            from .config import DATA
+            (DATA / "kv-cache").mkdir(parents=True, exist_ok=True)
+            a += ["--slot-save-path", str(DATA / "kv-cache")]
         if supports("--reasoning-format"):
             a += ["--reasoning-format", "deepseek"]
         if supports("--metrics"):
@@ -293,6 +327,8 @@ class LlamaServer:
             raise RuntimeError("llama-server binary not found. Re-run the installer.")
         self.stop()
         self.args = args
+        _BOOTS[self.port] = time.time()
+        _SLOTS[self.port] = int(args[args.index("-np") + 1]) if "-np" in args else 1
         logf = open(self.log_path, "w", encoding="utf-8", errors="replace")
         logf.write("ARGS: " + " ".join(args) + "\n")
         logf.flush()

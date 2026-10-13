@@ -144,6 +144,18 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Prompt cache (1.2.70)
+
+*Settings → Model & tuning*:
+- **Parallel slots** (default 2). Your chat stays in slot 0, and memory, reflection, journal and title jobs run in
+  slot 1. The slots share one KV pool, so the second slot costs no extra VRAM.
+- **Reuse cached chunks** (default 256 tokens). After an edit, unchanged parts of the cache are reused.
+- **Prompt cache in RAM** (default 8192 MB). Recent prompts stay in RAM.
+- **Save each long chat's prompt cache** (default on, at most 4 GB in `data/kv-cache`). It is restored the first
+  time the chat runs after a restart, and only for the same model, context and KV type.
+
+These apply when the model is next loaded.
+
 ### Tuning settings and profiles (1.2.65)
 
 The tuning dialog has a **Tuning settings** section. The model card has the same panel under ⋯ → **Tuning

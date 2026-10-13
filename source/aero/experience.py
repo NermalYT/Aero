@@ -21,7 +21,7 @@ import uuid
 
 import httpx
 
-from . import memory
+from . import kvcache, memory
 from .config import DATA
 
 PATH = DATA / "experience.json"
@@ -194,7 +194,8 @@ async def reflect(turn, task, agent_name):
               "Leave a list empty when there is nothing real to put in it.")
     body = {"messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": 600,
             "chat_template_kwargs": {"enable_thinking": False}, "stream": False,
-            "response_format": {"type": "json_schema", "json_schema": {"name": "experience", "schema": SCHEMA}}}
+            "response_format": {"type": "json_schema", "json_schema": {"name": "experience", "schema": SCHEMA}},
+            **kvcache.side_slot((getattr(turn, "engine", None) or {}).get("url"))}
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(240, connect=10)) as c:
             r = await c.post(turn.engine["url"] + "/v1/chat/completions", json=body)

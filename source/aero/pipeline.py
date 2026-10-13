@@ -18,7 +18,7 @@ import uuid
 
 import httpx
 
-from . import (agent, agents, app_catalog, app_registry, autonomy, chatgpt, cloud, control, experience, looplog, memory, router,
+from . import (agent, agents, app_catalog, app_registry, autonomy, chatgpt, cloud, control, experience, kvcache, looplog, memory, router,
                stats, tools)
 from .config import DATA
 
@@ -36,6 +36,15 @@ def extra(turn):
     parts = [agent.profile_for(turn.settings, turn.chat_id, turn.ctx_size)[0],
              memory.carry_block(turn.carry) if turn.carry else "", getattr(turn, "persona", "")]
     return "\n\n".join(p for p in parts if p)
+
+
+async def save_cache(turn):
+    """Save the chat's prompt cache (slot 0) now, before reviews and learning queue side jobs (kvcache.py)."""
+    if not getattr(turn, "used_local", False) or turn.cancel.is_set() or getattr(turn, "is_sub", False):
+        return
+    chars = sum(len(str(m.get("content") or "")) for m in turn.history)
+    await asyncio.to_thread(kvcache.after_turn, turn.chat_id, turn.engine, turn.settings, int(chars / 3.5),
+                            getattr(turn, "unattended", False))
 
 
 # ------------------------------------------------------------------------------------------------ compaction
@@ -332,7 +341,8 @@ async def make_lessons(turn, reviews, takeovers=()):
               "editing it before saying the edit worked.\"; bad: \"Fix line 12 of app.py\"). Reply as JSON.")
     body = {"messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": 400,
             "chat_template_kwargs": {"enable_thinking": False}, "stream": False,
-            "response_format": {"type": "json_schema", "json_schema": {"name": "lessons", "schema": LESSON_SCHEMA}}}
+            "response_format": {"type": "json_schema", "json_schema": {"name": "lessons", "schema": LESSON_SCHEMA}},
+            **kvcache.side_slot((getattr(turn, "engine", None) or {}).get("url"))}
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(240, connect=10)) as c:
             r = await c.post(turn.engine["url"] + "/v1/chat/completions", json=body)
@@ -441,6 +451,7 @@ async def _review_flow(turn, p):
             yield {"t": "lane", "lane": "local", "phase": "fix", "round": rnd}
             async for ev in agent.run_local(turn):
                 yield ev
+            await save_cache(turn)
             if turn.cancel.is_set():
                 return
             rnd += 1
@@ -573,6 +584,7 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         settings = mods.chat_settings(settings, mod["id"])
     turn = agent.Turn(chat_id, history, settings, engine_state, carry, title)
     turn.loop_round = bool(opts.get("loop"))
+    turn.unattended = bool(opts.get("_job"))           # a scheduled run (1.2.75): nobody resumes it, no cache save
     turn.approval_mode = autonomy.mode_for(settings, loop=turn.loop_round)
     if turn.loop_round:
         turn.loop_task = agent._last_user_text(history)
@@ -638,6 +650,7 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
                    "think": turn.think, "tools": len(turn.exposed) if turn.exposed is not None else None})
         async for ev in agent.run_local(turn):
             yield out(ev)
+        await save_cache(turn)            # now, before reviews and learning use the server
         if (turn.review or turn.gpt_review) and not turn.cancel.is_set():
             async for ev in review_passes(turn):
                 yield out(ev)
@@ -682,6 +695,7 @@ async def run_turn(chat_id, history, settings, engine_state, carry=None, title="
         final = next((m.get("content") for m in reversed(turn.history) if m.get("role") == "assistant"
                       and not m.get("tool_calls") and (m.get("content") or "").strip()), "")
         agents.finish(ids["chat"], "stopped" if stopped else "error" if failed else "done", final)
+
     if summary and (summary["completed"] or summary["not_completed"]):
         done = "; ".join(summary["completed"][-8:]) or "nothing yet"
         rest = "; ".join(summary["not_completed"][-8:]) or "nothing"
