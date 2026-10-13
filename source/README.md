@@ -144,6 +144,20 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Voice typing, text in images, Word documents (1.3)
+
+- **Voice typing.** The microphone button beside the paperclip records you; click again to stop. whisper.cpp on
+  this PC turns it into text in the message box (nothing is sent anywhere). Attached recordings (WAV, MP3, FLAC)
+  are transcribed for the model, and the `transcribe_audio` tool reads a recording on disk. It is set up in the
+  background with the other integrations (Workspaces → Create shows it). macOS: `brew install whisper-cpp`.
+- **Text in images (OCR).** With a model that can't see, Aero reads the text of attached images, scanned PDF pages,
+  screenshots (each line with its position) and images opened with `read_file`, using Windows' own OCR engine.
+  *Settings → Tools → Read text in images for models without vision*. Windows only.
+- **Word documents.** `write_docx` turns Markdown (headings, lists, tables) into a .docx, reopens it and reports
+  what is in it. It never overwrites a file unless asked.
+- **Parallel slots fit the GPU.** The second llama-server slot (1.2.70) is only used when it fits beside the model:
+  a model whose tuning fills the card gets one slot, so it can't run out of memory mid-chat.
+
 ### Tuning that keeps improving (1.2.80)
 
 - **Warm start.** A tune starts from this model's last tuning (or that of another quant of it on this PC), so a

@@ -29,6 +29,17 @@ def _map(x, y):
     return int(s["left"] + float(x) * s["scale"]), int(s["top"] + float(y) * s["scale"])
 
 
+def primary_first(mons):
+    """mss lists monitors in the order Windows enumerates them ([0] = all of them stitched), so its 1 isn't always
+    the primary (1.3: on the owner's PC it was the vertical side monitor). The tool promises 1 = primary."""
+    rest = list(mons[1:])
+    prim = next((m for m in rest if m.get("is_primary")), None) or \
+        next((m for m in rest if m.get("left") == 0 and m.get("top") == 0), None)
+    if prim is None:
+        return list(mons)
+    return [mons[0], prim] + [m for m in rest if m is not prim]
+
+
 @tool("screenshot", "Capture the screen. Returns an image (vision models) and its size. Use the screenshot's "
       "pixel coordinates for mouse tools. monitor: 1 = primary, 2 = second..., 0 = all monitors stitched.",
       "screen", {"monitor": {"type": "integer"}}, summary=lambda a: f"monitor {a.get('monitor', 1)}")
@@ -36,7 +47,7 @@ def screenshot(ctx, monitor=1):
     import mss
     from PIL import Image
     with _lock, mss.mss() as sct:
-        mons = sct.monitors
+        mons = primary_first(sct.monitors)
         monitor = int(monitor if monitor is not None else 1)
         if monitor < 0 or monitor >= len(mons):
             monitor = 1
@@ -55,8 +66,21 @@ def screenshot(ctx, monitor=1):
     txt = (f"Screenshot of monitor {monitor}: real {w}x{h}, shown at {im.size[0]}x{im.size[1]}. "
            f"Use coordinates in the shown {im.size[0]}x{im.size[1]} space.")
     if not ctx.vision:
-        txt += " NOTE: the loaded model has no vision projector, so you cannot see this image."
+        seen = _ocr_lines(ctx, buf.getvalue())
+        txt += (" The loaded model has no vision, so here is the text on the screen (OCR), each line with its "
+                f"centre in the shown coordinates (use them with the mouse tools):\n{seen}" if seen else
+                " NOTE: the loaded model has no vision projector, so you cannot see this image.")
     return {"text": txt, "image": meta["id"]}
+
+
+def _ocr_lines(ctx, png, limit=6000, positions=True):
+    """1.3: the text on a picture with positions, for models without vision ("" when OCR is off or unavailable)."""
+    if not ctx.settings.get("ocr_for_text_models", True):
+        return ""
+    from .. import ocr
+    if not ocr.available():
+        return ""
+    return ocr.screen_text(png, limit) if positions else ocr.image_text(png, limit)
 
 
 @tool("mouse_click", "Click at (x, y) in the last screenshot's coordinates.", "desktop",

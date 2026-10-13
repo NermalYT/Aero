@@ -30,7 +30,8 @@ WORKSPACES = [
      "JavaScript/TypeScript, Rust, Go, C/C++ and CSS"},
     {"id": "mobile", "name": "Mobile apps", "icon": "mobile", "blurb": "Flutter apps for Android, iOS, web and "
      "desktop, with a live preview; iOS builds with xtool"},
-    {"id": "create", "name": "Create", "icon": "create", "blurb": "Images made on this PC with stable-diffusion.cpp"},
+    {"id": "create", "name": "Create", "icon": "create", "blurb": "Images made on this PC with stable-diffusion.cpp, "
+     "and voice typing with whisper.cpp"},
     {"id": "diagrams", "name": "Diagrams", "icon": "diagram", "blurb": "Editorial diagrams (44 types) as HTML + SVG, "
      "imports from Mermaid, draw.io and Excalidraw, PNG/SVG export"},
     {"id": "review", "name": "Review & test", "icon": "review", "blurb": "Code review with open-code-review, end-to-end "
@@ -116,6 +117,7 @@ EXAMPLES = {
                 "Run the app in the preview and fix any analyzer warnings"],
     "xtool": ["Create an iOS SwiftUI app with xtool"],
     "image": ["Make a Frutiger Aero wallpaper with bubbles over green hills", "Draw a logo idea for a coffee shop"],
+    "voice": ["Transcribe the recording in my Downloads folder", "What does this voicemail say?"],
     "diagram-design": ["Draw the architecture of this project as a diagram", "Turn this Mermaid file into a diagram"],
     "open-code-review": ["Review my uncommitted changes", "Scan this folder for security problems"],
     "e2e": ["Explore http://localhost:3000 and find bugs in the sign-up flow", "Run this project's end-to-end tests"],
@@ -130,7 +132,7 @@ EXAMPLES = {
     "bigmodels": ["Plan how Llama 3.3 70B runs on this PC", "Run Qwen2.5-32B in full precision with AirLLM"],
 }
 MODULES = ["code", "mobile", "diagrams", "review", "testing", "debug", "finance", "library", "memory", "create",
-           "models"]
+           "models", "voice"]
 _loaded = {"done": False}
 _lock = threading.Lock()
 

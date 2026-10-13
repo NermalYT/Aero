@@ -28,6 +28,7 @@ const I = {
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   agents: '<svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 7.5v9M8.2 6.3l7.6 4.4"/></svg>',
+  mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
   clip: '<svg viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
   send: '<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   stop: '<svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
@@ -164,7 +165,7 @@ const PASTE_CHARS = 1200, PASTE_LINES = 18;
 async function boot() {
   $('#lSettings').innerHTML = I.gear; $('#settingsBtn').innerHTML = I.gear;
   $('#sbCollapse').innerHTML = I.panel; $('#sbExpand').innerHTML = I.panel;
-  $('#attachBtn').innerHTML = I.clip; $('#modalClose').innerHTML = I.x;
+  $('#attachBtn').innerHTML = I.clip; $('#micBtn').innerHTML = I.mic; $('#modalClose').innerHTML = I.x;
   $('.search-ico').innerHTML = I.search; $('.ico-plus').innerHTML = I.plus; $('.ico-mem').innerHTML = I.mem; $('.ico-lab').innerHTML = I.lab;
   $('#dashBtn').innerHTML = I.dash; $('.ico-mod').innerHTML = I.mod;
   Scene.init(); bindTips();
@@ -1463,6 +1464,7 @@ function bindChatUI() {
   ta.addEventListener('paste', onPaste);
   $('#sendBtn').onclick = () => S.streaming ? stopGen() : send();
   $('#attachBtn').onclick = () => $('#fileInput').click();
+  $('#micBtn').onclick = toggleVoice;
   $('#appBtn').onclick = pickApp;
   $('#fileInput').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
   $('#newChat').onclick = newChat;
@@ -1634,6 +1636,55 @@ function renderChips() {
     }
   }
   renderSend();
+}
+
+// ---------------------------------------------------------------- voice typing (1.3)
+// The microphone records in the app window (16 kHz mono), whisper.cpp on this PC turns it into text, and the text goes
+// into the message box to read and send. Nothing leaves the PC.
+const VOICE = { rec: null, MAX_S: 120 };
+async function toggleVoice() {
+  if (VOICE.rec) return VOICE.rec.stop();
+  const btn = $('#micBtn');
+  if (btn.classList.contains('busy') || VOICE.starting) return;
+  VOICE.starting = true;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  catch (e) { return toast(`No microphone: ${e.message}`, true); }
+  finally { VOICE.starting = false; }
+  const ctx = new AudioContext({ sampleRate: 16000 });
+  const src = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  const chunks = [];
+  node.onaudioprocess = e => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(node); node.connect(ctx.destination);
+  btn.classList.add('rec'); btn.title = 'Listening… click to stop';
+  const timer = setTimeout(() => VOICE.rec?.stop(), VOICE.MAX_S * 1000);
+  VOICE.rec = { stop: async () => {
+    clearTimeout(timer); VOICE.rec = null;
+    node.disconnect(); src.disconnect(); stream.getTracks().forEach(t => t.stop());
+    const rate = ctx.sampleRate; await ctx.close();
+    btn.classList.remove('rec'); btn.classList.add('busy'); btn.title = 'Transcribing…';
+    try {
+      const r = await fetch('/api/voice/transcribe', { method: 'POST', body: encodeWav(chunks, rate), headers: { 'content-type': 'audio/wav' } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || r.statusText);
+      if (!j.text) return toast('No speech heard.');
+      const ta = $('#input'); ta.value = (ta.value.trim() ? ta.value.trimEnd() + ' ' : '') + j.text; autosize(); ta.focus();
+    } catch (e) { toast(e.message, true, 8000); }
+    finally { btn.classList.remove('busy'); btn.title = 'Speak instead of typing (click again to stop)'; }
+  } };
+}
+/** Float32 chunks -> a 16-bit PCM mono WAV blob. */
+function encodeWav(chunks, rate) {
+  const n = chunks.reduce((a, c) => a + c.length, 0);
+  const v = new DataView(new ArrayBuffer(44 + n * 2));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, n * 2, true);
+  let o = 44;
+  for (const c of chunks) for (let i = 0; i < c.length; i++, o += 2) { const s = Math.max(-1, Math.min(1, c[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true); }
+  return new Blob([v.buffer], { type: 'audio/wav' });
 }
 
 // ---------------------------------------------------------------- sending + streaming
@@ -2954,9 +3005,10 @@ async function openSettings(start = 'General') {
         toggle('strict_background', s.strict_background, 'Strict Background Only: never use my real mouse and keyboard, not even when I allow it'),
         h('p', { class: 'muted', style: 'font-size:12.5px;margin:-4px 0 12px' }, 'Background control (UI Automation, window messages, Aero\'s browser) keeps working. Anything that would need your input stops and says so instead.'),
         field('Aero\'s browser', select('browser_mode', s.browser_mode || 'visible', [['visible', 'On screen: you watch every page it opens'], ['background', 'In the background: no window, nothing on screen']]),
-          'On screen it works in your own browser when that is connected (below), else in Aero\'s own profile. Saying "in the background" in a request uses Aero\'s hidden profile for that one. When a page needs your sign-in, Aero shows it and waits for you.'),
+          'Aero always uses its own browser profile, never your browser: sign in to your accounts there once (below) and the sign-ins stay. Saying "in the background" in a request keeps that one off screen. When a page needs your sign-in, Aero shows it and waits for you.'),
         browserSessionField(s),
         toggle('show_work', s.show_work !== false, 'Show the apps Aero works in: bring each window to the front while it is used (unless the request says background)'),
+        toggle('ocr_for_text_models', s.ocr_for_text_models !== false, 'Read text in images for models without vision: attachments, scanned PDFs and screenshots go through Windows\' own OCR (Windows only)'),
         field('Mail accounts to check', h('textarea', { 'data-k': 'mail_accounts', 'data-lines': '1', rows: 3, placeholder: 'one inbox address per line, e.g. https://mail.google.com/mail/u/1/' }, (s.mail_accounts || []).join('\n')),
           'Checked first for "check my email" requests. Gmail and Outlook are always included.'),
         toggle('use_bookmarks_for_accounts', s.use_bookmarks_for_accounts !== false, 'Also check the mail sites in my browser bookmarks (Edge, Chrome, Brave; read only)'),

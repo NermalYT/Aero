@@ -29,7 +29,7 @@ _approval_chat = {}    # call_id -> chat id it belongs to (Stop in one chat must
 _chat_allow = {}       # chat_id -> set(categories) allowed for the rest of the chat
 _cancel = {}           # chat_id -> asyncio.Event
 
-WRITE_TOOLS = {"write_file", "edit_file", "move_path", "delete_path"}
+WRITE_TOOLS = {"write_file", "edit_file", "move_path", "delete_path", "write_docx"}
 LOOP_TOOLS = {"run_subagent", "load_tools", "ask_user", "get_answer"}     # run by the loop itself, not tools.run
 PARALLEL_MAX = 4               # read-only tool calls from one step that may run at the same time
 TIMEOUT_RE = re.compile(r"time(d)? ?out|TimeoutError|timeout", re.I)
@@ -102,8 +102,10 @@ def _screen_size():
     if "v" not in _screen:
         try:
             import mss
+
+            from .tools.desktop import primary_first
             with mss.mss() as s:
-                mon = s.monitors[1]
+                mon = primary_first(s.monitors)[1]          # the primary screen, not Windows' first
                 _screen["v"] = f"{mon['width']}x{mon['height']}"
         except Exception:
             _screen["v"] = "unknown"
@@ -144,7 +146,7 @@ REVIEWER_NAMES = {"fable": "Claude Fable 5.1", "astra": "GPT-6 Astra"}       # l
 TAKEOVER_NAMES = {"opus": "Claude Opus 5.5", "sol": "GPT-6.1 Sol"}          # lanes that redo the task
 
 
-def _user_content(m, vision, note=""):
+def _user_content(m, vision, note="", ocr_on=True):
     text = m.get("content") or ""
     if m.get("from") in REVIEWER_NAMES:
         text = f"[Message from the cloud reviewer ({REVIEWER_NAMES[m['from']]}), not from the user]\n" + text
@@ -169,7 +171,12 @@ def _user_content(m, vision, note=""):
                 except Exception as e:  # noqa: BLE001
                     text += f"\n\n[Attached image {a['name']} could not be decoded: {e}]"
                     continue
-            text += f"\n\n[Attached image '{a['name']}' - the current model has no vision support, so it can't be seen]"
+            seen = attachments.ocr_text(a["id"]) if ocr_on else ""
+            if seen:
+                text += (f"\n\n[Attached image '{a['name']}': the current model can't see images, so Aero read the "
+                         f"text in it with OCR (layout and pictures are lost)]\n<image_text>\n{seen}\n</image_text>")
+            else:
+                text += f"\n\n[Attached image '{a['name']}' - the current model has no vision support, so it can't be seen]"
         else:
             body = attachments.text_of(a["id"])
             meta = attachments.load_meta(a["id"]) or {}
@@ -180,6 +187,53 @@ def _user_content(m, vision, note=""):
     if not images:
         return text
     return [{"type": "text", "text": text}] + [{"type": "image_url", "image_url": {"url": u}} for u in images]
+
+
+class EchoGuard:
+    """Small models sometimes go on to repeat the <turn_context> block Aero appends to the user's message (1.3: seen
+    with Qwen3-1.7B after an OCR'd attachment). From where the block starts again the text is not part of the answer:
+    it is cut, and the stream is stopped. Only the block itself counts: the tag at the start of a line, followed by
+    one of its own first lines; the tag quoted anywhere else (code, a file being edited) passes. Text that might be
+    the start of the block is held back until the next pieces decide."""
+    MARK = "<turn_context>"
+    FIRST = ("Sent: ", "Router plan", "Relevant skills", "Apps:", "Integrations", "Memory", "Earlier")
+
+
+    def __init__(self):
+        self.held, self.hit = "", False
+
+    def _decide(self, s):
+        """(text to emit now, text to hold back)."""
+        pos = 0
+        while True:
+            k = s.find(self.MARK, pos)
+            if k < 0:
+                break
+            line_start = k == 0 or s[:k].rstrip(" \t").endswith("\n") or not s[:k].strip()
+            after = s[k + len(self.MARK):].lstrip(" \t")
+            if line_start:
+                if not after:
+                    return s[:k], s[k:]                      # nothing after the tag yet: hold it
+                if after.startswith("\n"):
+                    nxt = after[1:]
+                    if nxt.startswith(self.FIRST):
+                        self.hit = True
+                        return s[:k].rstrip(), ""
+                    if any(f.startswith(nxt) for f in self.FIRST):
+                        return s[:k], s[k:]                  # could still be the block: wait for more
+            pos = k + len(self.MARK)
+        keep = max((n for n in range(1, len(self.MARK)) if s.endswith(self.MARK[:n])), default=0)
+        return (s[:-keep], s[-keep:]) if keep else (s, "")
+
+    def feed(self, text):
+        if self.hit:
+            return ""
+        out, self.held = self._decide(self.held + text)
+        return out
+
+    def flush(self):
+        out, self.held = ("" if self.hit else self.held), ""
+        return out
 
 
 def _est_tokens(content):
@@ -267,7 +321,8 @@ def build_messages(history, settings, vision, ctx_size, extra="", trim=True, cal
             flush()
         if r == "user":
             note = _turn_note(m, routers.get(m["_i"]), memory_text if m["_i"] == newest_user else "")
-            out.append({"role": "user", "content": _user_content(m, vision, note)})
+            out.append({"role": "user", "content": _user_content(m, vision, note,
+                                                                 settings.get("ocr_for_text_models", True))})
         elif r == "assistant":
             a = {"role": "assistant", "content": m.get("content") or ""}
             if m.get("tool_calls"):
@@ -381,6 +436,8 @@ class Turn:
         self.vision = bool(engine_state.get("vision"))
         self.ctx_size = int(engine_state.get("ctx") or 8192)
         self.tctx = tools.Ctx(settings, self.vision, chat_id, self.cancel)
+        last = next((m for m in reversed(self.history) if m.get("role") == "user"), None) or {}
+        self.tctx.target_window = (last.get("target_app") or {}).get("id")
         self.graph = task_graph.TaskGraph(title, chat_id)
         self.ambiguous = {}          # op key -> observation count when a consequential call ended in an unknown state
         self.observed = 0            # read-only calls so far (an observation between attempts allows a repeat)
@@ -646,6 +703,41 @@ def _repeat_guard(turn, name, args):
     return None
 
 
+SAME_MAX = 2          # the same call with the same result this many times in a row: the next one is refused
+
+
+def _sig(name, args):
+    try:
+        return name + json.dumps(args, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return name + str(args)
+
+
+def _stuck(turn, name, args):
+    """1.3: a model that repeats one call that keeps giving the same result (found: 39 presses on a text box that
+    needed typing) is told to change approach instead of running it again."""
+    last = getattr(turn, "same", None)
+    if "wait" in name or not last or last["sig"] != _sig(name, args) or last["n"] < SAME_MAX:
+        return None                      # waiting for something to change is a repeat on purpose
+    if capabilities.caps_of(name).side_effect in ("none", "local_read", "external_read"):
+        return None                      # so is looking again (a screenshot while a page loads)
+    last["n"] += 1
+    return {"text": f"Not run: this exact {name} call already ran {last['n'] - 1} times in a row with the same result, "
+                    "so running it again won't change anything. Use a different tool or different arguments (for text "
+                    "fields, app_type), or stop and tell the user what is in the way.", "error": True}
+
+
+def _note_same(turn, name, args, res):
+    if res.get("text", "").startswith(f"Not run: this exact {name} call"):
+        return
+    sig, out = _sig(name, args), (res.get("text") or "")[:600]
+    last = getattr(turn, "same", None)
+    if last and last["sig"] == sig and last["out"] == out:
+        last["n"] += 1
+    else:
+        turn.same = {"sig": sig, "out": out, "n": 1}
+
+
 def _note_outcome(turn, name, args, res):
     caps = capabilities.caps_of(name)
     if capabilities.read_only(name, args):
@@ -654,7 +746,8 @@ def _note_outcome(turn, name, args, res):
     if caps.side_effect not in capabilities.NON_IDEMPOTENT or args is None or res.get("denied"):
         return
     key = task_graph.op_key(_root(turn).chat_id, name, args)
-    text = (res.get("text") or "") + " " + str((res.get("envelope") or {}).get("error") or "")
+    first = (res.get("text") or "").split("\n", 1)[0]           # the error itself, not a traceback under it
+    text = first + " " + str((res.get("envelope") or {}).get("error") or "")[:300]
     if res.get("error") and TIMEOUT_RE.search(text):
         turn.ambiguous[key] = turn.observed
         if caps.side_effect in ("external_write", "destructive"):
@@ -771,6 +864,8 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
                "error": True, "denied": True}
     elif (guard := _repeat_guard(turn, name, args)) is not None:
         res = guard
+    elif (stuck := _stuck(turn, name, args)) is not None:
+        res = stuck
     elif gate == "batch":
         it, created = autonomy.enqueue(owner, call_id, name, args, label, category, physical,
                                        by=control.actor(turn, lane), lane=lane)
@@ -870,6 +965,7 @@ async def exec_tool(turn, call_id, name, args, lane="local", allowed_categories=
             yield ev
     if t:
         _note_outcome(turn, name, args, res)
+        _note_same(turn, name, args, res)
         caps = capabilities.caps_of(name, category)
         if caps.network == "internet" and capabilities.read_only(name, args) and not res.get("error"):
             u = _root(turn).untrusted
@@ -1146,6 +1242,7 @@ async def run_local(turn, lane="local", max_steps=None):
         timings, usage, finish = {}, {}, None
         t0 = time.time()
         first_tok = None
+        echo = EchoGuard()
         yield {"t": "assistant_start", "id": msg["id"], "lane": lane, "model": turn.model_name}
         retry = False
         pre = None
@@ -1213,8 +1310,14 @@ async def run_local(turn, lane="local", max_steps=None):
                                     yield {"t": "reasoning", "d": d["reasoning_content"], "lane": lane}
                                 if d.get("content"):
                                     first_tok = first_tok or time.time()
-                                    msg["content"] += d["content"]
-                                    yield {"t": "content", "d": d["content"], "lane": lane}
+                                    piece = echo.feed(d["content"])
+                                    if piece:
+                                        msg["content"] += piece
+                                        yield {"t": "content", "d": piece, "lane": lane}
+                                    if echo.hit:
+                                        msg["content"] = msg["content"].rstrip()
+                                        finish = finish or "stop"
+                                        break
                                 for tc in d.get("tool_calls") or []:
                                     c = calls.setdefault(tc.get("index", 0), {"id": None, "name": "", "args": ""})
                                     if tc.get("id"):
@@ -1225,6 +1328,12 @@ async def run_local(turn, lane="local", max_steps=None):
                                         yield {"t": "tool_pending", "name": c["name"], "lane": lane}
                                     if f.get("arguments"):
                                         c["args"] += f["arguments"]
+                            if echo.hit:
+                                break               # the model began repeating Aero's own context: stop it there
+                        rest = echo.flush()
+                        if rest:
+                            msg["content"] += rest
+                            yield {"t": "content", "d": rest, "lane": lane}
         if retry:
             continue
 

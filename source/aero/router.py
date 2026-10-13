@@ -43,6 +43,7 @@ COMPANIONS = {
     "browser_open": ["browser_snapshot", "browser_click", "browser_type", "browser_read"],
     "mouse_click": ["screenshot"], "type_text": ["screenshot"], "press_keys": ["screenshot"],
     "web_search": ["fetch_url"], "fetch_url": ["web_search"], "run_command": ["read_file", "list_dir"],
+    "write_docx": ["list_dir", "read_file"],
 }
 
 RULES = """You are the decision router of Aero, a local AI agent on the user's computer. You never answer the user. You read the request and decide how the main model should handle it, by filling in the JSON form.
@@ -60,6 +61,7 @@ Fields (fill in the ones the form asks for)
 Rules
 - Only the catalog's tool names are valid. Never invent tools.
 - Files on this PC: list_dir, find_files, search_files, read_file; changes: write_file, edit_file, move_path, delete_path.
+- A Word document (.docx) the user wants made: write_docx.
 - Commands, installs, git, scripts, system info: run_command.
 - An app window ("in Notepad", "click", "this window", "my app"): app_list, app_view, app_click, app_type, app_keys, app_read.
 - The web: web_search and fetch_url for facts and pages; browser_* to log in, click or fill forms on websites.
@@ -370,12 +372,15 @@ def decide(history, tool_list, skills=None, timeout=45):
 
 
 def expand(chosen, available):
-    """Add companion tools so a chosen tool is never stranded without the one it depends on."""
+    """Add companion tools so a chosen tool is never stranded without the one it depends on, and their companions
+    too (1.3: app_click brought app_view but not app_type, so a model asked to type into a field couldn't)."""
     out = list(dict.fromkeys(chosen))
-    for n in list(out):
-        for c in COMPANIONS.get(n, []):
+    i = 0
+    while i < len(out):
+        for c in COMPANIONS.get(out[i], []):
             if c in available and c not in out:
                 out.append(c)
+        i += 1
     return out
 
 

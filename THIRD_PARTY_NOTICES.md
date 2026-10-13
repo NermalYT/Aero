@@ -55,6 +55,7 @@ into your data folder when you ask, and it stays under its own licence there.
 | openpyxl | MIT | |
 | uiautomation | Apache-2.0 | Windows only |
 | tzdata | Apache-2.0 | Windows only |
+| winrt-runtime, winrt-Windows.Media.Ocr and the other winrt-Windows.* packages it needs (pywinrt) | MIT | Windows only (1.3: OCR with Windows' own engine) |
 | nvidia-ml-py | BSD | |
 | anthropic, openai | MIT / Apache-2.0 | |
 | playwright | Apache-2.0 | optional |
@@ -80,6 +81,8 @@ into your data folder when you ask, and it stays under its own licence there.
 | Hindsight (hindsight-api-slim) | vectorize-io/hindsight | MIT (in its own Python environment) |
 | pg0 (embedded PostgreSQL with pgvector, a Hindsight dependency) | vectorize-io/pg0; PostgreSQL; pgvector | MIT; PostgreSQL Licence; PostgreSQL Licence (in Hindsight's environment) |
 | stable-diffusion.cpp | leejet/stable-diffusion.cpp | MIT |
+| whisper.cpp (`whisper-cli`, 1.3: voice typing) | ggml-org/whisper.cpp | MIT |
+| Whisper base model, 8-bit (`ggml-base-q8_0.bin`) | OpenAI Whisper, converted by ggerganov/whisper.cpp (Hugging Face) | MIT |
 | Z-Image-Turbo, its VAE | Tongyi-MAI/Z-Image-Turbo (GGUF by leejet; VAE from Comfy-Org/z_image_turbo) | Apache-2.0 |
 | Qwen3-4B-Instruct-2507 (authority model, image text encoder) | Qwen (GGUF by unsloth) | Apache-2.0 |
 | AirLLM, PyTorch, transformers, accelerate | lyogavin/airllm; pytorch; huggingface | Apache-2.0; BSD-3-Clause; Apache-2.0 (in AirLLM's own environment) |

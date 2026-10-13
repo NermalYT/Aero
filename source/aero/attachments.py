@@ -55,18 +55,51 @@ def _html_text(s: str):
     return re.sub(r"\n\s*\n+", "\n\n", s).strip()
 
 
+OCR_PAGES = 60                 # scanned PDFs: pages read with OCR at most (about a second each)
+
+
+def _page_ocr(p):
+    """The text of a scanned page: OCR of the images on it (1.3; Windows OCR, see ocr.py)."""
+    from . import ocr
+    out = []
+    try:
+        imgs = list(p.images)[:4]
+    except Exception:  # noqa: BLE001
+        return ""
+    for img in imgs:
+        t = ocr.image_text(img.data)
+        if t:
+            out.append(t)
+    return "\n".join(out)
+
+
 def _pdf(b):
     from pypdf import PdfReader
+
+    from . import ocr
     r = PdfReader(io.BytesIO(b))
-    pages = []
+    pages, scanned, read = [], 0, 0
+    can_ocr = ocr.available()
     for i, p in enumerate(r.pages):
         try:
-            pages.append(f"--- page {i+1} ---\n{p.extract_text() or ''}")
-        except Exception:
+            t = p.extract_text() or ""
+        except Exception:  # noqa: BLE001
             pages.append(f"--- page {i+1} --- (unreadable)")
+            continue
+        if len(t.strip()) < 40:
+            scanned += 1
+            if can_ocr and read < OCR_PAGES:
+                o = _page_ocr(p)
+                read += 1
+                if o:
+                    pages.append(f"--- page {i+1} (text read with OCR) ---\n{o}")
+                    continue
+        pages.append(f"--- page {i+1} ---\n{t}")
     txt = "\n".join(pages)
-    if len(txt.strip()) < 40 * max(1, len(r.pages)):
+    if scanned and not can_ocr:
         txt += "\n\n[Note: little extractable text; this PDF may be scanned images.]"
+    elif scanned > read:
+        txt += f"\n\n[Note: {scanned - read} more scanned pages weren't read with OCR (limit {OCR_PAGES}).]"
     return txt
 
 
@@ -124,6 +157,21 @@ def _zip(b):
     return "\n".join(out)
 
 
+AUDIO_EXT = {".wav", ".mp3", ".flac", ".ogg", ".oga"}
+
+
+def _transcript(name, data, ext):
+    """1.3: what is said in an attached recording (whisper.cpp, when voice typing is set up)."""
+    try:
+        from .integrations import voice
+        if not voice.ready():
+            return None
+        t = voice.transcribe_bytes(data, ext)
+    except Exception as e:  # noqa: BLE001
+        return f"[{name}: an audio file whisper.cpp couldn't transcribe ({e})]"
+    return f"[Transcript of {name} (speech to text on this PC with whisper.cpp)]\n{t or '(no speech found)'}"
+
+
 def extract(name: str, data: bytes):
     """Returns (kind, text_or_None, note)."""
     ext = Path(name).suffix.lower()
@@ -152,10 +200,15 @@ def extract(name: str, data: bytes):
         note = f"(structured parse failed: {e}; showing raw text)"
     else:
         note = ""
-    t = _decode(data)
+    media = ext in AUDIO_EXT or mime.startswith(("audio/", "video/"))
+    if ext in AUDIO_EXT:
+        got = _transcript(name, data, ext)
+        if got:
+            return "file", got, ""
+    t = None if media else _decode(data)       # a recording's bytes are not text, whatever they decode as
     if t is not None:
         return "file", t, note
-    if mime.startswith(("audio/", "video/")):
+    if media:
         return "file", f"[{mime} file, {len(data):,} bytes. Audio/video content cannot be read directly; "\
                        f"metadata strings follow]\n" + _strings(data[:2_000_000], 6, 4000), ""
     hexhead = " ".join(f"{x:02x}" for x in data[:64])
@@ -163,7 +216,9 @@ def extract(name: str, data: bytes):
                     f"First 64 bytes (hex): {hexhead}\n\nPrintable strings:\n{_strings(data)}"), ""
 
 
-def save_upload(name: str, data: bytes):
+def save_upload(name: str, data: bytes, ocr=True):
+    """Store an upload and what can be read from it. ocr: work out an image's text now (1.3), while this runs in a
+    thread; screenshots pass False (their tools read them themselves, only for models without vision)."""
     uid = uuid.uuid4().hex[:16]
     safe = re.sub(r"[^\w.\- ]", "_", name)[:120] or "file"
     folder = UPLOADS / uid
@@ -179,7 +234,39 @@ def save_upload(name: str, data: bytes):
             "chars": len(text) if text else 0, "truncated": truncated,
             "mime": mimetypes.guess_type(name)[0] or "application/octet-stream"}
     (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    if ocr and kind == "image":
+        try:
+            ocr_text(uid)
+        except Exception:  # noqa: BLE001
+            pass
     return meta
+
+
+def _on_event_loop():
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False
+
+
+def ocr_text(uid: str):
+    """The text in an attached image (OCR, worked out once and kept next to it); "" when there is none."""
+    folder = UPLOADS / re.sub(r"\W", "", uid)
+    cache = folder / "ocr.txt"
+    if cache.exists():
+        return cache.read_text(encoding="utf-8")
+    from . import ocr
+    p = file_path(uid)
+    if not p or not p.exists() or not ocr.available() or _on_event_loop():
+        return ""                     # never on the server's event loop: that would hold up every other request
+    t = ocr.image_text(p.read_bytes())
+    try:
+        cache.write_text(t, encoding="utf-8")
+    except OSError:
+        pass
+    return t
 
 
 def load_meta(uid: str):
@@ -215,4 +302,4 @@ def image_data_url(uid: str, max_side=1568):
 
 
 def save_image_bytes(png: bytes, name="screenshot.png"):
-    return save_upload(name, png)
+    return save_upload(name, png, ocr=False)

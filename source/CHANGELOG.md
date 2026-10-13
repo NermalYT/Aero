@@ -1,5 +1,109 @@
 # Changelog
 
+## Aero 1.3 (2026-10-13)
+
+**Every feature tested on a real PC**: voice typing, text in images for models that can't see, Word documents, and
+fixes for what the testing found.
+
+### New
+
+- **Voice typing (`integrations/voice.py`).** A microphone button in the chat box: speak, click again, and what you
+  said appears in the message box to read and send. It runs on this PC with
+  [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) and the multilingual Whisper base model (82 MB),
+  both downloaded from their projects with the published SHA-256 and set up in the background like every
+  integration.
+  - Attached recordings (WAV, MP3, FLAC) are transcribed, so the model reads what is said in them; the new
+    `transcribe_audio` tool does the same for a file on disk.
+  - Sounds that aren't speech ("(crickets chirping)", "[BLANK_AUDIO]") are left out.
+  - Windows x64 and Linux x64 get the official build; on macOS `brew install whisper-cpp` provides it.
+- **Text in images for models that can't see (`ocr.py`).** Windows' own OCR engine (through the MIT `winrt`
+  packages, about 1 MB; nothing else to download) reads:
+  - images you attach,
+  - scanned PDF pages (pypdf finds no text on them; up to 60 pages),
+  - screenshots, browser screenshots and app pictures, each line with its position, so a text-only model can still
+    point the mouse tools at what it reads,
+  - images opened with `read_file`.
+  - An attached image is read when it arrives, so OCR never holds up a reply or another request; the text is
+    treated as data, like any web page.
+  - *Settings → Tools → Read text in images for models without vision*, on by default. Windows only.
+- **Word documents (`write_docx`).** The model writes Markdown (headings, lists, tables, bold, code) and gets a real
+  .docx, made with Aero's own Python, reopened and summarized, with a download card in the chat. It never
+  overwrites a file unless asked.
+
+### Fixed (found by testing every feature on the owner's PC, then checked by an independent review)
+
+- **A model tuned to fill the GPU crashed on its second request** (since 1.2.70). Tuning measures one llama-server
+  slot; the second slot added in 1.2.70 took about 350 MB more on a 27B model, and on a full 16 GB card the server
+  ran out of memory (CUDA OOM) and closed.
+  - Aero now adds slots only when they fit inside the tuning's VRAM limit and what other apps leave free
+    (`server.slots_for`).
+  - If an allocation still fails while loading, it restarts with one slot.
+- **App control: "type into this box" never typed.** Three bugs together:
+  - the router chose `app_click` and `app_read`, and the tools those bring along didn't bring theirs, so `app_type`
+    was never offered (`router.expand` now follows companions all the way);
+  - when you pick a window with the App button, every app tool is offered;
+  - pressing a text field now says it doesn't enter text and how to type into it.
+  - Measured on the owner's PC: "replace the text and press Add" took 40 tool calls without finishing before; after,
+    3 calls, 3 runs out of 3.
+- **App control: acting before looking.** A model that clicked before `app_view` got "No app selected", and a
+  traceback under that message contained the word "timeout", so the repeat guard then called it a timed-out click
+  and hid the hint.
+  - The window you picked is now selected and shown to the model instead (nothing is clicked blind).
+  - Tool errors that are messages (ValueError, RuntimeError, OSError) no longer carry a Python traceback.
+  - The timeout check reads only the error itself.
+- **The same call over and over.** A third identical call with an identical result isn't run; the model is told to
+  change approach. Waiting and looking again (a screenshot while a page loads) are exempt.
+- **Windows Forms text boxes**: "replace" added to the old text. They are edit controls underneath and now get
+  their text set directly; where text can only be sent as keystrokes, the result says the old text is still there.
+- **`edit_file` on Windows files**: kept failing on a CRLF file in a live mod ("old_text not found" ten times) and
+  turned CRLF files into LF.
+  - Line endings are kept; a file that mixes them is only edited by exact copies, so its other lines stay as
+    they are.
+  - Line numbers copied from `read_file` are ignored (only when the text as given doesn't match).
+  - A snippet that differs only in indentation or trailing spaces is applied when it fits exactly one place.
+  - When nothing matches, the closest line is named.
+- **Mod Aero: no mod could pass its checks.** A mod's copy of Aero left out every folder named `data`, including the
+  bundled library snapshots, so two unit tests failed in every copy. Only the app folder's own `data/` (and models,
+  engine, venv) are left out now. Measured: a word-count mod then passed all five checks.
+- **Small models repeating Aero's context**: an answer that runs into the `<turn_context>` block Aero appends is cut
+  there and the stream stopped (only the block itself: the tag quoted in code or a file passes).
+- **Recordings decoded as text**: an MP3 without voice typing set up became pages of garbage; it now says what the
+  file is.
+- **Background tuning log**: each trial and the result are in `data/logs/bgtune.log`.
+
+### Tested on this PC (RTX 5080 16 GB, Windows 11)
+
+With Qwen3.8-27B (IQ2_M, 81,920 context, 102.5 tok/s) on a test copy of Aero, one chat each:
+
+| Feature | Result |
+|---|---|
+| Files: write, read, edit, search | passed |
+| Terminal command | passed |
+| Web search and fetch | passed |
+| Aero's own browser (on the second monitor) | passed |
+| Memory: remember, then recall in a new chat | passed |
+| Subagent | passed |
+| Question card answered mid-task | passed |
+| Diagram | passed |
+| Library search | passed |
+| Scheduled task created by the model (approval card) | passed |
+| Word attachment, image attachment | passed |
+| Project check and tests | passed |
+| Forever-loop, two rounds | passed |
+| Compaction | passed |
+| Stop during a reply | stopped in 0.2 s |
+| App control on a test window | passed after the fixes above |
+| Performance Lab (quick suite) | passed |
+| Mod Aero (word count under replies) | all five checks passed after the fix above |
+| Word document from Markdown | passed |
+| Voice: transcribe endpoint, browser-recorded WAV, audio attachment | passed |
+| OCR with a text-only model (Qwen3-1.7B): attached invoice image | passed, 3 runs out of 3 |
+| Every Settings section, panel and workspace opens without errors | passed |
+
+Not tested here: features that need your accounts or sign-ins (Claude and ChatGPT reviews, GitHub, MCP servers,
+mail), multi-GB integrations (image studio, Flutter, Hindsight), Remote Mode with a second PC, and the microphone
+itself (the recording path was tested with generated audio).
+
 ## Aero 1.2.80 (2026-10-13)
 
 **Tuning that keeps improving**: tuning starts from what worked last time, and goes deeper while the PC is idle.
