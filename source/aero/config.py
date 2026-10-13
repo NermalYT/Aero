@@ -17,7 +17,7 @@ from pathlib import Path
 from .osinfo import IS_LINUX, IS_MAC, IS_WIN  # noqa: F401  (re-exported for the other modules)
 
 APP_NAME = "Aero"
-VERSION = "1.2.5"
+VERSION = "1.2.6"
 REPO = "NermalYT/Aero"            # GitHub repository the updater reads releases from
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -195,6 +195,8 @@ DEFAULTS = {
     "verify_downloads": True,        # check Hugging Face downloads against their published SHA-256
     "keep_quant_source": False,      # quantize.py: keep the original weights after making a GGUF
     "use_tuned_tool_temp": True,     # tool steps use the temperature the exam measured best
+    "select_depth": "medium",        # 1.2.6 Select: how long the tuner runs after the download
+    "select_min_tps": 5,             # Select: plans slower than this (tokens/s) only when nothing faster runs
     "mail_accounts": [],              # extra mail sites to check (URLs); bookmarks and Gmail/Outlook are added
     "use_bookmarks_for_accounts": True,   # read mail sites from the browsers' bookmarks (read-only)
     "app_scan_hours": 24,          # re-scan installed apps after this long (also after installs, or on request)

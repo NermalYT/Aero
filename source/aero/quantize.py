@@ -93,6 +93,18 @@ def _py():
     return VENV / ("Scripts/python.exe" if IS_WIN else "bin/python")
 
 
+def arch_supported(arch):
+    """Whether llama.cpp's converter registers this architecture (as in config.json's "architectures"); None when
+    that can't be told yet (the converter is fetched on first use)."""
+    if not arch:
+        return None
+    tag = build_tag()
+    conv = HOME / tag / "convert_hf_to_gguf.py" if tag else None
+    if not conv or not conv.exists():
+        return None
+    return f'"{arch}"' in conv.read_text(encoding="utf-8", errors="replace")
+
+
 def converter_ready():
     tag = build_tag()
     return bool(tag and (HOME / tag / "convert_hf_to_gguf.py").exists() and (_airllm_py() or _py().exists()))

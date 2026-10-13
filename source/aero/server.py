@@ -437,6 +437,97 @@ async def hf_download(req: Request):
     return stream_job(job)
 
 
+# ---- Select (1.2.6): search result -> planned, downloaded, tuned, loaded --------------------------------------
+
+def _valid_repo(repo):
+    return bool(re.fullmatch(r"[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*", repo)) and ".." not in repo
+
+
+def _select_budget(h):
+    """VRAM Select plans with: free VRAM less the tuning advisor's share and a margin (no 1 GB floor: a card that is
+    already full plans for the CPU); 0 without a GPU."""
+    if not h["gpus"]:
+        return 0
+    return max(0, int(h["vram_total_mb"] - _others_mb(h) - ADVISOR_MARGIN_MB - 256))
+
+
+def _select_plan(repo, h=None):
+    from . import select_model
+    h = h or hw(force=True)
+    s = load_settings()
+    try:
+        min_tps = min(200.0, max(0.5, float(s.get("select_min_tps") or 5)))
+    except (TypeError, ValueError):
+        min_tps = 5.0
+    r = select_model.plan_for(repo, h, _select_budget(h), min_tps)
+    depth = s.get("select_depth", "medium")
+    r["depth"] = depth if depth in tuner.DEPTHS else "medium"
+    r["hardware"] = {"gpu": h.get("gpu_name") or "", "vram_mb": h.get("vram_total_mb") or 0,
+                     "ram_mb": h.get("ram_total_mb") or 0, "others_mb": _others_mb(h)}
+    return r
+
+
+@app.post("/api/select/plan")
+async def select_plan(req: Request):
+    """What Select would fetch and how it would run it on this PC, before anything is downloaded."""
+    b = await req.json()
+    repo = str(b.get("repo") or "").strip()
+    if not _valid_repo(repo):
+        raise HTTPException(400, "repo must look like owner/name")
+    try:
+        return await asyncio.to_thread(_select_plan, repo)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not plan {repo}: {e}")
+
+
+@app.post("/api/select")
+async def select_run(req: Request):
+    """Plan, download (or make) the file, tune it with the automatic VRAM budget and load it."""
+    b = await req.json()
+    repo = str(b.get("repo") or "").strip()
+    if not _valid_repo(repo):
+        raise HTTPException(400, "repo must look like owner/name")
+
+    def job(emit, cancel):
+        import shutil
+        from .config import models_dir
+        h = hw(force=True)
+        emit({"type": "log", "text": f"Planning {repo} for this PC…"})
+        r = _select_plan(repo, h)
+        emit({"type": "plan", "plan": r})
+        if r["route"] == "none":
+            raise RuntimeError(r.get("warning") or "Nothing to run in this repo.")
+        if r["route"] == "airllm":
+            return {"route": "airllm", "repo": repo}
+        tuner.Tuner.check_cancel(cancel)
+        if r["route"] == "make":
+            emit({"type": "log", "text": r["summary"]})
+            m = quantize.run(repo, r["quant"], emit, cancel)
+        else:
+            pick, rid = r["pick"], r["repo"]
+            paths = list(pick["parts"]) + ([r["mmproj"]] if r.get("mmproj") else [])
+            missing = [p for p in paths if not hf.local_path(rid, p).exists()]
+            if missing:
+                root = models_dir()
+                root.mkdir(parents=True, exist_ok=True)
+                free = shutil.disk_usage(root).free
+                need = r["download_mb"] * 2**20
+                if need + 2 * 2**30 > free:
+                    raise RuntimeError(f"Not enough disk space: this needs {need / 2**30:.1f} GB and the models "
+                                       f"drive has {free / 2**30:.1f} GB free (2 GB is kept free).")
+                emit({"type": "log", "text": f"Downloading {pick['file']} ({pick['size'] / 2**30:.1f} GB)…"})
+            local = hf.download(rid, paths, emit, cancel) if missing else [hf.local_path(rid, p) for p in paths]
+            mm = str(hf.local_path(rid, r["mmproj"])) if r.get("mmproj") else None
+            m = models.add(local[0], repo=rid, mmproj=mm, name=f"{rid.split('/')[-1]} · {pick['quant'] or pick['file']}",
+                           mmproj_auto=False)
+            models.update(m["id"], select={"summary": r["summary"], "strategy": pick["strategy"], "ctx": pick["ctx"],
+                                           "kv": pick["kv"], "est_tg": pick["est_tg"], "at": time.time()})
+        emit({"type": "phase", "phase": "tune"})
+        res = _load_job(m, False, "auto", r.get("depth") or "medium", emit, cancel)
+        return {**(res or {}), "model_id": m["id"]}
+    return stream_job(job)
+
+
 @app.post("/api/cancel")
 def cancel_job():
     _job["cancel"].set()
@@ -464,18 +555,8 @@ def tune_info(mid: str):
     if not m:
         raise HTTPException(404, "Unknown model")
     h = hw(force=True)
-    others = 0
-    if h["gpus"]:
-        others = sum(x["used_mb"] for x in h["gpus"]) - \
-            (ENGINE_VRAM["mb"] if ENGINE.running() and h.get("vram_measured", True) else 0)
-    size_mb = 0
-    try:
-        size_mb = sum(p.stat().st_size for p in gguf.split_parts(Path(m["path"]))) / 2**20
-    except Exception:
-        pass
-    mm = 0
-    if m.get("mmproj") and Path(m["mmproj"]).exists():
-        mm = Path(m["mmproj"]).stat().st_size / 2**20
+    others = _others_mb(h)
+    size_mb, mm = _model_mb(m, split=True)
     gpu_total = h["vram_total_mb"]
     # seconds per trial: load from NVMe + warm-up + ~1k-token prompt + 96 tokens; slower when it can't fit
     partial = gpu_total and (size_mb + mm) > gpu_total * 0.85
@@ -492,6 +573,32 @@ def tune_info(mid: str):
 
 
 ENGINE_VRAM = {"mb": 0}
+
+
+def _others_mb(h):
+    """VRAM other apps use now (Aero's own model excluded)."""
+    if not h["gpus"]:
+        return 0
+    return max(0, sum(x["used_mb"] for x in h["gpus"]) -
+               (ENGINE_VRAM["mb"] if ENGINE.running() and h.get("vram_measured", True) else 0))
+
+
+def _model_mb(m, split=False):
+    """Size of a model's files in MB (weights, projector); split=True returns them separately."""
+    size_mb = mm = 0
+    try:
+        size_mb = sum(p.stat().st_size for p in gguf.split_parts(Path(m["path"]))) / 2**20
+    except Exception:  # noqa: BLE001
+        pass
+    if m.get("mmproj") and Path(m["mmproj"]).exists():
+        mm = Path(m["mmproj"]).stat().st_size / 2**20
+    return (size_mb, mm) if split else size_mb + mm
+
+
+def auto_limit_gb(m, h):
+    """The VRAM (RAM without a GPU) limit for tuning, without asking: free VRAM less the advisor's share and a margin
+    (suggest_limit)."""
+    return suggest_limit(h, _model_mb(m), _others_mb(h))["gb"]
 
 
 def suggest_limit(h, model_mb, others_mb):
@@ -513,6 +620,138 @@ class NeedsTune(Exception):
     pass
 
 
+def _load_job(m, retune, limit_gb, depth, emit, cancel):
+    """Load model m, tuning it first when there is no saved tuning (or retune). limit_gb: the VRAM (RAM) limit for
+    tuning in GB, "auto" for this PC's free VRAM less a margin (1.2.6: nobody has to type it), or None to ask
+    the user (NeedsTune). Shared by /api/load and Select."""
+    s = load_settings()
+    unload()
+    h = hw(force=True)
+    spec = spec_args(m["path"], s)
+    key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
+    entry = None if retune else tuner.cached(key)
+    if limit_gb == "auto":
+        limit_gb = auto_limit_gb(m, h)
+        if entry is None:
+            emit({"type": "log", "text": f"VRAM for this model: {limit_gb:g} GB, chosen automatically "
+                                         f"({suggest_limit(h, _model_mb(m), _others_mb(h))['why']})."})
+
+    def do_tune():
+        if limit_gb is None:
+            raise NeedsTune()
+        STATE.update(status="tuning", model=m, error=None)
+        others = hardware.settle_vram(timeout=6) if h["gpus"] else 0
+        limit_mb = limit_gb * 1024
+        if h["gpus"]:
+            headroom = h["vram_total_mb"] - others - limit_mb - ADVISOR_MARGIN_MB
+            emit({"type": "log", "text": f"VRAM: {h['vram_total_mb']:,} MB total, other apps {others:,} MB, "
+                                         f"model limit {limit_mb:,.0f} MB, left for the advisor "
+                                         f"{max(0, headroom):,.0f} MB."})
+            if others + limit_mb > h["vram_total_mb"] - 64:
+                emit({"type": "log", "text": "Your limit plus what other apps use is more than the card has, so "
+                                             "free VRAM will be the real limit."})
+        else:
+            headroom = 0
+        save_settings({"last_vram_limit_gb": limit_gb})
+        adv = advisor.Advisor(s, h, headroom, emit, cancel)
+        try:
+            emit({"type": "phase", "phase": "advisor"})
+            adv.prepare()
+            tuner.Tuner.check_cancel(cancel)
+            emit({"type": "phase", "phase": "trials"})
+            t = tuner.Tuner(m["path"], m.get("mmproj"), s, limit_mb, depth, adv, emit, cancel, others_mb=others)
+            e = t.run()
+        finally:
+            adv.stop()
+        e["others_mb"] = others
+        tuner.store(key, e)
+        return e
+
+    try:
+        if entry:
+            emit({"type": "log", "text": f"Using saved tuning from {entry['tuned_at']}: {entry['desc']} "
+                                         f"({entry['tg']} tok/s). Skipping trials."})
+        else:
+            entry = do_tune()
+
+        prof = hapo.active(key)
+        attempt = 0
+        while True:
+            use = prof.get("config") if prof else None
+            if not use:
+                attempt += 1
+            cfg = use or entry["config"]
+            STATE.update(status="loading", model=m, error=None)
+            emit({"type": "loading", "desc": prof["desc"] if use else entry["desc"],
+                  "profile": prof.get("name") if use else None})
+            before = hardware.settle_vram() if h["gpus"] else 0
+            ENGINE.start(build_args(m["path"], cfg, LLAMA_PORT, m.get("mmproj"), final=True,
+                                    settings=s, spec=spec))
+            ok, why = ENGINE.wait_ready(900, cancel)
+            if ok:
+                if not h["gpus"]:
+                    ENGINE_VRAM["mb"] = 0
+                elif h.get("vram_measured", True):
+                    ENGINE_VRAM["mb"] = max(0, (hardware.gpu_used_mb() or 0) - before)
+                else:
+                    ENGINE_VRAM["mb"] = ENGINE.device_mb()
+                break
+            if cancel.is_set():
+                ENGINE.stop()
+                raise tuner.Cancelled()
+            tail = ENGINE.log_tail(25)
+            ENGINE.stop()
+            if use:                 # the chosen HAPO profile no longer loads: drop it, use the tuner's pick
+                hapo.failed(key, tail)
+                emit({"type": "log", "text": f"The {prof.get('name')} profile failed to load "
+                                             f"({tuner.classify_failure(tail)}), so Aero went back to the "
+                                             "tuner's pick and removed that profile choice."})
+                prof = None
+                continue
+            if attempt == 1 and limit_gb is None:
+                raise NeedsTune()
+            if attempt == 1:
+                emit({"type": "log", "text": "The tuned settings failed to load (other apps took VRAM or "
+                                             "llama.cpp changed). Re-tuning with your limit."})
+                entry = do_tune()
+                key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
+                prof = None
+            else:
+                STATE.update(status="error", error=tail)
+                raise RuntimeError("llama-server failed to start:\n" + tail)
+    except Exception as e:      # NeedsTune asks for a tune; a failed or cancelled tune must not leave the UI on "tuning"
+        if not isinstance(e, NeedsTune):
+            if STATE["status"] in ("tuning", "loading"):
+                STATE.update(status="idle", model=None)
+            raise
+        STATE.update(status="idle", model=None)
+        return {"needs_tune": True, "model_id": m["id"],
+                "reason": "This model needs tuning first." if not entry else
+                          "The saved tuning no longer loads (VRAM in use by other apps, or llama.cpp changed)."}
+
+    warning = None
+    g = hardware.gpus()
+    if g and all(x.get("measured") for x in g) and sum(x["used_mb"] for x in g) > sum(x["total_mb"] for x in g) - 200:
+        warning = ("VRAM is almost full; other apps are using GPU memory, so generation may spill into "
+                   "slow shared memory. Close them or re-tune.")
+    desc = prof["desc"] if prof else entry["desc"]
+    tg, pp = (prof["tg"], prof["pp"]) if prof else (entry["tg"], entry["pp"])
+    STATE.update(status="ready", model=m, ctx=cfg["ctx"], vision=bool(m.get("mmproj")), desc=desc, cfg=dict(cfg),
+                 remote=False,
+                 tune={"tg": tg, "pp": pp, "at": entry["tuned_at"],
+                       "trials": len(entry["trials"]), "limit_gb": round(entry.get("limit_mb", 0) / 1024, 2),
+                       "depth": entry.get("depth"), "advisor": (entry.get("advisor") or {}).get("name"),
+                       "profile": prof.get("profile") if prof else None,
+                       "profile_name": prof.get("name") if prof else None, "key": key,
+                       "tools": {k: (entry.get("tool_eval") or {}).get(k) for k in
+                                 ("score", "bfcl", "aero", "temperature", "act_first")}
+                       if entry.get("tool_eval") else None},
+                 warning=warning, error=None)
+    models.update(m["id"], last_used=time.time())
+    return {"ready": True, "desc": desc, "ctx": cfg["ctx"], "tg": tg, "pp": pp, "warning": warning,
+            "profile": prof.get("name") if prof else None}
+
+
 @app.post("/api/load")
 async def load(req: Request):
     body = await req.json()
@@ -522,7 +761,7 @@ async def load(req: Request):
         raise HTTPException(404, "Unknown model")
     limit_gb = body.get("vram_limit_gb")
     depth = body.get("depth") or "medium"
-    if limit_gb is not None:
+    if limit_gb is not None and limit_gb != "auto":
         try:
             limit_gb = float(limit_gb)
         except (TypeError, ValueError):
@@ -535,127 +774,7 @@ async def load(req: Request):
         save_settings({"tune_mode": body["mode"]})
 
     def job(emit, cancel):
-        s = load_settings()
-        unload()
-        h = hw(force=True)
-        spec = spec_args(m["path"], s)
-        key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
-        entry = None if retune else tuner.cached(key)
-
-        def do_tune():
-            if limit_gb is None:
-                raise NeedsTune()
-            STATE.update(status="tuning", model=m, error=None)
-            others = hardware.settle_vram(timeout=6) if h["gpus"] else 0
-            limit_mb = limit_gb * 1024
-            if h["gpus"]:
-                headroom = h["vram_total_mb"] - others - limit_mb - ADVISOR_MARGIN_MB
-                emit({"type": "log", "text": f"VRAM: {h['vram_total_mb']:,} MB total, other apps {others:,} MB, "
-                                             f"model limit {limit_mb:,.0f} MB, left for the advisor "
-                                             f"{max(0, headroom):,.0f} MB."})
-                if others + limit_mb > h["vram_total_mb"] - 64:
-                    emit({"type": "log", "text": "Your limit plus what other apps use is more than the card has, so "
-                                                 "free VRAM will be the real limit."})
-            else:
-                headroom = 0
-            save_settings({"last_vram_limit_gb": limit_gb})
-            adv = advisor.Advisor(s, h, headroom, emit, cancel)
-            try:
-                emit({"type": "phase", "phase": "advisor"})
-                adv.prepare()
-                tuner.Tuner.check_cancel(cancel)
-                emit({"type": "phase", "phase": "trials"})
-                t = tuner.Tuner(m["path"], m.get("mmproj"), s, limit_mb, depth, adv, emit, cancel, others_mb=others)
-                e = t.run()
-            finally:
-                adv.stop()
-            e["others_mb"] = others
-            tuner.store(key, e)
-            return e
-
-        try:
-            if entry:
-                emit({"type": "log", "text": f"Using saved tuning from {entry['tuned_at']}: {entry['desc']} "
-                                             f"({entry['tg']} tok/s). Skipping trials."})
-            else:
-                entry = do_tune()
-
-            prof = hapo.active(key)
-            attempt = 0
-            while True:
-                use = prof.get("config") if prof else None
-                if not use:
-                    attempt += 1
-                cfg = use or entry["config"]
-                STATE.update(status="loading", model=m, error=None)
-                emit({"type": "loading", "desc": prof["desc"] if use else entry["desc"],
-                      "profile": prof.get("name") if use else None})
-                before = hardware.settle_vram() if h["gpus"] else 0
-                ENGINE.start(build_args(m["path"], cfg, LLAMA_PORT, m.get("mmproj"), final=True,
-                                        settings=s, spec=spec))
-                ok, why = ENGINE.wait_ready(900, cancel)
-                if ok:
-                    if not h["gpus"]:
-                        ENGINE_VRAM["mb"] = 0
-                    elif h.get("vram_measured", True):
-                        ENGINE_VRAM["mb"] = max(0, (hardware.gpu_used_mb() or 0) - before)
-                    else:
-                        ENGINE_VRAM["mb"] = ENGINE.device_mb()
-                    break
-                if cancel.is_set():
-                    ENGINE.stop()
-                    raise tuner.Cancelled()
-                tail = ENGINE.log_tail(25)
-                ENGINE.stop()
-                if use:                 # the chosen HAPO profile no longer loads: drop it, use the tuner's pick
-                    hapo.failed(key, tail)
-                    emit({"type": "log", "text": f"The {prof.get('name')} profile failed to load "
-                                                 f"({tuner.classify_failure(tail)}), so Aero went back to the "
-                                                 "tuner's pick and removed that profile choice."})
-                    prof = None
-                    continue
-                if attempt == 1 and limit_gb is None:
-                    raise NeedsTune()
-                if attempt == 1:
-                    emit({"type": "log", "text": "The tuned settings failed to load (other apps took VRAM or "
-                                                 "llama.cpp changed). Re-tuning with your limit."})
-                    entry = do_tune()
-                    key = tuner.cache_key(m["path"], m.get("mmproj"), h, spec)
-                    prof = None
-                else:
-                    STATE.update(status="error", error=tail)
-                    raise RuntimeError("llama-server failed to start:\n" + tail)
-        except Exception as e:      # NeedsTune asks for a tune; a failed or cancelled tune must not leave the UI on "tuning"
-            if not isinstance(e, NeedsTune):
-                if STATE["status"] in ("tuning", "loading"):
-                    STATE.update(status="idle", model=None)
-                raise
-            STATE.update(status="idle", model=None)
-            return {"needs_tune": True, "model_id": m["id"],
-                    "reason": "This model needs tuning first." if not entry else
-                              "The saved tuning no longer loads (VRAM in use by other apps, or llama.cpp changed)."}
-
-        warning = None
-        g = hardware.gpus()
-        if g and all(x.get("measured") for x in g) and sum(x["used_mb"] for x in g) > sum(x["total_mb"] for x in g) - 200:
-            warning = ("VRAM is almost full; other apps are using GPU memory, so generation may spill into "
-                       "slow shared memory. Close them or re-tune.")
-        desc = prof["desc"] if prof else entry["desc"]
-        tg, pp = (prof["tg"], prof["pp"]) if prof else (entry["tg"], entry["pp"])
-        STATE.update(status="ready", model=m, ctx=cfg["ctx"], vision=bool(m.get("mmproj")), desc=desc, cfg=dict(cfg),
-                     remote=False,
-                     tune={"tg": tg, "pp": pp, "at": entry["tuned_at"],
-                           "trials": len(entry["trials"]), "limit_gb": round(entry.get("limit_mb", 0) / 1024, 2),
-                           "depth": entry.get("depth"), "advisor": (entry.get("advisor") or {}).get("name"),
-                           "profile": prof.get("profile") if prof else None,
-                           "profile_name": prof.get("name") if prof else None, "key": key,
-                           "tools": {k: (entry.get("tool_eval") or {}).get(k) for k in
-                                     ("score", "bfcl", "aero", "temperature", "act_first")}
-                           if entry.get("tool_eval") else None},
-                     warning=warning, error=None)
-        models.update(m["id"], last_used=time.time())
-        return {"ready": True, "desc": desc, "ctx": cfg["ctx"], "tg": tg, "pp": pp, "warning": warning,
-                "profile": prof.get("name") if prof else None}
+        return _load_job(m, retune, limit_gb, depth, emit, cancel)
     return stream_job(job)
 
 

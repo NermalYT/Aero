@@ -74,8 +74,11 @@ LAYER = re.compile(r"^blk\.(\d+)\.")
 
 def inspect(path):
     """Per-layer bytes by kind, plus the non-layer tensors. Returns a dict the planner and the UI use."""
-    tensors = gguf.read_tensors(path)
-    meta = gguf.summarize(path)
+    return layout(gguf.read_tensors(path), gguf.summarize(path), str(path))
+
+
+def layout(tensors, meta, path=""):
+    """inspect() from a tensor list: [(name, bytes)] (planner.py builds one from a remote header)."""
     layers = {}
     other = {"token_embd": 0, "output": 0, "rest": 0}
     for name, size in tensors:
@@ -102,7 +105,7 @@ def inspect(path):
     if not other["output"]:            # tied embeddings (Gemma, many small models): llama.cpp puts a copy of
         other["output"] = other["token_embd"]      # token_embd on the GPU as the output layer (measured: 1.42 GB, Gemma-3-27B Q8)
         other["tied"] = True
-    return {"path": str(path), "meta": meta, "layers": [layers.get(i, {"attn": 0, "ffn": 0, "exps": 0, "other": 0})
+    return {"path": path, "meta": meta, "layers": [layers.get(i, {"attn": 0, "ffn": 0, "exps": 0, "other": 0})
                                                           for i in range(n)],
             "other": other, "total": sum(s for _, s in tensors), "moe": any(L["exps"] for L in layers.values())}
 

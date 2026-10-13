@@ -72,13 +72,15 @@ def get(mid):
     return read_store("models.json", {}).get(mid)
 
 
-def add(path, repo=None, mmproj=None, name=None):
+def add(path, repo=None, mmproj=None, name=None, mmproj_auto=True):
+    """mmproj_auto=False: use exactly mmproj (None = text only), as Select decided; no projector found next to it."""
     reg = read_store("models.json", {})
     p = Path(path)
     mid = _id(p)
     cur = reg.get(mid, {"added": time.time(), "last_used": 0})
+    proj = (mmproj or cur.get("mmproj") or _find_mmproj(p)) if mmproj_auto else mmproj
     cur.update({"id": mid, "name": name or cur.get("name") or p.stem, "path": str(p), "repo": repo or cur.get("repo"),
-                "mmproj": mmproj or cur.get("mmproj") or _find_mmproj(p), "hidden": False})
+                "mmproj": proj, "hidden": False})
     reg[mid] = cur
     write_store("models.json", reg)
     return cur

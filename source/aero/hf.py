@@ -189,6 +189,24 @@ def remote_metadata(repo: str, path: str):
     key = (repo, path)
     if key in _META_CACHE:
         return _META_CACHE[key]
+    kv = gguf.read_metadata(io.BytesIO(remote_header(repo, path)))
+    _META_CACHE[key] = kv
+    return kv
+
+
+_HEAD_CACHE = {}
+
+
+def remote_tensors(repo: str, path: str, size: int):
+    """[(name, bytes)] of a remote GGUF file from its header alone (planner.py prices every quant from one of these)."""
+    return gguf.tensors_from(io.BytesIO(remote_header(repo, path)), size)
+
+
+def remote_header(repo: str, path: str):
+    """The first megabytes of a remote GGUF: enough for its whole header (metadata and tensor table)."""
+    key = (repo, path)
+    if key in _HEAD_CACHE:
+        return _HEAD_CACHE[key]
     url = f"{API}/{repo}/resolve/main/{path}"
     with httpx.Client(headers=_headers(), follow_redirects=True, timeout=60) as c:
         for mb in (6, 32, 96):
@@ -203,9 +221,13 @@ def remote_metadata(repo: str, path: str):
                     if len(buf) >= want:     # server ignored Range: stop instead of pulling the whole file
                         break
             try:
-                kv = gguf.read_metadata(io.BytesIO(bytes(buf[:want])))
-                _META_CACHE[key] = kv
-                return kv
+                bio = io.BytesIO(bytes(buf[:want]))
+                gguf.tensors_from(bio, 1 << 62)                    # the whole header, tensor table included
+                data = bio.getvalue()[:bio.tell()]                 # keep the header only, not the whole window
+                while len(_HEAD_CACHE) >= 16:
+                    _HEAD_CACHE.pop(next(iter(_HEAD_CACHE)))
+                _HEAD_CACHE[key] = data
+                return data
             except EOFError:
                 if len(buf) < want:          # that was the whole file
                     raise

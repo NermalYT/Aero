@@ -144,6 +144,29 @@ PC*), with its **Artificial Analysis Intelligence Index** score. Press Enter for
 or skip and keep the models you have. The first time you load a model, Aero tunes it (below) and shows the real
 measured speed.
 
+### Select (1.2.6)
+
+Search any model in the launcher and click **Select** (on the result, or on the model's page). Aero:
+1. **Picks the file.** For a repo with only the original weights, it uses the model's own GGUF version, makes one
+   with `quantize.py`, or offers AirLLM.
+2. **Plans how to run it on this PC.** It prices every quant and placement:
+   - all on the GPU;
+   - experts in RAM;
+   - feed-forward in RAM;
+   - layers on the CPU;
+   - CPU or disk.
+
+   Each at 8k, 16k and 32k context with a q8_0 or q4_0 KV cache. The estimates come from your GPU's memory
+   bandwidth and your RAM speed.
+3. **Downloads, tunes and loads.** Downloads are checked after a disk-space check; tuning uses the automatic VRAM
+   limit, at the depth from *Settings → Model & tuning → Select tunes for*.
+
+When nothing reaches *Select: minimum speed* (default 5 tokens/s), Aero shows the estimate and smaller models of the
+same family first.
+
+Tuning a model you already have no longer asks you to type a VRAM limit. Aero uses free VRAM less the advisor's share
+and a margin, and the depth prompt has **Change** for your own number.
+
 Run the chooser again any time with `C:\Aero\Update-Aero.bat` (Linux and macOS: `sh <install folder>/install.sh`),
 or switch routers in Settings → Router.
 

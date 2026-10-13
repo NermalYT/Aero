@@ -291,7 +291,8 @@ async function hfSearch(q) {
         r.size_b ? h('span', { class: 'badge' }, r.size_b + 'B') : null,
         h('span', { class: 'badge ' + (r.gguf ? 'gpu' : 'split'), title: r.gguf ? 'Ready-to-run GGUF files' : 'Original weights: Aero finds a GGUF version of it, makes one for your PC, or runs it with AirLLM' }, r.gguf ? 'GGUF' : 'original'),
         r.gated ? h('span', { class: 'badge split' }, 'gated') : null,
-        h('small', {}, `↓ ${fmtK(r.downloads)}  ♥ ${fmtK(r.likes)}  ${r.updated || ''}`)));
+        h('small', {}, `↓ ${fmtK(r.downloads)}  ♥ ${fmtK(r.likes)}  ${r.updated || ''}`),
+        h('button', { class: 'btn sm', title: 'Aero picks the quant and setup for your PC, downloads, tunes and loads it', onclick: e => { e.stopPropagation(); selectModel(r.id); } }, 'Select')));
     }
   } catch (e) { if (seq === hfSeq) box.innerHTML = `<div class="err-msg">${esc(e.message)}</div>`; }
 }
@@ -315,7 +316,8 @@ async function openRepo(repo) {
   const p = $('#repoPanel'); p.classList.remove('hidden'); p.innerHTML = '';
   const close = h('button', { class: 'icon-btn', html: I.x, onclick: () => p.classList.add('hidden') });
   const body = h('div', { class: 'rp-body' }, h('div', { class: 'muted' }, 'Reading the model\'s files and header…'));
-  p.append(h('div', { class: 'rp-head' }, h('h3', {}, repo), h('a', { href: `https://huggingface.co/${repo}`, target: '_blank', class: 'btn ghost sm' }, 'Model card'), close), body);
+  p.append(h('div', { class: 'rp-head' }, h('h3', {}, repo), h('a', { href: `https://huggingface.co/${repo}`, target: '_blank', class: 'btn ghost sm' }, 'Model card'),
+    h('button', { class: 'btn sm', title: 'Aero picks the quant and setup for your PC, downloads, tunes and loads it', onclick: () => selectModel(repo) }, 'Select'), close), body);
   try {
     const d = await api('/api/hf/files?repo=' + encodeURIComponent(repo));
     body.innerHTML = '';
@@ -549,7 +551,7 @@ function askVramLimit(info) {
 }
 
 /** Step 2: how many trials. 90-second visible countdown, Medium when it runs out. */
-function askDepth(info, limitGB) {
+function askDepth(info, limitGB, auto = false) {
   return new Promise(resolve => {
     const SECONDS = 90;
     let left = SECONDS, sel = 'medium', mode = info.mode || 'balanced', timer = null;
@@ -562,9 +564,12 @@ function askDepth(info, limitGB) {
     const cards = h('div', { class: 'depth-grid' });
     const goal = h('div', { class: 'seg goal-seg' });
     const cancel = h('button', { class: 'btn ghost' }, 'Cancel load');
+    const change = h('button', { class: 'btn ghost sm', onclick: () => finish({ change: true }) }, 'Change');
     const g = gate('How long should tuning run?',
-      h('p', {}, `Every trial is a real llama-server run of `, h('b', {}, info.model), ` inside your ${limitGB} GB limit. Pick a depth, or Aero starts `,
+      h('p', {}, `Every trial is a real llama-server run of `, h('b', {}, info.model), ` inside a ${limitGB} GB VRAM limit. Pick a depth, or Aero starts `,
         h('b', {}, 'Medium'), ' when the timer runs out.'),
+      h('div', { class: 'auto-limit' }, h('span', {}, `VRAM for this model: ${limitGB} GB` + (auto ? ' (automatic)' : ' (yours)')),
+        auto && info.suggest ? h('small', { class: 'muted' }, info.suggest.why) : null, change),
       h('div', { class: 'cd' }, clock, h('div', { class: 'cd-right' }, label, bar)), cards,
       h('div', { class: 'goal-row' }, h('span', { class: 'muted' }, 'Goal'), goal),
       h('div', { class: 'gate-foot' }, h('small', { class: 'muted', style: 'margin-right:auto' }, 'Keep games and other GPU apps closed while it runs.'), cancel));
@@ -599,11 +604,16 @@ async function loadModel(id, retune = false, preset = null) {
   try { info = await api(`/api/models/${id}/tune_info`); } catch (e) { return toast(e.message, true); }
   let req = { id };
   if (retune || !info.tuned) {
-    const limit = await askVramLimit(info);
-    if (limit === null) return;
-    const pick = preset?.depth ? { depth: preset.depth, mode: info.mode || 'balanced' } : await askDepth(info, limit);
-    if (!pick) return;
-    req = { id, retune: true, vram_limit_gb: limit, depth: pick.depth, mode: pick.mode };
+    // 1.2.6: the VRAM limit is chosen automatically (free VRAM less a margin); Change still lets you type one
+    let limit = 'auto';
+    for (;;) {
+      const shown = limit === 'auto' ? (info.suggest?.gb ?? '?') : limit;
+      const pick = preset?.depth ? { depth: preset.depth, mode: info.mode || 'balanced' } : await askDepth(info, shown, limit === 'auto');
+      if (!pick) return;
+      if (pick.change) { const v = await askVramLimit(info); if (v !== null) limit = v; continue; }
+      req = { id, retune: true, vram_limit_gb: limit, depth: pick.depth, mode: pick.mode };
+      break;
+    }
   }
   const res = await runLoad(req, info);
   if (res?.needs_tune) {
@@ -612,11 +622,11 @@ async function loadModel(id, retune = false, preset = null) {
   }
 }
 
-async function runLoad(req, info) {
-  S.loadReq = req;
+async function runLoad(req, info, url = '/api/load') {
+  S.loadReq = req; S.loadUrl = url;
   const ov = $('#loadOverlay'); ov.classList.remove('hidden');
-  $('#loadTitle').textContent = `Loading ${info?.model || 'model'}`;
-  $('#loadSub').textContent = req.vram_limit_gb ? 'Preparing the tuning advisor…' : 'Using saved tuning…';
+  $('#loadTitle').textContent = url === '/api/select' ? `Selecting ${info?.model || 'model'}` : `Loading ${info?.model || 'model'}`;
+  $('#loadSub').textContent = url === '/api/select' ? 'Planning for this PC…' : req.vram_limit_gb ? 'Preparing the tuning advisor…' : 'Using saved tuning…';
   $('#loadSpin').className = 'spinner';
   $('#loadLog').innerHTML = ''; $('#trialTable').classList.add('hidden'); $('#trialTable tbody').innerHTML = '';
   $('#loadFoot').classList.add('hidden'); $('#loadCancel').classList.remove('hidden');
@@ -625,9 +635,26 @@ async function runLoad(req, info) {
   const bar = p => { $('#loadProgress').classList.remove('hidden'); $('#loadProgress i').style.width = Math.min(100, p).toFixed(1) + '%'; };
   let result = null, err = null, budget = 0, done = 0;
   try {
-    await sseFetch('/api/load', req, ev => {
+    await sseFetch(url, req, ev => {
       switch (ev.type) {
         case 'log': log(ev.text); break;
+        case 'plan': {
+          const P = ev.plan;
+          if (P.note) log(P.note);
+          if (P.summary) { log('Plan: ' + P.summary, 'ok'); $('#loadSub').textContent = P.summary; }
+          if (P.warning) log(P.warning, 'err');
+          break;
+        }
+        case 'progress': {
+          bar(ev.total ? ev.done / ev.total * 100 : 0);
+          const eta = ev.speed > 0 && ev.total > ev.done ? ` · ${fmtDur((ev.total - ev.done) / ev.speed)} left` : '';
+          $('#loadTitle').textContent = 'Downloading';
+          $('#loadSub').textContent = `${fmtBytes(ev.done)} / ${fmtBytes(ev.total)} · ${fmtBytes(ev.speed || 0)}/s${eta}` + (ev.file ? ` · ${ev.file.split('/').pop()}` : '');
+          break;
+        }
+        case 'verify': $('#loadSub').textContent = `Checking ${(ev.file || '').split('/').pop()} against Hugging Face's SHA-256…`; break;
+        case 'stage': $('#loadSub').textContent = ev.text; log(ev.text); break;
+        case 'phase': if (ev.phase === 'tune') { $('#loadTitle').textContent = 'Tuning for this PC'; $('#loadProgress').classList.add('hidden'); } break;
         case 'advisor': log('advisor · ' + ev.text, 'adv'); break;
         case 'advisor_progress': {
           bar(ev.total ? ev.done / ev.total * 100 : 0);
@@ -688,6 +715,8 @@ async function runLoad(req, info) {
     });
   } catch (e) { err = e.message; }
   await refreshState();
+  if (url === '/api/select') renderMyModels();
+  if (result?.route === 'airllm') { ov.classList.add('hidden'); WS.bigRepo = result.repo; openWorkspace('models'); toast('This model runs with AirLLM: start it in Big models.', false, 6000); return result; }
   if (result?.needs_tune) { ov.classList.add('hidden'); return result; }
   if (err) {
     $('#loadSpin').className = 'spinner fail'; $('#loadTitle').textContent = err === 'Cancelled' ? 'Cancelled' : 'Could not load the model';
@@ -705,7 +734,36 @@ async function runLoad(req, info) {
   return result;
 }
 $('#loadCancel').onclick = () => api('/api/cancel', { method: 'POST' });
-$('#loadRetry').onclick = () => S.loadReq && (S.loadReq.vram_limit_gb ? loadModel(S.loadReq.id, true) : runLoad(S.loadReq, { model: S.models.find(x => x.id === S.loadReq.id)?.name }));
+$('#loadRetry').onclick = () => S.loadReq && (S.loadUrl === '/api/select' ? runLoad(S.loadReq, { model: S.loadReq.repo }, '/api/select') :
+  S.loadReq.vram_limit_gb ? loadModel(S.loadReq.id, true) : runLoad(S.loadReq, { model: S.models.find(x => x.id === S.loadReq.id)?.name }));
+
+/** Select (1.2.6): one click from a search result to a tuned, loaded model. The plan is shown first only when the
+ *  model will be slow on this PC (with smaller models of the same family to pick instead). */
+async function selectModel(repo) {
+  if (S.streaming) return toast('Wait for the current reply to finish.', true);
+  if (S.st?.busy) return toast('Another download or load is running.', true);
+  const wait = gate('Planning for your PC', h('p', { class: 'muted' }, `Reading ${repo}'s files and pricing every quant and placement for this PC…`), h('div', { class: 'spinner' }));
+  let P;
+  try { P = await api('/api/select/plan', { method: 'POST', json: { repo } }); } catch (e) { wait.close(); return toast(e.message, true, 8000); }
+  wait.close();
+  if (P.route === 'none') return toast(P.warning || 'Nothing to run in this repo.', true, 8000);
+  if (P.level !== 'ok' || P.route === 'airllm') {
+    const go = await new Promise(resolve => {
+      const alts = (P.alternatives || []).map(a => h('button', { class: 'btn ghost sm', onclick: () => { g.close(); resolve({ alt: a.id }); } }, `${a.id.split('/').pop()} (${a.size_b}B)`));
+      const g = gate(P.level === 'very_slow' ? 'This model is too big for this PC' : 'This model will be slow here',
+        h('p', {}, P.summary || ''), P.warning ? h('p', { class: 'warn-note' }, P.warning) : null,
+        alts.length ? h('div', {}, h('small', { class: 'muted' }, 'Smaller models of the same family that run fully on your GPU:'), h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px' }, ...alts)) : null,
+        h('div', { class: 'gate-foot' }, h('button', { class: 'btn ghost', onclick: () => { g.close(); resolve(null); } }, 'Cancel'),
+          h('button', { class: 'btn', onclick: () => { g.close(); resolve({ go: true }); } }, P.route === 'airllm' ? 'Open in Big models' : 'Select it anyway')));
+    });
+    if (!go) return;
+    if (go.alt) return selectModel(go.alt);
+    if (P.route === 'airllm') { $('#repoPanel').classList.add('hidden'); WS.bigRepo = repo; return openWorkspace('models'); }
+  }
+  $('#repoPanel').classList.add('hidden');
+  const res = await runLoad({ repo }, { model: P.model?.name || repo }, '/api/select');
+  if (res?.needs_tune && res.model_id) loadModel(res.model_id, true);
+}
 $('#loadClose').onclick = () => { $('#loadOverlay').classList.add('hidden'); showLauncher(); };
 
 // ---------------------------------------------------------------- chats
@@ -2648,6 +2706,11 @@ async function openSettings(start = 'General') {
           field('Context cap', num('context_cap', s.context_cap, 1024), '0 = model maximum'),
           field('Tuning advisor', h('input', { type: 'text', 'data-k': 'advisor_model', value: s.advisor_model }),
             'auto = Bonsai first, quant sized to the VRAM you leave free · off = built-in step policy · or an HF repo / .gguf path')),
+        h('div', { class: 'row2' },
+          field('Select tunes for', select('select_depth', s.select_depth || 'medium', Object.entries(DEPTH_INFO).map(([k, v]) => [k, `${v[0]} (${v[1]})`])),
+            'How long tuning runs after Select downloads a model.'),
+          field('Select: minimum speed', num('select_min_tps', s.select_min_tps ?? 5, 1),
+            'tokens/s. Select prefers the best quality that is at least this fast, and warns when nothing is.')),
         toggle('allow_q4_kv', s.allow_q4_kv, 'Let the tuner try a q4_0 KV cache (more context, small quality loss; Full depth always tries it)'),
         toggle('tune_tool_eval', s.tune_tool_eval !== false, 'Test tool calling while tuning: a short exam (Berkeley function-calling cases + Aero requests) picks the temperature for tool steps and whether Aero should start actions for this model'),
         toggle('use_tuned_tool_temp', s.use_tuned_tool_temp !== false, 'Use the temperature the exam found best whenever tools are offered'),
