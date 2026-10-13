@@ -510,18 +510,16 @@ and tool calls, review verdicts, ChatGPT and Claude usage and spending today, an
   permission of *auto* counts as standing permission). Aero waits until you stop typing, never lets two agents use
   them at once, and puts your window back afterwards. **Strict Background Only** in Settings → Tools refuses them
   completely. Slam the real mouse into a screen corner to abort pyautogui.
-- **The browser** (1.2.1) is your default browser when it is Chrome, Edge, Brave, Vivaldi or Chromium, on screen. With
-  its remote-debugging switch on (`chrome://inspect/#remote-debugging`, Chrome 144+), Aero connects to the browser
-  you are using, with your sign-ins: the browser asks you to Allow, Aero opens its own tabs, never lists or closes
-  yours, and disconnects when the request is done (Settings → Tools → *Which browser Aero works in*). Otherwise, with
-  strict offline on, or for a request that says "in the background", it uses Aero's own profile
-  (`C:\Aero\data\browser-profile`). Each agent has its own tab.
-  With the switch off (1.2.3, Windows), Aero opens a new window of your browser in your everyday profile and works in
-  it the way it works in apps: a picture with numbered controls, links and buttons pressed and fields set through UI
-  Automation. It types only into the page (never the address bar, menus or a password field), sees only that window,
-  and closes it when the request is done unless you added tabs to it.
+- **The browser** (1.2.5) is Aero's own: your default browser when it is Chrome, Edge, Brave, Vivaldi or Chromium,
+  with Aero's own profile (`C:\Aero\data\browser-profile`), on screen unless a request says "in the background".
+  Aero never uses your own browser or its windows. Each agent has its own tab. To sign in, Settings → Tools →
+  **Sign in to your accounts** opens that profile as a normal browser window (no automation, so Google accepts the
+  sign-in): sign in to your Chrome profile with sync or to single sites, then press **Done**. A page that asks for a
+  sign-in mid-task opens the same window on that page; Aero waits, then continues signed in. Aero never types
+  passwords. `AERO_BROWSER_ARGS` adds browser switches (e.g. `--window-position=-1080,0` to keep it on one monitor).
 - **Seeing what Aero uses** (1.2.3): the window being used gets a blue outline and a banner, "*model* is using *app*",
   with **Stop** (stops every running task). Both follow the window across monitors and are left out of screenshots.
+  Only the Aero app shows them (1.2.5; scripts and tests running Aero's code used to pop them up).
 
 ## Folders
 

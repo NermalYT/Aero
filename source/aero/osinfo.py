@@ -209,47 +209,6 @@ def default_browser():
     return None
 
 
-# where each Chromium browser keeps its user data (DevToolsActivePort appears there while remote debugging is on),
-# and the page with its remote-debugging switch
-_USER_DATA = {
-    "chrome": (r"Google\Chrome\User Data", "Google/Chrome", "google-chrome", "chrome://inspect/#remote-debugging",
-               "Chrome"),
-    "msedge": (r"Microsoft\Edge\User Data", "Microsoft Edge", "microsoft-edge", "edge://inspect/#remote-debugging",
-               "Edge"),
-    "brave": (r"BraveSoftware\Brave-Browser\User Data", "BraveSoftware/Brave-Browser", "BraveSoftware/Brave-Browser",
-              "brave://inspect/#remote-debugging", "Brave"),
-    "vivaldi": (r"Vivaldi\User Data", "Vivaldi", "vivaldi", "vivaldi://inspect/#remote-debugging", "Vivaldi"),
-    "chromium": (r"Chromium\User Data", "Chromium", "chromium", "chrome://inspect/#remote-debugging", "Chromium"),
-}
-
-
-def user_browser():
-    """The user's own default browser and its everyday profile: {exe, user_data, inspect_url, name}, or None when the
-    default isn't a Chromium browser Aero knows. Aero connects to that running browser (with the user's sign-ins)
-    when its remote-debugging switch is on (tools/browser.py)."""
-    exe = default_browser()
-    if not exe:
-        return None
-    stem = Path(exe).name.lower() if IS_MAC else Path(exe).stem.lower()
-    key = next((k for k in _USER_DATA if k in stem.replace(" ", "").replace("google", "").replace("microsoft", "")
-                .replace("browser", "") or stem.startswith(k)), None)
-    if IS_MAC and not key:
-        key = {"google chrome": "chrome", "microsoft edge": "msedge", "brave browser": "brave", "vivaldi": "vivaldi",
-               "chromium": "chromium"}.get(stem)
-    if not key and ("google-chrome" in stem or stem == "chrome"):
-        key = "chrome"
-    if not key:
-        return None
-    win, mac, linux, inspect, name = _USER_DATA[key]
-    if IS_WIN:
-        data = Path(os.environ.get("LOCALAPPDATA", "")) / win
-    elif IS_MAC:
-        data = Path.home() / "Library" / "Application Support" / mac
-    else:
-        data = Path.home() / ".config" / linux
-    return {"exe": exe, "user_data": str(data), "inspect_url": inspect, "name": name}
-
-
 def find_browser():
     """(argv prefix, sandboxed) of a Chromium-family browser that supports --app windows, or (None, False): the
     user's default browser first (1.2.1), then the usual ones. sandboxed: a snap or flatpak build, which can't use a

@@ -2759,23 +2759,24 @@ async function openSettings(start = 'General') {
   show(SECTIONS.includes(start) ? start : 'General');
 }
 
-/** Settings > Tools: work in the user's own signed-in browser (its remote-debugging switch), or Aero's own profile. */
+/** Settings > Tools: Aero's own browser, and signing in to it (1.2.5: Aero never uses the user's own browser). */
 function browserSessionField(s) {
-  const status = h('small', { class: 'muted' }, 'Checking your browser…');
-  const box = h('div', { class: 'field' }, h('label', {}, 'Which browser Aero works in'),
-    select('browser_session', s.browser_session || 'mine', [['mine', 'Your own browser, already signed in to your accounts'], ['aero', 'Aero\'s own browser profile (you sign in to each site there once)']]),
-    status);
-  api('/api/browser/session').then(st => {
-    if (!st.supported) { status.textContent = 'Your default browser isn\'t Chrome, Edge, Brave or Vivaldi, so Aero uses its own profile.'; return; }
-    status.innerHTML = '';
-    const off = !(st.connected || st.switch_on);
-    status.append(st.connected ? `Connected to your ${st.name}. ` : st.switch_on ? `${st.name} is ready: it asks you to Allow when Aero connects. ` :
-      st.screen ? `Aero opens a window of your ${st.name} (your profile, signed in as you) and works in it on screen, by sight. Faster and more precise: open ` :
-      `To let Aero work in your signed-in ${st.name}, open `, off ? h('code', {}, st.inspect_url) : '',
-      off ? ` in ${st.name} and switch on remote debugging. ${st.name} asks you to Allow each time Aero connects; Aero opens its own tabs there and closes only those. ` : '',
-      st.connected || st.switch_on ? '' : h('button', { class: 'btn ghost sm', onclick: async e => { try { await navigator.clipboard.writeText(st.inspect_url); e.target.textContent = 'Copied: paste it in the address bar'; } catch { e.target.textContent = st.inspect_url; } } }, 'Copy the address'));
-  }).catch(() => { status.textContent = ''; });
-  return box;
+  const status = h('small', { class: 'muted' }, '');
+  const done = h('button', { class: 'btn sm', style: 'display:none', onclick: async () => {
+    try { await api('/api/browser/signin/done', { method: 'POST' }); } catch (e) { toast(e.message, true); }
+    done.style.display = 'none'; status.textContent = 'Signed in. Aero uses those sign-ins from now on.';
+  } }, 'Done signing in');
+  const open = h('button', { class: 'btn ghost sm', onclick: async () => {
+    try {
+      await api('/api/browser/signin', { method: 'POST', json: {} });
+      done.style.display = '';
+      status.textContent = 'Aero\'s browser is open. Sign in to your Chrome profile (profile icon, then Turn on sync) or to any sites, then press Done.';
+    } catch (e) { toast(e.message, true); }
+  } }, 'Sign in to your accounts');
+  api('/api/browser/signin').then(st => { if (st.open) { done.style.display = ''; status.textContent = 'Aero\'s browser is open for signing in.'; } }).catch(() => { });
+  return h('div', { class: 'field' }, h('label', {}, 'Aero\'s browser'),
+    h('small', { class: 'muted', style: 'display:block;margin-bottom:6px' }, 'Aero has its own browser, separate from yours. Sign in there once (your Chrome profile with sync, or single sites) and it stays signed in.'),
+    h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, open, done), status);
 }
 
 function privacySection(s) {

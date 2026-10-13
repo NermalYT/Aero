@@ -925,17 +925,9 @@ async def signin_pause(turn, res, lane="local", asked=""):
         res["text"] = (f"The user already skipped signing in to {site}. Don't open {site} again in this request; "
                        "go on without it and say so in your answer.")
         return
-    hint = ""
-    try:
-        from . import osinfo
-        ub = osinfo.user_browser()
-        if ub and not browser.in_users_browser(owner):   # the sign-ins the user already has could be used instead
-            hint = (f" (Already signed in to {want or site} in your {ub['name']}? Let Aero work there instead: "
-                    "Settings > Tools > Which browser Aero works in.)")
-    except Exception:  # noqa: BLE001
-        pass
-    q, created = clarifications.ask(root.chat_id, f"Please sign in to {shown} in the browser window that just "
-                                    "opened, then press \"I've signed in\". Aero never types your password." + hint,
+    q, created = clarifications.ask(root.chat_id, f"Please sign in to {shown} in Aero's browser window that just "
+                                    "opened, then press \"I've signed in\" (Aero closes that window and goes on). "
+                                    "Aero never types your password. Sign-ins stay for next time.",
                                     ["I've signed in", "Skip this site"], kind="choice", allow_free=False,
                                     owner=owner, context="sign-in")
     if created:

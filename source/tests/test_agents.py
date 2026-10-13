@@ -207,7 +207,7 @@ class Turn(unittest.TestCase):
                 return {"text": f"Opened {args.get('target')}", "error": False}
             return real_run(name, args, ctx)
         self.patches = [mock.patch.object(agent.httpx, "AsyncClient", client), mock.patch.object(agent.tools, "run", run),
-                        mock.patch.object(control, "banner_on", lambda text, rect=None: self.banners.append(text)),
+                        mock.patch.object(control, "banner_on", lambda text, *a: self.banners.append(text)),
                         mock.patch.object(control, "banner_off", lambda: self.banners.append(None))]
         for p in self.patches:
             p.start()
