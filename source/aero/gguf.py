@@ -249,6 +249,39 @@ def read_tensors(path):
     return out
 
 
+def tensors_from(f, file_size):
+    """[(name, bytes)] from the header of one GGUF file held in f (a file object over its first megabytes, e.g. a
+    remote file's start), with file_size the whole file's size. Same offset arithmetic as read_tensors. Raises
+    EOFError when f doesn't hold the whole header."""
+    r = _Reader(f)
+    if r.read(4) != b"GGUF":
+        raise ValueError("not a GGUF file")
+    r.u32()
+    n_tensors, n_kv = r.u64(), r.u64()
+    align = 32
+    for _ in range(n_kv):
+        key = r.string()
+        t = r.u32()
+        val = r.value(t)
+        if key == "general.alignment" and isinstance(val, int) and val > 0:
+            align = val
+    infos = []
+    for _ in range(n_tensors):
+        name = r.string()
+        nd = r.u32()
+        for _d in range(nd):
+            r.u64()
+        r.u32()
+        infos.append((name, r.u64()))
+    data_start = (f.tell() + align - 1) // align * align
+    infos.sort(key=lambda x: x[1])
+    out = []
+    for i, (name, off) in enumerate(infos):
+        nxt = infos[i + 1][1] if i + 1 < len(infos) else file_size - data_start
+        out.append((name, max(0, nxt - off)))
+    return out
+
+
 _BLK = re.compile(r"^blk\.(\d+)\.")
 
 

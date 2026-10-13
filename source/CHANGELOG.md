@@ -1,5 +1,49 @@
 # Changelog
 
+## Aero 1.2.6 (2026-10-13)
+
+**Select**: search any model, click Select, and Aero runs it the best way your PC can.
+
+- **One click from search to a running model.** Select is on every search result and model page. Aero:
+  1. plans how to run the model on your hardware, before downloading anything;
+  2. downloads the chosen file (checked against Hugging Face's SHA-256, after a disk-space check);
+  3. tunes it with an automatic VRAM limit;
+  4. loads it.
+  A repo with only the original weights uses the model's own GGUF version (the same organisation's first, then
+  well-known quantizers). When nobody has published one, Aero makes it (`quantize.py`). When llama.cpp can't convert
+  the architecture either, Aero offers AirLLM.
+- **The planner (`planner.py`).** It reads one quant's header from Hugging Face (a few MB) and scales its exact tensor
+  layout to every quant in the repo. For each quant it prices every way to place it:
+  - all on the GPU;
+  - mixture-of-experts experts in RAM;
+  - feed-forward weights in RAM with attention on the GPU;
+  - whole layers on the CPU;
+  - CPU only, or streaming from disk.
+
+  Each placement is priced at 8k, 16k and 32k context with a q8_0 or q4_0 KV cache. Speed is estimated from where
+  the bytes each token reads live (VRAM, RAM or disk) and how fast each is on this PC: a table of GPU memory
+  bandwidths, and RAM speed read from the installed modules. A mixture-of-experts model counts only its active
+  experts. The pick balances answer quality (by bits per weight) against speed, and prefers 32k context for agent
+  work; 8k is penalised, because Aero's own prompt is about 7.4k tokens.
+
+  Estimates for Qwen3.8-27B-class models (simulated hardware):
+  | GPU / RAM | Pick | Estimate |
+  | --- | --- | --- |
+  | 4 GB / 16 GB | IQ3, split across GPU and CPU | about 3 tok/s, marked slow |
+  | 16 GB card | Q3_K_M fully on the GPU | about 60 tok/s |
+
+  A 30B-A3B mixture-of-experts model on a 4 GB GPU: about 26 tok/s with experts in RAM.
+
+  Too-slow and too-big cases say so, offer smaller models of the same family, and still run when you choose to.
+- **No more typing a VRAM limit.** Tuning uses free VRAM less the tuning advisor's share and a margin. The depth
+  prompt shows the number, with **Change** for setting your own.
+- **Settings → Model & tuning:**
+  - *Select tunes for*: Short, Medium (default), Long or Full;
+  - *Select: minimum speed*: default 5 tokens/s.
+- **Live test (RTX 5080 nearly full with another model, so effectively CPU only).** Select on `Qwen/Qwen3-1.7B` found
+  `Qwen/Qwen3-1.7B-GGUF`, planned Q8_0 on the CPU, downloaded and verified it, tuned 10 trials in 142 s, loaded it
+  at 24.2 tok/s and answered a chat. CPU speed estimates were calibrated against that run.
+
 ## Aero 1.2.5 (2026-10-12)
 
 Aero has its own browser and never uses yours.

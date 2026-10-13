@@ -12,7 +12,7 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 [**Download**](https://github.com/NermalYT/Aero/releases/latest) ·
 [**Quick start**](#quick-start) ·
 [**Manual**](#manual) ·
-[**What's new in 1.2.5**](#whats-new-in-125) ·
+[**What's new in 1.2.6**](#whats-new-in-126) ·
 [**FAQ**](#faq)
 
 ![Aero at work: an agent hands part of the job to a subagent, then opens Notepad while the header says so](screenshots/agents-control.jpg)
@@ -85,6 +85,16 @@ A local AI workstation for Windows, Linux and macOS, wrapped in Frutiger Aero gl
 | Day | Night |
 |---|---|
 | ![Day](screenshots/day.jpg) | ![Night](screenshots/night.jpg) |
+
+## What's new in 1.2.6
+
+- **Select.** Search any model on Hugging Face and click **Select**. Aero:
+  - works out the best quant and setup for your PC before downloading;
+  - downloads it, tunes it and loads it.
+
+  A 4 GB GPU can select a 27B model and it runs (slowly, and Aero says so and suggests faster options). A
+  mixture-of-experts model like Qwen3-30B-A3B runs at about 26 tok/s on that card.
+- **No VRAM number to type** before tuning: Aero uses what's free, and **Change** is there if you want your own.
 
 ## What's new in 1.2.5
 
